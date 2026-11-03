@@ -1,15 +1,11 @@
 """Phase 7 Stage A config tests: Recommended-tier drift guard, SSOT materialization,
 and preset slug-resolution audit.
-
-Sources of truth:
-  - artifacts/plans/model_pricing_tiers_plan.md (Recommended tier JSON block)
-  - artifacts/plans/onboarding_configuration_step_plan.md (§5.1/§5.2/§8/§12.4/§12.5)
 """
 
 import copy
 import json
-import re
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 from zocrates.config import (
@@ -20,15 +16,53 @@ from zocrates.config import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-TIER_PLAN_PATH = (
-    REPO_ROOT / "artifacts" / "plans" / "model_pricing_tiers_plan.md"
-)
 
-# Keys of the Recommended tier JSON that deliberately do NOT match DEFAULT_CONFIG.
-# Each entry is a documented deviation; anything not listed here must match the
-# tier JSON exactly (drift guard).
+RECOMMENDED_TIER_REFERENCE: dict[str, Any] = {
+    "enable_vlm_captioning": True,
+    "vlm_captioning_provider": "openrouter",
+    "vlm_captioning_model": "openrouter/deepseek/deepseek-v4.1-flash",
+    "vlm_max_images_per_doc": 100,
+    "vlm_captioning_backup_model": "openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+    "llm_provider": "openrouter_llm",
+    "llm_model": "openrouter/~z-ai/glm-flash-latest",
+    "override_agent_models": {
+        "coordinator": {
+            "model": None,
+            "thinking_level": "medium",
+        },
+        "library_search": {
+            "model": None,
+            "thinking_level": "low",
+        },
+        "library_synthesizer": {
+            "model": "openrouter/google/gemini-3.8-flash",
+            "thinking_level": "high",
+        },
+        "online_search": {
+            "model": None,
+            "thinking_level": "low",
+        },
+        "online_synthesizer": {
+            "model": "openrouter/google/gemini-3.8-flash",
+            "thinking_level": "high",
+        },
+    },
+    "embedding_model": "openrouter/voyageai/voyage-4",
+    "embedding_provider": "cloud",
+    "reranker_model": "qwen/qwen3-reranker-8b",
+    "citation_verification_provider": "openrouter",
+    "citation_verification_model": "inception/mercury-decide",
+    "enable_predictive_ghost_input": True,
+    "predictive_prompt_model": "openrouter/~deepseek/deepseek-flash-latest",
+    "compaction_summarizer_model": "openrouter/~deepseek/deepseek-flash-latest",
+    "adaptive_compaction_decision_model": "inception/mercury-decide",
+}
+
+# Keys of the Recommended tier specification that deliberately do NOT match DEFAULT_CONFIG.
+# Each entry is a documented deviation; anything not listed here must match
+# RECOMMENDED_TIER_REFERENCE exactly (drift guard).
 DOCUMENTED_DEVIATIONS = {
-    # Plan §5.2 deviation #1: local embeddings are skip-safe (no API key needed);
+    # Deviation #1: local embeddings are skip-safe (no API key needed);
     # the Recommended preset card still sets cloud voyage-4 in the wizard.
     "embedding_provider": ("deviation", "local"),
     "embedding_model": ("deviation", "jinaai/jina-embeddings-v5-text-nano"),
@@ -38,24 +72,13 @@ DOCUMENTED_DEVIATIONS = {
 }
 
 
-def _load_recommended_tier_json() -> dict:
-    """Parse the Recommended tier JSON block from model_pricing_tiers_plan.md.
-
-    The first ```json fenced block in the plan file is the Recommended tier
-    (the Free tier block follows it). Raises if the block disappears or stops
-    being machine-parseable so the drift guard fails loudly.
-    """
-    text = TIER_PLAN_PATH.read_text(encoding="utf-8")
-    blocks = re.findall(r"```json\n(.*?)```", text, re.DOTALL)
-    assert blocks, (
-        f"No ```json blocks found in {TIER_PLAN_PATH}; the Recommended tier "
-        "definition must remain a machine-parseable JSON block."
-    )
-    return json.loads(blocks[0])
+def _load_recommended_tier_json() -> dict[str, Any]:
+    """Return a copy of the Recommended tier reference specification."""
+    return copy.deepcopy(RECOMMENDED_TIER_REFERENCE)
 
 
 # ---------------------------------------------------------------------------
-# Drift guard: DEFAULT_CONFIG == Recommended tier JSON (except documented deviations)
+# Drift guard: DEFAULT_CONFIG == RECOMMENDED_TIER_REFERENCE (except documented deviations)
 # ---------------------------------------------------------------------------
 def test_default_config_matches_recommended_tier_except_documented_deviations():
     tier = _load_recommended_tier_json()
@@ -63,9 +86,9 @@ def test_default_config_matches_recommended_tier_except_documented_deviations():
         if key in DOCUMENTED_DEVIATIONS:
             continue
         assert DEFAULT_CONFIG[key] == tier_value, (
-            f"DEFAULT_CONFIG['{key}'] drifted from the Recommended tier JSON in "
-            f"{TIER_PLAN_PATH.name}: {DEFAULT_CONFIG[key]!r} != {tier_value!r}. "
-            "Update zocrates/config.py consciously (plan §5.2 alignment table)."
+            f"DEFAULT_CONFIG['{key}'] drifted from RECOMMENDED_TIER_REFERENCE: "
+            f"{DEFAULT_CONFIG[key]!r} != {tier_value!r}. "
+            "Update zocrates/config.py consciously."
         )
 
 
