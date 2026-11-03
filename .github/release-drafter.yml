@@ -1,0 +1,46 @@
+name-template: 'v$RESOLVED_VERSION'
+tag-template: 'v$RESOLVED_VERSION'
+change-template: '- $TITLE by @$AUTHOR in #$NUMBER'
+
+categories:
+  - title: '🚀 Features & Enhancements'
+    labels:
+      - 'feature'
+      - 'enhancement'
+  - title: '🐛 Bug Fixes'
+    labels:
+      - 'fix'
+      - 'bug'
+  - title: '📚 Documentation'
+    labels:
+      - 'docs'
+      - 'documentation'
+  - title: '⚙️ Infrastructure & Maintenance'
+    labels:
+      - 'ci'
+      - 'maintenance'
+      - 'dependencies'
+
+version-resolver:
+  major:
+    labels:
+      - 'major'
+      - 'update:major'
+      - 'Update:major'
+      - 'Update:Major'
+  minor:
+    labels:
+      - 'minor'
+      - 'update:minor'
+      - 'Update:minor'
+      - 'Update:Minor'
+  patch:
+    labels:
+      - 'patch'
+      - 'update:patch'
+      - 'update:patchlevel'
+      - 'Update:patch'
+      - 'Update:Patch'
+      - 'Update:patchlevel'
+      - 'Update:Patchlevel'
+  default: patch

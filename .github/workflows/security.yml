@@ -1,0 +1,50 @@
+name: Security & Dependencies
+
+on:
+  pull_request:
+    branches:
+      - master
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  dependency-review:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Export locked dependencies
+        run: |
+          uv export --locked --format requirements-txt --no-dev --no-emit-project --no-hashes \
+            --output-file /tmp/audit-requirements.txt
+
+      - name: Run advisory vulnerability audit
+        run: |
+          uv tool run --python 3.13 --from pip-audit pip-audit -r /tmp/audit-requirements.txt
+        continue-on-error: true

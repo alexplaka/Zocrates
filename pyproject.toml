@@ -1,0 +1,81 @@
+[project]
+name = "zocrates"
+version = "0.90.0"
+description = "An LLM-powered assistant for Zotero."
+license = { text = "AGPL-3.0-or-later" }
+authors = [
+    {name = "Alex Plakantonakis"},
+]
+
+dependencies = [
+    "google-adk==2.8",
+    "opentelemetry-exporter-otlp-proto-http>=1.30.0",
+    "litellm>=1.85.7",
+    "aiohttp>=3.13.4",
+    "chromadb>=1.5",
+    "markitdown[all]>=0.1.0,<1.0.0",
+    "azure-ai-contentunderstanding>=1.2.0b1",
+    "fastapi>=0.115.0,<1.0.0",
+    "sse-starlette>=2.0.0,<3.0.0",
+    "requests",
+    "transformers>=4.57.0",
+    "torch>=2.0.0",
+    "torchvision>=0.20.0",
+    "peft>=0.15.2",
+    "platformdirs>=4.0.0",
+    "filelock>=3.0.0",
+    "pypdf",
+    "docling",
+    "datalab-python-sdk>=0.7.1",
+    "Pillow",
+    "resvg-py>=0.4.0",
+    # [asyncio] extra is REQUIRED: it pulls greenlet, which sqlalchemy.ext.asyncio
+    # hard-requires (SQLAlchemy 2.1 removed the automatic greenlet dependency,
+    # which broke ADK's DatabaseSessionService in wheel-provisioned venvs).
+    "sqlalchemy[asyncio]>=2.0.52,<2.1",
+    "mcp>=1.28.0,<2.0.0",
+]
+requires-python = ">=3.12,<3.15"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2,<10.0.0",
+    "pytest-asyncio>=1.0.0,<2.0.0",
+    "pytest-cov>=7.1.0,<8.0.0",
+    "nest-asyncio>=1.6.0,<2.0.0",
+    "sentence-transformers>=3.0.0,<4.0.0",
+    "diff-cover>=9.0.0,<10.0.0",
+]
+docs = [
+    "mkdocs>=1.6.0,<2.0.0",
+    "mkdocs-material>=9.5.0,<10.0.0",
+    "mkdocstrings[python]>=0.28.0,<2.0.0",
+    "mkdocs-gen-files>=0.5.0,<1.0.0",
+    "mkdocs-literate-nav>=0.6.0,<1.0.0",
+]
+
+[project.optional-dependencies]
+lint = [
+    "codespell>=2.2.0,<3.0.0",
+]
+
+[tool.codespell]
+ignore-words-list = "rouge,ans,ure,nin,ths,unparseable,disjointness,re-uses,pre-selected,pre-select,pre-selecting,pre-emptive,pre-emptively,astroid,discreet"
+skip = "./locust_env/*,uv.lock,.venv,./frontend,**/package-lock.json,./scratch/*,*mermaid.min.js,*.min.js,*.min.css,*.pdf,*.json,*.log,./site/*,./build_dist/*,./scripts/datalab_experiment/*,./scripts/dialogue_agent_proto_evals/*,./tests/*"
+
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+
+[tool.pytest.ini_options]
+pythonpath = "."
+testpaths = ["tests"]
+asyncio_default_fixture_loop_scope = "session"
+norecursedirs = [".venv", ".git", "artifacts"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["zocrates"]
+
+

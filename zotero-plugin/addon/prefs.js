@@ -1,0 +1,15 @@
+pref("extensions.zocrates.embeddingMode", "local");
+pref("extensions.zocrates.documentConverterMode", "local");
+pref("extensions.zocrates.documentConverter", "markitdown");
+pref("extensions.zocrates.embeddingModel", "jinaai/jina-embeddings-v5-text-nano");
+pref("extensions.zocrates.cloudApiKey", "");
+pref("extensions.zocrates.openRouterApiKey", "");
+pref("extensions.zocrates.backendPort", 8765);
+pref("extensions.zocrates.backendSourceDir", "");
+pref("extensions.zocrates.session_titles", "{}");
+pref("extensions.zocrates.last_active_session_id", "");
+pref("zocrates.theme", "auto");
+pref("extensions.zotero.zocrates.theme", "auto");
+pref("extensions.zocrates.citationsEnabled", true);
+pref("extensions.zocrates.referencesSectionEnabled", true);
+pref("extensions.zocrates.scholarPoliteEmail", "");

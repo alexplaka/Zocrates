@@ -1,0 +1,80 @@
+name: Build Add-on
+
+on:
+  push:
+    branches:
+      - master
+      - main
+  pull_request:
+    branches:
+      - master
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Synchronize manifest.json version
+        run: |
+          python3 -c '
+          import json, tomllib
+          from pathlib import Path
+
+          pyproj = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+          ver = pyproj["project"]["version"]
+          mpath = Path("zotero-plugin/addon/manifest.json")
+          mdata = json.loads(mpath.read_text(encoding="utf-8"))
+          if mdata.get("version") != ver:
+              mdata["version"] = ver
+              mpath.write_text(json.dumps(mdata, indent=2) + "\n", encoding="utf-8")
+              print(f"   Synced manifest.json version to {ver}")
+          else:
+              print(f"   manifest.json already in sync with pyproject.toml ({ver})")
+          '
+
+      - name: Build backend wheel
+        run: uv build --wheel --out-dir build_dist
+
+      - name: Stage wheel payload in the add-on
+        run: |
+          mkdir -p zotero-plugin/addon/backend
+          cp build_dist/zocrates-*.whl zotero-plugin/addon/backend/zocrates.whl
+
+      - name: Export pinned constraints
+        run: |
+          uv export --locked --format requirements-txt --no-dev --no-emit-project --no-hashes \
+            --output-file zotero-plugin/addon/backend/constraints.txt
+
+      - name: Build zocrates.xpi
+        run: |
+          cd zotero-plugin/addon
+          zip -r "../../zocrates.xpi" .
+
+      - name: Upload zocrates.xpi artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zocrates-xpi
+          path: zocrates.xpi
+          retention-days: 14

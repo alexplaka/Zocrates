@@ -1,0 +1,181 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - master
+      - main
+  pull_request:
+    branches:
+      - master
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies with uv
+        run: uv sync --locked
+
+      - name: Run Front-end JS Unit Tests
+        run: node tests/js/run_js_tests.js
+
+      - name: Run Pytest Suite
+        run: uv run pytest --cov=zocrates --cov-report=term-missing:skip-covered --cov-report=json:coverage-summary.json --cov-report=xml:coverage.xml
+
+      - name: Publish Coverage Summary
+        if: always()
+        run: |
+          if [ -f .coverage ]; then
+            echo "### 📊 Python Test Coverage Report" >> $GITHUB_STEP_SUMMARY
+            uv run coverage report --format=markdown >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Check PR Diff Coverage
+        if: always() && github.event_name == 'pull_request'
+        continue-on-error: true
+        run: |
+          if [ ! -f coverage.xml ]; then
+            echo "coverage.xml not found, skipping diff coverage."
+            exit 0
+          fi
+
+          # Fetch the base branch for git diff comparison
+          git fetch origin ${{ github.base_ref }} --depth=1
+
+          # Generate diff-cover markdown and json against base branch using direct two-dot diff
+          uv run diff-cover coverage.xml \
+            --compare-branch=origin/${{ github.base_ref }} \
+            --diff-range-notation=.. \
+            --fail-under=0 \
+            --format markdown:diff-cover.md,json:diff-cover.json || true
+
+          python3 -c '
+          import json, os
+
+          TARGET = 80.0
+
+          if not os.path.exists("diff-cover.json"):
+              print("No diff coverage data generated.")
+              exit(0)
+
+          with open("diff-cover.json") as f:
+              data = json.load(f)
+
+          total_lines = data.get("total_num_lines", 0)
+          pct = float(data.get("total_percent_covered", 100.0))
+          violations = data.get("total_num_violations", 0)
+          covered = total_lines - violations
+
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY", "")
+
+          if total_lines == 0:
+              msg = "\n### ℹ️ PR Diff Coverage\nNo executable Python code modified in this pull request.\n"
+              if summary_path:
+                  with open(summary_path, "a", encoding="utf-8") as f:
+                      f.write(msg)
+              print(msg)
+              exit(0)
+
+          if pct < TARGET:
+              print(f"::warning title=PR Diff Coverage Below Target ({pct:.1f}%25 < {TARGET:.0f}%25)::Only {pct:.1f}% of modified code is covered by tests ({covered}/{total_lines} lines).")
+              alert = (
+                  f"\n### ⚠️ PR Diff Coverage: {pct:.1f}%\n\n"
+                  f"> [!WARNING]\n"
+                  f"> **Coverage Warning**: Only **{pct:.1f}%** of newly added or modified lines in this PR are covered by tests "
+                  f"(target is **{TARGET:.0f}%**). {violations} line(s) missing test coverage.\n\n"
+              )
+          else:
+              alert = (
+                  f"\n### ✅ PR Diff Coverage: {pct:.1f}%\n\n"
+                  f"> [!TIP]\n"
+                  f"> **Great job!** **{pct:.1f}%** of newly added or modified lines in this PR are covered by tests "
+                  f"(target is **{TARGET:.0f}%**).\n\n"
+              )
+
+          if summary_path:
+              details = ""
+              if os.path.exists("diff-cover.md"):
+                  with open("diff-cover.md", encoding="utf-8") as df:
+                      diff_md = df.read().strip()
+                  if diff_md:
+                      details = f"<details><summary>Click to view diff coverage details</summary>\n\n{diff_md}\n\n</details>\n"
+              with open(summary_path, "a", encoding="utf-8") as f:
+                  f.write(alert + details)
+          '
+
+      - name: Update Coverage Badge
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')
+        continue-on-error: true
+        run: |
+          python3 -c '
+          import json
+          with open("coverage-summary.json") as f:
+              data = json.load(f)
+          pct = round(data["totals"]["percent_covered"])
+          if pct >= 90:
+              color = "brightgreen"
+          elif pct >= 80:
+              color = "green"
+          elif pct >= 70:
+              color = "yellowgreen"
+          elif pct >= 60:
+              color = "yellow"
+          else:
+              color = "red"
+          endpoint = {
+              "schemaVersion": 1,
+              "label": "coverage",
+              "message": f"{pct}%",
+              "color": color
+          }
+          with open("/tmp/coverage-endpoint.json", "w") as out:
+              json.dump(endpoint, out, indent=2)
+          '
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin badges; then
+              git fetch origin badges
+              git checkout -B badges origin/badges
+          else
+              git checkout --orphan badges
+              git rm -rf . >/dev/null 2>&1 || true
+          fi
+          cp /tmp/coverage-endpoint.json coverage.json
+          git add coverage.json
+          if git diff --staged --quiet; then
+              echo "Coverage badge has not changed."
+          else
+              git commit -m "Update coverage badge [skip ci]"
+              git push origin badges
+          fi

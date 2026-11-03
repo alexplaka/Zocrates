@@ -1,0 +1,130 @@
+name: Release
+
+# Tag-driven release: builds the backend wheel, packages zocrates.xpi, and
+# publishes the XPI + update.json (Zotero add-on update manifest) as GitHub
+# release assets. Zotero resolves "update_url" against the
+# releases/latest/download/update.json permalink so updates flow without a
+# re-install.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Assert tag version matches pyproject.toml
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PYPROJECT_VERSION=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')
+          if [ "$TAG_VERSION" != "$PYPROJECT_VERSION" ]; then
+            echo "❌ Version mismatch: tag '$GITHUB_REF_NAME' (v$TAG_VERSION) != pyproject.toml version ($PYPROJECT_VERSION)." >&2
+            exit 1
+          fi
+          echo "✅ Tag version matches pyproject.toml ($PYPROJECT_VERSION)"
+
+      - name: Synchronize manifest.json version
+        run: |
+          python3 -c '
+          import json, tomllib
+          from pathlib import Path
+
+          pyproj = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+          ver = pyproj["project"]["version"]
+          mpath = Path("zotero-plugin/addon/manifest.json")
+          mdata = json.loads(mpath.read_text(encoding="utf-8"))
+          if mdata.get("version") != ver:
+              mdata["version"] = ver
+              mpath.write_text(json.dumps(mdata, indent=2) + "\n", encoding="utf-8")
+              print(f"   Synced manifest.json version to {ver}")
+          else:
+              print(f"   manifest.json already in sync with pyproject.toml ({ver})")
+          '
+
+      - name: Build backend wheel
+        run: uv build --wheel --out-dir build_dist
+
+      - name: Stage wheel payload in the add-on
+        run: |
+          mkdir -p zotero-plugin/addon/backend
+          cp build_dist/zocrates-*.whl zotero-plugin/addon/backend/zocrates.whl
+
+      - name: Export pinned constraints
+        run: |
+          uv export --locked --format requirements-txt --no-dev --no-emit-project --no-hashes \
+            --output-file zotero-plugin/addon/backend/constraints.txt
+
+      - name: Build zocrates.xpi
+        run: |
+          cd zotero-plugin/addon
+          zip -r "../../zocrates.xpi" .
+
+      - name: Generate update.json
+        run: |
+          python3 -c '
+          import hashlib, json, os
+          from pathlib import Path
+
+          xpi_path = Path("zocrates.xpi")
+          sha256 = hashlib.sha256(xpi_path.read_bytes()).hexdigest()
+          repo = os.environ.get("GITHUB_REPOSITORY", "alexplaka/Zocrates")
+          ref = os.environ.get("GITHUB_REF_NAME", "")
+          version = ref.removeprefix("v")
+          update_link = f"https://github.com/{repo}/releases/download/{ref}/zocrates.xpi"
+
+          mpath = Path("zotero-plugin/addon/manifest.json")
+          mdata = json.loads(mpath.read_text(encoding="utf-8"))
+          zotero_app = mdata.get("applications", {}).get("zotero", {})
+          addon_id = zotero_app.get("id", "zocrates@alexplaka.dev")
+          min_version = zotero_app.get("strict_min_version", "10.0.0")
+          max_version = zotero_app.get("strict_max_version", "10.*")
+
+          update = {
+              "addons": {
+                  addon_id: {
+                      "updates": [
+                          {
+                              "version": version,
+                              "update_link": update_link,
+                              "update_hash": f"sha256:{sha256}",
+                              "applications": {
+                                  "zotero": {
+                                      "strict_min_version": min_version,
+                                      "strict_max_version": max_version,
+                                  }
+                              },
+                          }
+                      ]
+                  }
+              }
+          }
+          Path("update.json").write_text(json.dumps(update, indent=2) + "\n", encoding="utf-8")
+          print(f"update.json generated (sha256={sha256})")
+          '
+          cat update.json
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            zocrates.xpi
+            update.json

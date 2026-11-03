@@ -1,0 +1,2453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zocrates • Paper Relations Network Graph</title>
+  <style>
+    :root {
+      --bg-dark: #0f172a;
+      --bg-card: #1e293b;
+      --bg-card-hover: #334155;
+      --border: #334155;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #6366f1;
+      --primary-hover: #4f46e5;
+      --accent: #38bdf8;
+      --bg-translucent: rgba(30, 41, 59, 0.88);
+      --bg-drawer: rgba(30, 41, 59, 0.95);
+      --input-bg: #0f172a;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    body, html {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #0f172a;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: #f8fafc;
+    }
+
+    #canvas-container {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      cursor: grab;
+    }
+
+    canvas.panning {
+      cursor: grabbing;
+    }
+
+    canvas.dragging-node {
+      cursor: crosshair;
+    }
+
+    /* Floating Toolbar */
+    #toolbar {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      right: 16px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 16px;
+      background: rgba(30, 41, 59, 0.88);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid #334155;
+      border-radius: 12px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+      z-index: 10;
+      pointer-events: auto;
+    }
+
+    .toolbar-left, .toolbar-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .brand-title {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      color: #38bdf8;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-right: 6px;
+    }
+
+    .brand-title svg {
+      width: 18px;
+      height: 18px;
+      fill: #38bdf8;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #334155;
+      color: #f8fafc;
+      border: 1px solid #475569;
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .btn:hover {
+      background: #475569;
+      border-color: #64748b;
+    }
+
+    .btn:active {
+      transform: scale(0.97);
+    }
+
+    .btn svg {
+      width: 14px;
+      height: 14px;
+      fill: currentColor;
+    }
+
+    .btn.active {
+      background: #0284c7;
+      border-color: #38bdf8;
+      color: #ffffff;
+    }
+
+    /* Search Box */
+    .search-box {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+
+    .search-box input {
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 6px 28px 6px 10px;
+      color: #f8fafc;
+      font-size: 12px;
+      width: 180px;
+      transition: width 0.2s ease, border-color 0.2s ease;
+      outline: none;
+      user-select: auto;
+      -webkit-user-select: auto;
+    }
+
+    .search-box input:focus {
+      width: 240px;
+      border-color: #38bdf8;
+      box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+    }
+
+    .search-box .clear-btn {
+      position: absolute;
+      right: 6px;
+      background: transparent;
+      border: none;
+      color: #94a3b8;
+      cursor: pointer;
+      font-size: 14px;
+      display: none;
+      padding: 2px;
+    }
+
+    .search-box input:not(:placeholder-shown) + .clear-btn {
+      display: block;
+    }
+
+    /* Slider and Control Groups */
+    .control-group,
+    .slider-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: #0f172a;
+      padding: 4px 10px;
+      border-radius: 6px;
+      border: 1px solid #334155;
+      font-size: 12px;
+      color: #cbd5e1;
+    }
+
+    .control-group label {
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    #depth-val {
+      min-width: 12px;
+      font-weight: 600;
+      color: #38bdf8;
+    }
+
+    .control-group input[type="range"],
+    .slider-group input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 80px;
+      height: 4px;
+      background: #334155;
+      border-radius: 2px;
+      outline: none;
+      cursor: pointer;
+    }
+
+    .control-group input[type="range"]::-webkit-slider-thumb,
+    .slider-group input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #38bdf8;
+      cursor: pointer;
+      box-shadow: 0 0 4px rgba(56, 189, 248, 0.6);
+    }
+
+    .control-group input[type="range"]::-moz-range-thumb,
+    .slider-group input[type="range"]::-moz-range-thumb {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #38bdf8;
+      border: none;
+      cursor: pointer;
+      box-shadow: 0 0 4px rgba(56, 189, 248, 0.6);
+    }
+
+    /* Checkbox Group */
+    .checkbox-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+    }
+
+    .checkbox-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+      color: #cbd5e1;
+    }
+
+    .checkbox-label input {
+      accent-color: #38bdf8;
+      cursor: pointer;
+    }
+
+    .edge-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    .dot-curated { background-color: #a855f7; }
+    .dot-hybrid { background-color: #38bdf8; }
+    .dot-tags { background-color: #f59e0b; }
+
+    /* Stats Indicator */
+    .stats-badge {
+      font-size: 11px;
+      color: #94a3b8;
+      padding: 4px 8px;
+      background: #0f172a;
+      border-radius: 4px;
+      border: 1px solid #334155;
+    }
+
+    /* Side Inspector Drawer */
+    #inspector-drawer {
+      position: absolute;
+      top: 80px;
+      bottom: 20px;
+      right: 16px;
+      width: 380px;
+      max-width: calc(100vw - 32px);
+      background: rgba(30, 41, 59, 0.95);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid #334155;
+      border-radius: 12px;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
+      z-index: 20;
+      display: flex;
+      flex-direction: column;
+      transform: translateX(420px);
+      transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+      overflow: hidden;
+      pointer-events: auto;
+    }
+
+    #inspector-drawer.open {
+      transform: translateX(0);
+    }
+
+    .drawer-header {
+      padding: 14px 16px;
+      border-bottom: 1px solid #334155;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      background: rgba(15, 23, 42, 0.4);
+    }
+
+    .drawer-header-left {
+      flex: 1;
+    }
+
+    .drawer-title {
+      font-size: 15px;
+      font-weight: 600;
+      line-height: 1.4;
+      color: #f8fafc;
+      user-select: text;
+      -webkit-user-select: text;
+    }
+
+    .close-btn {
+      background: transparent;
+      border: none;
+      color: #94a3b8;
+      cursor: pointer;
+      font-size: 18px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      transition: all 0.15s ease;
+    }
+
+    .close-btn:hover {
+      background: #334155;
+      color: #f8fafc;
+    }
+
+    .drawer-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .drawer-content::-webkit-scrollbar {
+      width: 6px;
+    }
+    .drawer-content::-webkit-scrollbar-thumb {
+      background: #475569;
+      border-radius: 3px;
+    }
+
+    .meta-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .pill {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #cbd5e1;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .pill-key {
+      color: #38bdf8;
+      border-color: rgba(56, 189, 248, 0.4);
+      user-select: text;
+      -webkit-user-select: text;
+    }
+
+    .pill-year {
+      color: #a78bfa;
+      border-color: rgba(167, 139, 250, 0.4);
+    }
+
+    .pill-type {
+      color: #34d399;
+      border-color: rgba(52, 211, 153, 0.4);
+    }
+
+    .section-title {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: #94a3b8;
+      margin-bottom: 6px;
+    }
+
+    .keywords-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .tag-pill {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: #0f172a;
+      border: 1px solid #334155;
+      color: #94a3b8;
+    }
+
+    .connections-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .connection-card {
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 10px 12px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .connection-card:hover {
+      border-color: #38bdf8;
+      background: rgba(56, 189, 248, 0.05);
+      transform: translateY(-1px);
+    }
+
+    .connection-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .connection-card-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #f1f5f9;
+      line-height: 1.3;
+    }
+
+    .connection-card-meta {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      font-size: 11px;
+      color: #94a3b8;
+    }
+
+    .relation-badge {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+
+    .badge-curated {
+      background: rgba(168, 85, 247, 0.2);
+      color: #c084fc;
+      border: 1px solid rgba(168, 85, 247, 0.4);
+    }
+
+    .badge-hybrid {
+      background: rgba(56, 189, 248, 0.2);
+      color: #38bdf8;
+      border: 1px solid rgba(56, 189, 248, 0.4);
+    }
+
+    .badge-both {
+      background: rgba(16, 185, 129, 0.2);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.4);
+    }
+
+    .badge-tags {
+      background: rgba(245, 158, 11, 0.2);
+      color: #fbbf24;
+      border: 1px solid rgba(245, 158, 11, 0.4);
+    }
+
+    .connection-evidence {
+      font-size: 11px;
+      color: #94a3b8;
+      line-height: 1.4;
+      font-style: italic;
+    }
+
+    /* Topical Cluster Card */
+    .cluster-card {
+      background: var(--input-bg, #0f172a);
+      border: 1px solid var(--border, #334155);
+      border-radius: 8px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .cluster-header {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .cluster-title-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .cluster-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      background-color: var(--accent, #38bdf8);
+    }
+
+    .cluster-topic-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-main, #f8fafc);
+      line-height: 1.3;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .cluster-meta-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .btn-focus-cluster {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      font-weight: 500;
+      padding: 4px 8px;
+      border-radius: 4px;
+      background: var(--bg-card, #1e293b);
+      border: 1px solid var(--border, #334155);
+      color: var(--accent, #38bdf8);
+      cursor: pointer;
+      transition: all 0.15s ease;
+      font-family: inherit;
+    }
+
+    .btn-focus-cluster:hover {
+      background: var(--bg-card-hover, #334155);
+      border-color: var(--accent, #38bdf8);
+    }
+
+    .btn-focus-cluster:active {
+      transform: scale(0.97);
+    }
+
+    .cluster-members-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted, #94a3b8);
+      margin-top: 2px;
+    }
+
+    .cluster-members-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      max-height: 170px;
+      overflow-y: auto;
+      padding-right: 2px;
+    }
+
+    .cluster-members-list::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    .cluster-members-list::-webkit-scrollbar-thumb {
+      background: var(--border, #334155);
+      border-radius: 2px;
+    }
+
+    .cluster-member-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      color: var(--text-main, #f8fafc);
+      background: var(--bg-card, #1e293b);
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .cluster-member-item:hover {
+      background: var(--bg-card-hover, #334155);
+      border-color: var(--border, #475569);
+    }
+
+    .cluster-member-item.current {
+      background: rgba(56, 189, 248, 0.1);
+      border-color: rgba(56, 189, 248, 0.35);
+      cursor: default;
+    }
+
+    .cluster-member-item.current:hover {
+      background: rgba(56, 189, 248, 0.15);
+      border-color: rgba(56, 189, 248, 0.45);
+    }
+
+    .cluster-member-title {
+      flex: 1;
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .cluster-member-tag {
+      font-size: 9px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(56, 189, 248, 0.18);
+      color: var(--accent, #38bdf8);
+      border: 1px solid rgba(56, 189, 248, 0.38);
+      flex-shrink: 0;
+    }
+
+    .cluster-empty-state {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 8px 4px;
+    }
+
+    /* Tooltip */
+    #graph-tooltip {
+      position: absolute;
+      pointer-events: none;
+      background: rgba(15, 23, 42, 0.94);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border: 1px solid #475569;
+      border-radius: 8px;
+      padding: 8px 12px;
+      color: #f8fafc;
+      font-size: 12px;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.6);
+      z-index: 100;
+      display: none;
+      max-width: 280px;
+      line-height: 1.35;
+    }
+
+    .tooltip-title {
+      font-weight: 600;
+      margin-bottom: 4px;
+      color: #f8fafc;
+    }
+
+    .tooltip-meta {
+      font-size: 11px;
+      color: #94a3b8;
+      margin-bottom: 4px;
+    }
+
+    .tooltip-connections {
+      font-size: 11px;
+      color: #38bdf8;
+      font-weight: 500;
+    }
+
+    /* Legend Overlay Bottom Left */
+    #graph-legend {
+      position: absolute;
+      bottom: 16px;
+      left: 16px;
+      background: rgba(30, 41, 59, 0.82);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 11px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      color: #94a3b8;
+      z-index: 10;
+      pointer-events: none;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .legend-line {
+      width: 18px;
+      height: 3px;
+      border-radius: 2px;
+    }
+
+    .line-curated { background-color: #a855f7; }
+    .line-hybrid { background-color: #38bdf8; }
+    .line-both { background-color: #10b981; }
+    .line-tags { background-color: #f59e0b; }
+
+    /* Loading Overlay */
+    #loading-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: #0f172a;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      z-index: 50;
+      transition: opacity 0.3s ease;
+    }
+
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid #334155;
+      border-top-color: #38bdf8;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+
+  <div id="loading-overlay">
+    <div class="spinner"></div>
+    <div style="font-size: 14px; color: #94a3b8;">Loading Knowledge Graph...</div>
+  </div>
+
+  <div id="canvas-container">
+    <canvas id="graph-canvas"></canvas>
+  </div>
+
+  <!-- Top Floating Controls Toolbar -->
+  <div id="toolbar">
+    <div class="toolbar-left">
+      <div class="brand-title">
+        <svg viewBox="0 0 24 24"><path d="M19 15c-1.1 0-2.07.57-2.63 1.43L10.9 13.7c.07-.22.1-.46.1-.7 0-.24-.03-.48-.1-.7l5.47-2.73C16.93 10.43 17.9 11 19 11c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.03.48.1.7L7.63 11.43C7.07 10.57 6.1 10 5 10c-1.66 0-3 1.34-3 3s1.34 3 3 3c1.1 0 2.07-.57 2.63-1.43l5.47 2.73c-.07.22-.1.46-.1.7 0 1.66 1.34 3 3 3s3-1.34 3-3-1.34-3-3-3z"/></svg>
+        Zocrates Graph
+      </div>
+
+      <button id="btn-fit-screen" class="btn" title="Fit all papers to screen">
+        <svg viewBox="0 0 24 24"><path d="M15 3l2.3 2.3-2.89 2.87 1.42 1.42L18.7 6.7 21 9V3h-6zM3 9l2.3-2.3 2.87 2.89 1.42-1.42L6.7 5.3 9 3H3v6zm6 12l-2.3-2.3 2.89-2.87-1.42-1.42L5.3 17.3 3 15v6h6zm12-6l-2.3 2.3-2.87-2.89-1.42 1.42 2.89 2.87L15 21h6v-6z"/></svg>
+        Fit Screen
+      </button>
+
+      <div class="search-box">
+        <input id="search-input" type="text" placeholder="Search papers, keywords..." autocomplete="off">
+        <button id="btn-clear-search" class="clear-btn">&times;</button>
+      </div>
+    </div>
+
+    <div class="toolbar-right">
+      <div class="control-group">
+        <label for="depth-slider" title="Connection Depth">Depth: <span id="depth-val">2</span></label>
+        <input type="range" id="depth-slider" min="1" max="3" value="2" step="1" style="width: 65px;" />
+      </div>
+
+      <div class="slider-group" title="Filter edges by minimum confidence score">
+        <span>Min Score:</span>
+        <input id="confidence-slider" type="range" min="0.50" max="1.00" step="0.01" value="0.50">
+        <span id="min-score-val" style="min-width: 32px; font-weight: 600; color: #38bdf8;">0.50</span>
+      </div>
+
+      <div class="checkbox-group">
+        <label class="checkbox-label" title="Toggle Curated Zotero Links">
+          <input type="checkbox" id="chk-curated" checked>
+          <span class="edge-dot dot-curated"></span> Curated
+        </label>
+        <label class="checkbox-label" title="Toggle Hybrid Search Matches">
+          <input type="checkbox" id="chk-hybrid" checked>
+          <span class="edge-dot dot-hybrid"></span> Hybrid
+        </label>
+        <label class="checkbox-label" title="Toggle Shared Tag Edges">
+          <input type="checkbox" id="chk-tags" checked>
+          <span class="edge-dot dot-tags"></span> Tags
+        </label>
+      </div>
+
+      <div id="stats-badge" class="stats-badge">0 papers • 0 links</div>
+    </div>
+  </div>
+
+  <!-- Legend Overlay -->
+  <div id="graph-legend">
+    <div class="legend-item"><span class="legend-line line-both"></span> Corroborated (Both)</div>
+    <div class="legend-item"><span class="legend-line line-curated"></span> Human Curated</div>
+    <div class="legend-item"><span class="legend-line line-hybrid"></span> Hybrid Search</div>
+    <div class="legend-item"><span class="legend-line line-tags"></span> Shared Tags</div>
+  </div>
+
+  <!-- Tooltip -->
+  <div id="graph-tooltip">
+    <div id="tooltip-title" class="tooltip-title"></div>
+    <div id="tooltip-meta" class="tooltip-meta"></div>
+    <div id="tooltip-connections" class="tooltip-connections"></div>
+  </div>
+
+  <!-- Side Inspector Drawer -->
+  <div id="inspector-drawer">
+    <div class="drawer-header">
+      <div class="drawer-header-left">
+        <div id="inspector-title" class="drawer-title">Paper Details</div>
+      </div>
+      <button id="btn-close-inspector" class="close-btn" title="Close Inspector">&times;</button>
+    </div>
+    <div class="drawer-content">
+      <div class="meta-pills">
+        <div id="inspector-key-pill" class="pill pill-key" title="Item Key">
+          <svg style="width:12px;height:12px;fill:currentColor;" viewBox="0 0 24 24"><path d="M12.65 10C11.83 7.67 9.61 6 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6c2.61 0 4.83-1.67 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/></svg>
+          <span id="inspector-key-val">KEY</span>
+        </div>
+        <div id="inspector-year-pill" class="pill pill-year">Year: <span id="inspector-year-val">N/A</span></div>
+        <div id="inspector-type-pill" class="pill pill-type"><span id="inspector-type-val">Article</span></div>
+        <div id="inspector-degree-pill" class="pill">Connections: <span id="inspector-degree-val">0</span></div>
+      </div>
+
+      <div id="inspector-bib-section" style="margin-bottom: 12px; display: none;">
+        <div id="inspector-authors" style="font-size:12px;color:#cbd5e1;margin-bottom:2px;font-weight:500;"></div>
+        <div id="inspector-publication" style="font-size:11px;color:#94a3b8;font-style:italic;"></div>
+      </div>
+
+      <div id="inspector-abstract-section" style="margin-bottom: 16px; display: none;">
+        <div class="section-title">Abstract Excerpt</div>
+        <div id="inspector-abstract" style="font-size:11px;color:#94a3b8;line-height:1.5;background:#0f172a;padding:8px 10px;border-radius:6px;border:1px solid #334155;max-height:120px;overflow-y:auto;white-space:pre-wrap;"></div>
+      </div>
+
+      <div id="inspector-keywords-section">
+        <div class="section-title">Keywords &amp; Domain Tags</div>
+        <div id="inspector-keywords" class="keywords-container">
+          <span style="font-size:11px;color:#64748b;">No keywords available</span>
+        </div>
+      </div>
+
+      <div id="inspector-cluster-section" style="margin-bottom: 16px;">
+        <div class="section-title">Topical Cluster</div>
+        <div id="inspector-cluster-card" class="cluster-card"></div>
+      </div>
+
+      <div>
+        <div class="section-title">Connected Papers (<span id="inspector-conn-count">0</span>)</div>
+        <div id="inspector-connections" class="connections-list">
+          <span style="font-size:11px;color:#64748b;">No connections found</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Pure Vanilla JS + Canvas 2D Force-Directed Network Graph Visualizer
+    (function() {
+      // Color Palettes
+      const COLORS = {
+        background: "#0f172a",
+        nodeDefault: "#0284c7",
+        nodeCenter: "#818cf8",
+        nodePinned: "#e11d48",
+        nodeBorder: "#f8fafc",
+        textDefault: "#f8fafc",
+        textMuted: "#94a3b8",
+        edgeCurated: "#a855f7",
+        edgeHybrid: "#38bdf8",
+        edgeBoth: "#10b981",
+        edgeTags: "#f59e0b",
+        textShadow: "rgba(15, 23, 42, 0.95)"
+      };
+
+      // Community Color Palette
+      const COMMUNITY_COLORS = [
+        "#6366f1", "#06b6d4", "#10b981", "#f59e0b", "#ec4899",
+        "#8b5cf6", "#14b8a6", "#f97316", "#3b82f6", "#84cc16"
+      ];
+
+      function getCommunityColor(communityId) {
+        if (communityId === undefined || communityId === null || communityId < 0) {
+          return COLORS.nodeDefault;
+        }
+        return COMMUNITY_COLORS[communityId % COMMUNITY_COLORS.length];
+      }
+
+      // State
+      let rawNodes = [];
+      let rawLinks = [];
+      let activeNodes = [];
+      let activeLinks = [];
+      let nodesMap = new Map();
+      let hoveredNode = null;
+      let selectedNode = null;
+      let selectedClusterId = null;
+      let draggedNode = null;
+      let alpha = 1.0;
+      let currentDepth = 2;
+      let communityMeta = {};
+
+      // Camera
+      let panX = 0;
+      let panY = 0;
+      let zoom = 1.0;
+      let isPanning = false;
+      let panStartX = 0;
+      let panStartY = 0;
+      let hasDraggedSinceMouseDown = false;
+      let animTarget = null;
+
+      // Filter settings
+      let minScore = 0.50;
+      let includeCurated = true;
+      let includeHybrid = true;
+      let includeTags = true;
+      let searchQuery = "";
+
+      // DOM Elements
+      const canvas = document.getElementById("graph-canvas");
+      const ctx = canvas.getContext("2d");
+      const loadingOverlay = document.getElementById("loading-overlay");
+      const depthSlider = document.getElementById("depth-slider");
+      const depthVal = document.getElementById("depth-val");
+      const btnFitScreen = document.getElementById("btn-fit-screen");
+      const searchInput = document.getElementById("search-input");
+      const btnClearSearch = document.getElementById("btn-clear-search");
+      const confidenceSlider = document.getElementById("confidence-slider");
+      const minScoreVal = document.getElementById("min-score-val");
+      const chkCurated = document.getElementById("chk-curated");
+      const chkHybrid = document.getElementById("chk-hybrid");
+      const chkTags = document.getElementById("chk-tags");
+      const statsBadge = document.getElementById("stats-badge");
+      const tooltip = document.getElementById("graph-tooltip");
+      const tooltipTitle = document.getElementById("tooltip-title");
+      const tooltipMeta = document.getElementById("tooltip-meta");
+      const tooltipConnections = document.getElementById("tooltip-connections");
+      const inspectorDrawer = document.getElementById("inspector-drawer");
+      const btnCloseInspector = document.getElementById("btn-close-inspector");
+      const inspectorTitle = document.getElementById("inspector-title");
+      const inspectorClusterCard = document.getElementById("inspector-cluster-card");
+      const inspectorClusterSection = document.getElementById("inspector-cluster-section");
+      const inspectorKeyVal = document.getElementById("inspector-key-val");
+      const inspectorYearVal = document.getElementById("inspector-year-val");
+      const inspectorTypeVal = document.getElementById("inspector-type-val");
+      const inspectorDegreeVal = document.getElementById("inspector-degree-val");
+      const inspectorKeywords = document.getElementById("inspector-keywords");
+      const inspectorBibSection = document.getElementById("inspector-bib-section");
+      const inspectorAuthors = document.getElementById("inspector-authors");
+      const inspectorPublication = document.getElementById("inspector-publication");
+      const inspectorAbstractSection = document.getElementById("inspector-abstract-section");
+      const inspectorAbstract = document.getElementById("inspector-abstract");
+      const inspectorConnections = document.getElementById("inspector-connections");
+      const inspectorConnCount = document.getElementById("inspector-conn-count");
+
+      function escapeHtml(str) {
+        if (str === null || str === undefined) return "";
+        return String(str)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#039;");
+      }
+
+      // Responsive Canvas Setup
+      function resizeCanvas() {
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = window.innerWidth * dpr;
+        canvas.height = window.innerHeight * dpr;
+        canvas.style.width = window.innerWidth + "px";
+        canvas.style.height = window.innerHeight + "px";
+        requestRender();
+      }
+      window.addEventListener("resize", resizeCanvas);
+
+      // Coordinate Transformations
+      function screenToWorld(sx, sy) {
+        return {
+          x: (sx - panX) / zoom,
+          y: (sy - panY) / zoom
+        };
+      }
+
+      function worldToScreen(wx, wy) {
+        return {
+          x: wx * zoom + panX,
+          y: wy * zoom + panY
+        };
+      }
+
+      function getEdgeColor(relType) {
+        if (relType === "human_curated_and_hybrid_search") return COLORS.edgeBoth;
+        if (relType === "human_curated") return COLORS.edgeCurated;
+        if (relType === "hybrid_search") return COLORS.edgeHybrid;
+        if (relType === "shared_tags") return COLORS.edgeTags;
+        return COLORS.edgeHybrid;
+      }
+
+      function getEdgeThickness(score) {
+        const clamped = Math.max(0.5, Math.min(1.0, score || 0.5));
+        return 1.5 + ((clamped - 0.5) / 0.5) * 3.5;
+      }
+
+      function getNodeRadius(degree) {
+        return Math.max(7, Math.min(24, 7 + 2 * (degree || 0)));
+      }
+
+      function getShortCitation(node) {
+        if (!node) return "";
+        let authors = node.authors || node.creators;
+        if (typeof authors === "string") {
+          try {
+            const parsed = JSON.parse(authors);
+            if (Array.isArray(parsed)) authors = parsed;
+            else authors = [authors];
+          } catch (_) {
+            authors = authors.split(";").map(s => s.trim()).filter(Boolean);
+          }
+        }
+        let authorStr = "";
+        if (Array.isArray(authors) && authors.length > 0) {
+          const rawFirst = String(authors[0] || "").trim();
+          if (rawFirst) {
+            const hadEtAl = /\bet\s+al\.?$/i.test(rawFirst);
+            const first = rawFirst.replace(/\s+et\s+al\.?$/i, "").trim();
+            let lastName = "";
+            if (first.includes(",")) {
+              lastName = first.split(",")[0].trim();
+            } else {
+              const parts = first.split(/\s+/).filter(Boolean);
+              if (parts.length > 1 && /^[A-Za-z]\.?$/.test(parts[parts.length - 1])) {
+                lastName = parts[0];
+              } else {
+                lastName = parts[parts.length - 1] || first;
+              }
+            }
+            if (lastName) {
+              authorStr = lastName + ((hadEtAl || authors.length > 1) ? " et al." : "");
+            }
+          }
+        }
+
+        let yearStr = "";
+        if (node.year !== undefined && node.year !== null) {
+          const yStr = String(node.year).trim();
+          if (yStr && yStr !== "N/A" && yStr !== "null" && yStr !== "undefined") {
+            const match = yStr.match(/\b(19\d\d|20\d\d)\b/);
+            yearStr = match ? match[1] : yStr;
+          }
+        }
+
+        if (authorStr && yearStr) {
+          return `${authorStr} (${yearStr})`;
+        } else if (authorStr) {
+          return authorStr;
+        } else if (yearStr) {
+          return `(${yearStr})`;
+        }
+        return "";
+      }
+
+      // Edge weight calculation for Weighted Label Propagation Algorithm
+      // Edge weights: curated = 4.0, both = 5.0, hybrid = 2.0, tags = 1.0, multiplied by link.score
+      function getLinkWeight(link) {
+        let baseWeight = 2.0;
+        const rel = link.relation_type || "";
+        if (rel === "human_curated_and_hybrid_search" || rel === "both") {
+          baseWeight = 5.0;
+        } else if (rel === "human_curated" || rel === "curated") {
+          baseWeight = 4.0;
+        } else if (rel === "hybrid_search" || rel === "hybrid") {
+          baseWeight = 2.0;
+        } else if (rel === "shared_tags" || rel === "tags") {
+          baseWeight = 1.0;
+        }
+        const score = (link.score !== undefined && link.score !== null) ? Number(link.score) : 1.0;
+        return baseWeight * score;
+      }
+
+      // Community Detection via Weighted Label Propagation Algorithm (LPA)
+      function detectCommunities(nodes, links, numIterations = 5) {
+        if (!nodes || nodes.length === 0) return;
+
+        // Adjacency list with edge weights
+        const adj = new Map();
+        nodes.forEach(n => adj.set(n.id, []));
+
+        links.forEach(link => {
+          const w = getLinkWeight(link);
+          if (adj.has(link.source) && adj.has(link.target)) {
+            adj.get(link.source).push({ target: link.target, weight: w });
+            adj.get(link.target).push({ target: link.source, weight: w });
+          }
+        });
+
+        // 1. Assign each node initial community ID
+        const community = new Map();
+        nodes.forEach((n, idx) => {
+          community.set(n.id, idx);
+        });
+
+        // 2. Run iterations to converge into communities
+        for (let iter = 0; iter < numIterations; iter++) {
+          for (let i = 0; i < nodes.length; i++) {
+            const node = nodes[i];
+            const neighbors = adj.get(node.id) || [];
+            if (neighbors.length === 0) continue;
+
+            const weightByCommunity = new Map();
+            for (let j = 0; j < neighbors.length; j++) {
+              const edge = neighbors[j];
+              const c = community.get(edge.target);
+              weightByCommunity.set(c, (weightByCommunity.get(c) || 0) + edge.weight);
+            }
+
+            let bestComm = community.get(node.id);
+            let maxWeight = -1;
+            for (const [c, w] of weightByCommunity.entries()) {
+              if (w > maxWeight) {
+                maxWeight = w;
+                bestComm = c;
+              }
+            }
+            community.set(node.id, bestComm);
+          }
+        }
+
+        // 3. Count cluster sizes and sort descending
+        const clusterCounts = new Map();
+        nodes.forEach(n => {
+          const c = community.get(n.id);
+          clusterCounts.set(c, (clusterCounts.get(c) || 0) + 1);
+        });
+
+        const sortedClusters = Array.from(clusterCounts.keys()).sort((a, b) => {
+          return clusterCounts.get(b) - clusterCounts.get(a);
+        });
+
+        const commIdMap = new Map();
+        sortedClusters.forEach((oldId, newId) => {
+          commIdMap.set(oldId, newId);
+        });
+
+        nodes.forEach(n => {
+          const oldC = community.get(n.id);
+          const newC = commIdMap.get(oldC);
+          n.community = newC;
+          n.communitySize = clusterCounts.get(oldC) || 1;
+        });
+
+        // 4. Derive cluster topic metadata for inspector drawer
+        communityMeta = {};
+        const STOP_WORDS = new Set([
+          "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with",
+          "by", "from", "up", "about", "into", "over", "after", "is", "are", "was", "were",
+          "be", "been", "being", "have", "has", "had", "do", "does", "did", "can", "could",
+          "will", "would", "shall", "should", "may", "might", "must", "that", "which", "who",
+          "this", "these", "those", "using", "based", "approach", "study", "analysis", "system",
+          "method", "paper", "towards", "via", "through", "need"
+        ]);
+
+        sortedClusters.forEach((oldId, newId) => {
+          const members = nodes.filter(n => n.community === newId);
+          const count = members.length;
+          const color = getCommunityColor(newId);
+
+          // Keyword frequencies
+          const kwFreq = new Map();
+          const kwDisplay = new Map();
+
+          members.forEach(node => {
+            let kws = node.keywords || [];
+            if (typeof kws === "string") {
+              try {
+                kws = JSON.parse(kws);
+              } catch (_) {
+                kws = kws.split(",");
+              }
+            }
+            if (Array.isArray(kws)) {
+              kws.forEach(k => {
+                const raw = String(k || "").trim();
+                if (!raw) return;
+                const norm = raw.toLowerCase();
+                kwFreq.set(norm, (kwFreq.get(norm) || 0) + 1);
+                if (!kwDisplay.has(norm)) {
+                  const cap = raw.split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+                  kwDisplay.set(norm, cap);
+                }
+              });
+            }
+          });
+
+          let topic = "";
+          if (kwFreq.size > 0) {
+            const sortedKw = Array.from(kwFreq.entries()).sort((a, b) => b[1] - a[1]);
+            const topKws = sortedKw.slice(0, 2).map(([norm]) => kwDisplay.get(norm));
+            topic = topKws.join(", ");
+          } else {
+            // Fallback: top title keywords
+            const titleWordFreq = new Map();
+            members.forEach(node => {
+              const title = String(node.title || "");
+              const words = title.toLowerCase().replace(/[^a-z0-9\s-]/g, " ").split(/\s+/);
+              words.forEach(w => {
+                if (w.length >= 4 && !STOP_WORDS.has(w)) {
+                  titleWordFreq.set(w, (titleWordFreq.get(w) || 0) + 1);
+                }
+              });
+            });
+
+            if (titleWordFreq.size > 0) {
+              const sortedWords = Array.from(titleWordFreq.entries()).sort((a, b) => b[1] - a[1]);
+              const topWords = sortedWords.slice(0, 2).map(([w]) => w.charAt(0).toUpperCase() + w.slice(1));
+              topic = topWords.join(", ");
+            } else {
+              topic = `Cluster ${newId + 1}`;
+            }
+          }
+
+          communityMeta[newId] = {
+            topic: topic || `Cluster ${newId + 1}`,
+            count,
+            color
+          };
+        });
+      }
+      const runWeightedLPA = detectCommunities;
+
+      // Macro-Cluster Spatial Seeding
+      // Place discovered community centroids along a macro ring; member nodes around centroid with jitter;
+      // orphan nodes (degree 0) in an outer concentric ring.
+      function seedMacroClusterLayout(nodes, singleCenter) {
+        if (!nodes || nodes.length === 0) return;
+
+        const orphans = [];
+        const communities = new Map();
+
+        nodes.forEach(n => {
+          if (singleCenter && n.is_center) {
+            n.anchorX = 0;
+            n.anchorY = 0;
+            n.x = 0;
+            n.y = 0;
+            n.pinned = true;
+            return;
+          }
+          if ((n.degree || 0) === 0) {
+            orphans.push(n);
+          } else {
+            const c = n.community !== undefined ? n.community : 0;
+            if (!communities.has(c)) communities.set(c, []);
+            communities.get(c).push(n);
+          }
+        });
+
+        const commKeys = Array.from(communities.keys());
+        const numClusters = commKeys.length;
+        const macroRadius = Math.max(260, 45 * Math.sqrt(nodes.length));
+
+        commKeys.forEach((cId, idx) => {
+          const angle = (idx / Math.max(1, numClusters)) * 2 * Math.PI;
+          const cx = numClusters === 1 ? 0 : Math.cos(angle) * macroRadius;
+          const cy = numClusters === 1 ? 0 : Math.sin(angle) * macroRadius;
+
+          const members = communities.get(cId);
+          const memberCount = members.length;
+          members.forEach((node, mIdx) => {
+            node.anchorX = cx;
+            node.anchorY = cy;
+            const memberAngle = (mIdx / Math.max(1, memberCount)) * 2 * Math.PI + ((mIdx % 3) - 1) * 0.25;
+            const jitterDist = 35 + ((mIdx * 37) % 55);
+            node.x = cx + Math.cos(memberAngle) * jitterDist;
+            node.y = cy + Math.sin(memberAngle) * jitterDist;
+            node.vx = 0;
+            node.vy = 0;
+          });
+        });
+
+        // Position orphan nodes (degree 0) on outer concentric ring
+        const orphanRadius = macroRadius + 180 + Math.min(100, orphans.length * 2);
+        const orphanCount = orphans.length;
+        orphans.forEach((node, idx) => {
+          const angle = (idx / Math.max(1, orphanCount)) * 2 * Math.PI;
+          const ox = Math.cos(angle) * orphanRadius;
+          const oy = Math.sin(angle) * orphanRadius;
+          node.anchorX = ox;
+          node.anchorY = oy;
+          node.x = ox;
+          node.y = oy;
+          node.vx = 0;
+          node.vy = 0;
+        });
+      }
+
+      // Breadth-first search to find all nodes reachable within maxDepth hops from startNode
+      function getSpotlightNodeIds(startNode, maxDepth) {
+        if (!startNode) return null;
+        const visited = new Set();
+        visited.add(startNode.id);
+        const queue = [{ id: startNode.id, depth: 0 }];
+
+        const adj = new Map();
+        for (let i = 0; i < activeLinks.length; i++) {
+          const l = activeLinks[i];
+          if (!adj.has(l.source)) adj.set(l.source, []);
+          if (!adj.has(l.target)) adj.set(l.target, []);
+          adj.get(l.source).push(l.target);
+          adj.get(l.target).push(l.source);
+        }
+
+        while (queue.length > 0) {
+          const current = queue.shift();
+          if (current.depth >= maxDepth) continue;
+          const neighbors = adj.get(current.id) || [];
+          for (let i = 0; i < neighbors.length; i++) {
+            const nId = neighbors[i];
+            if (!visited.has(nId)) {
+              visited.add(nId);
+              queue.push({ id: nId, depth: current.depth + 1 });
+            }
+          }
+        }
+
+        return visited;
+      }
+
+      // Physics Simulation Step
+      function updatePhysics() {
+        if (activeNodes.length === 0 || alpha < 0.003) return;
+
+        const kRepulsion = 4000;
+        const damping = 0.85;
+        const kClusterCohesion = 0.035;
+
+        const n = activeNodes.length;
+
+        // Dynamic community centroids for cluster cohesion
+        const communityCentroids = new Map();
+        for (let i = 0; i < n; i++) {
+          const u = activeNodes[i];
+          if (u.community !== undefined && u.degree > 0) {
+            let c = communityCentroids.get(u.community);
+            if (!c) {
+              c = { sumX: 0, sumY: 0, count: 0 };
+              communityCentroids.set(u.community, c);
+            }
+            c.sumX += u.x;
+            c.sumY += u.y;
+            c.count += 1;
+          }
+        }
+
+        // Pairwise node repulsion
+        for (let i = 0; i < n; i++) {
+          const u = activeNodes[i];
+          for (let j = i + 1; j < n; j++) {
+            const v = activeNodes[j];
+            const dx = v.x - u.x;
+            const dy = v.y - u.y;
+            const distSq = dx * dx + dy * dy;
+            if (distSq === 0 || distSq > 600000) continue;
+            const dist = Math.sqrt(distSq);
+            const force = (kRepulsion / (distSq + 400)) * alpha;
+            const fx = (dx / dist) * force;
+            const fy = (dy / dist) * force;
+            if (!u.pinned) { u.vx -= fx; u.vy -= fy; }
+            if (!v.pinned) { v.vx += fx; v.vy += fy; }
+          }
+        }
+
+        // Spring forces on active links
+        // Intra-cluster link distance d ≈ 75px, inter-cluster d ≈ 180px
+        for (let i = 0; i < activeLinks.length; i++) {
+          const link = activeLinks[i];
+          const u = nodesMap.get(link.source);
+          const v = nodesMap.get(link.target);
+          if (!u || !v) continue;
+          const dx = v.x - u.x;
+          const dy = v.y - u.y;
+          const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+          const isSameCluster = (u.community !== undefined && v.community !== undefined && u.community === v.community);
+          const restLength = isSameCluster ? 65 : 280;
+          const kSpring = (isSameCluster ? 0.045 : 0.005) * alpha;
+          const displacement = dist - restLength;
+          const force = displacement * kSpring;
+          const fx = (dx / dist) * force;
+          const fy = (dy / dist) * force;
+          if (!u.pinned) { u.vx += fx; u.vy += fy; }
+          if (!v.pinned) { v.vx -= fx; v.vy -= fy; }
+        }
+
+        // Cluster cohesion force, anchor attraction, and velocity integration
+        for (let i = 0; i < n; i++) {
+          const u = activeNodes[i];
+          if (!u.pinned) {
+            // Cluster cohesion: gently attract nodes toward dynamic community centroid (0.035 * alpha)
+            if (u.community !== undefined && u.degree > 0) {
+              const c = communityCentroids.get(u.community);
+              if (c && c.count > 1) {
+                const cx = c.sumX / c.count;
+                const cy = c.sumY / c.count;
+                u.vx += (cx - u.x) * kClusterCohesion * alpha;
+                u.vy += (cy - u.y) * kClusterCohesion * alpha;
+              }
+            }
+
+            // Anchor attraction to keep clusters in assigned spatial sectors
+            if (u.anchorX !== undefined) {
+              u.vx += (u.anchorX - u.x) * 0.025 * alpha;
+              u.vy += (u.anchorY - u.y) * 0.025 * alpha;
+            }
+
+            u.vx *= damping;
+            u.vy *= damping;
+            u.x += u.vx;
+            u.y += u.vy;
+          }
+        }
+
+        alpha *= 0.992;
+      }
+
+      function wakeSimulation() {
+        alpha = Math.max(alpha, 0.45);
+        requestRender();
+      }
+
+      // Filter Nodes and Links based on UI controls
+      function applyFilters() {
+        const query = searchQuery.trim().toLowerCase();
+
+        // 1. Filter links based on minScore and relation types
+        activeLinks = rawLinks.filter(link => {
+          if (link.score < minScore) return false;
+          if (link.relation_type === "human_curated" && !includeCurated) return false;
+          if (link.relation_type === "shared_tags" && !includeTags) return false;
+          if (link.relation_type === "hybrid_search" && !includeHybrid) return false;
+          if (link.relation_type === "human_curated_and_hybrid_search" && !includeCurated && !includeHybrid) return false;
+          return true;
+        });
+
+        // 2. Recompute dynamic degrees
+        const counts = {};
+        rawNodes.forEach(n => { counts[n.id] = 0; });
+        activeLinks.forEach(link => {
+          counts[link.source] = (counts[link.source] || 0) + 1;
+          counts[link.target] = (counts[link.target] || 0) + 1;
+        });
+
+        rawNodes.forEach(n => {
+          n.degree = counts[n.id] || 0;
+          n.radius = getNodeRadius(n.degree);
+          // Search match flag
+          if (query) {
+            const titleMatch = (n.title || "").toLowerCase().includes(query);
+            const keyMatch = (n.id || "").toLowerCase().includes(query);
+            const kwMatch = (n.keywords || []).some(k => k.toLowerCase().includes(query));
+            const authorMatch = (n.authors || []).some(a => a.toLowerCase().includes(query));
+            n.searchMatch = titleMatch || keyMatch || kwMatch || authorMatch;
+          } else {
+            n.searchMatch = true;
+          }
+        });
+
+        activeNodes = rawNodes;
+        const centerCount = rawNodes.filter(n => n.is_center).length;
+        const centerText = centerCount > 1 ? ` (${centerCount} centers)` : "";
+        statsBadge.textContent = `${activeNodes.length} papers${centerText} • ${activeLinks.length} connections`;
+        wakeSimulation();
+      }
+
+      // Smooth Camera Animation Loop
+      function updateCameraAnimation() {
+        if (!animTarget) return;
+        animTarget.progress += 0.08;
+        const t = Math.min(1.0, animTarget.progress);
+        const ease = 1 - Math.pow(1 - t, 3);
+        panX = animTarget.startPanX + (animTarget.targetPanX - animTarget.startPanX) * ease;
+        panY = animTarget.startPanY + (animTarget.targetPanY - animTarget.startPanY) * ease;
+        zoom = animTarget.startZoom + (animTarget.targetZoom - animTarget.startZoom) * ease;
+        if (t >= 1.0) animTarget = null;
+      }
+
+      function centerOnNode(node) {
+        const targetZoom = Math.min(Math.max(zoom, 1.1), 2.2);
+        animTarget = {
+          startPanX: panX,
+          startPanY: panY,
+          startZoom: zoom,
+          targetPanX: window.innerWidth / 2 - node.x * targetZoom,
+          targetPanY: window.innerHeight / 2 - node.y * targetZoom,
+          targetZoom: targetZoom,
+          progress: 0
+        };
+        wakeSimulation();
+      }
+
+      function focusCluster(communityId) {
+        if (communityId === undefined || communityId === null || communityId < 0) return;
+        const members = activeNodes.filter(n => n.community === communityId);
+        if (members.length === 0) return;
+
+        selectedClusterId = communityId;
+
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        members.forEach(n => {
+          if (typeof n.x === "number" && !isNaN(n.x) && typeof n.y === "number" && !isNaN(n.y)) {
+            const r = n.radius || 10;
+            minX = Math.min(minX, n.x - r);
+            maxX = Math.max(maxX, n.x + r);
+            minY = Math.min(minY, n.y - r);
+            maxY = Math.max(maxY, n.y + r);
+          }
+        });
+
+        if (!isFinite(minX) || !isFinite(maxX) || !isFinite(minY) || !isFinite(maxY)) {
+          requestRender();
+          return;
+        }
+
+        const w = Math.max(maxX - minX, 100);
+        const h = Math.max(maxY - minY, 100);
+        const padding = 140;
+        const drawerOpen = inspectorDrawer && inspectorDrawer.classList.contains("open");
+        const drawerW = (drawerOpen && window.innerWidth > 650) ? 380 : 0;
+        const availW = Math.max(window.innerWidth - drawerW - padding, 200);
+        const availH = Math.max(window.innerHeight - padding, 200);
+        const targetZoom = Math.min(Math.max(Math.min(availW / w, availH / h), 0.3), 2.2);
+        const targetCenterX = (minX + maxX) / 2;
+        const targetCenterY = (minY + maxY) / 2;
+        const viewCenterX = (window.innerWidth - drawerW) / 2;
+        const viewCenterY = window.innerHeight / 2;
+
+        animTarget = {
+          startPanX: panX,
+          startPanY: panY,
+          startZoom: zoom,
+          targetPanX: viewCenterX - targetCenterX * targetZoom,
+          targetPanY: viewCenterY - targetCenterY * targetZoom,
+          targetZoom: targetZoom,
+          progress: 0
+        };
+        wakeSimulation();
+      }
+
+      function fitScreen() {
+        selectedClusterId = null;
+        if (activeNodes.length === 0) return;
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        activeNodes.forEach(n => {
+          minX = Math.min(minX, n.x - n.radius);
+          maxX = Math.max(maxX, n.x + n.radius);
+          minY = Math.min(minY, n.y - n.radius);
+          maxY = Math.max(maxY, n.y + n.radius);
+        });
+
+        const w = Math.max(maxX - minX, 100);
+        const h = Math.max(maxY - minY, 100);
+        const padding = 120;
+        const availW = Math.max(window.innerWidth - padding, 200);
+        const availH = Math.max(window.innerHeight - padding, 200);
+        const targetZoom = Math.min(Math.max(Math.min(availW / w, availH / h), 0.25), 2.0);
+        const targetCenterX = (minX + maxX) / 2;
+        const targetCenterY = (minY + maxY) / 2;
+
+        animTarget = {
+          startPanX: panX,
+          startPanY: panY,
+          startZoom: zoom,
+          targetPanX: window.innerWidth / 2 - targetCenterX * targetZoom,
+          targetPanY: window.innerHeight / 2 - targetCenterY * targetZoom,
+          targetZoom: targetZoom,
+          progress: 0
+        };
+        wakeSimulation();
+      }
+
+      // Drawing Routine
+      let renderPending = false;
+      function requestRender() {
+        if (!renderPending) {
+          renderPending = true;
+          requestAnimationFrame(render);
+        }
+      }
+
+      function render() {
+        renderPending = false;
+        updatePhysics();
+        updateCameraAnimation();
+
+        const dpr = window.devicePixelRatio || 1;
+        ctx.save();
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = COLORS.background;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Apply camera transformation
+        ctx.scale(dpr, dpr);
+        ctx.translate(panX, panY);
+        ctx.scale(zoom, zoom);
+
+        // Spotlight mode set when selectedClusterId or selectedNode is active
+        let spotlightNodeIds = null;
+        if (selectedClusterId !== null && selectedClusterId !== undefined) {
+          const members = activeNodes.filter(n => n.community === selectedClusterId);
+          spotlightNodeIds = new Set(members.map(m => m.id));
+        } else if (selectedNode) {
+          spotlightNodeIds = getSpotlightNodeIds(selectedNode, currentDepth);
+        }
+
+        // Find hovered 1-hop neighborhood if no selected node and no cluster spotlight
+        const hoveredNeighbors = new Set();
+        if (hoveredNode && !selectedNode && selectedClusterId === null) {
+          hoveredNeighbors.add(hoveredNode.id);
+          activeLinks.forEach(link => {
+            if (link.source === hoveredNode.id) hoveredNeighbors.add(link.target);
+            if (link.target === hoveredNode.id) hoveredNeighbors.add(link.source);
+          });
+        }
+
+        // Draw Links
+        for (let i = 0; i < activeLinks.length; i++) {
+          const link = activeLinks[i];
+          const u = nodesMap.get(link.source);
+          const v = nodesMap.get(link.target);
+          if (!u || !v) continue;
+
+          let alphaVal = 0.75;
+          let drawThickness = getEdgeThickness(link.score);
+
+          if (spotlightNodeIds) {
+            // Highlighted links (incident to spotlight set): 100% opacity, stroke width 2.5px
+            // Non-highlighted links: 4% opacity
+            const isSpotlightLink = spotlightNodeIds.has(link.source) && spotlightNodeIds.has(link.target);
+            if (isSpotlightLink) {
+              alphaVal = 1.0;
+              drawThickness = 2.5;
+            } else {
+              alphaVal = 0.04;
+            }
+          } else if (hoveredNode) {
+            if (link.source === hoveredNode.id || link.target === hoveredNode.id) {
+              alphaVal = 1.0;
+              drawThickness = drawThickness * 1.5;
+            } else {
+              alphaVal = 0.12;
+            }
+          } else if (searchQuery.trim() && (!u.searchMatch || !v.searchMatch)) {
+            alphaVal = 0.15;
+          }
+
+          ctx.save();
+          ctx.beginPath();
+          ctx.moveTo(u.x, u.y);
+          ctx.lineTo(v.x, v.y);
+          ctx.strokeStyle = getEdgeColor(link.relation_type);
+          ctx.globalAlpha = alphaVal;
+          ctx.lineWidth = drawThickness;
+          ctx.lineCap = "round";
+          ctx.stroke();
+          ctx.restore();
+        }
+
+        // Draw Nodes
+        for (let i = 0; i < activeNodes.length; i++) {
+          const node = activeNodes[i];
+
+          let alphaVal = 1.0;
+          let drawRadius = node.radius;
+          let showLabel = false;
+
+          if (spotlightNodeIds) {
+            // Highlighted nodes: 100% opacity, standard radius, crisp labels
+            // Non-highlighted nodes: 12% opacity, smaller radius, labels hidden
+            if (spotlightNodeIds.has(node.id)) {
+              alphaVal = 1.0;
+              drawRadius = node.radius;
+              showLabel = true;
+            } else {
+              alphaVal = 0.12;
+              drawRadius = Math.max(3, node.radius * 0.7);
+              showLabel = false;
+            }
+          } else {
+            if (hoveredNode) {
+              alphaVal = hoveredNeighbors.has(node.id) ? 1.0 : 0.15;
+            } else if (searchQuery.trim() && !node.searchMatch) {
+              alphaVal = 0.18;
+            }
+
+            // Semantic Zoom & Degree-Based Label Culling (Level of Detail)
+            if ((hoveredNode && hoveredNeighbors.has(node.id)) || (searchQuery.trim() && node.searchMatch)) {
+              showLabel = true;
+            } else {
+              if (zoom < 0.65) {
+                showLabel = (node.degree >= 3 || Boolean(node.is_center));
+              } else if (zoom < 1.05) {
+                showLabel = (node.degree >= 1 || Boolean(node.is_center));
+              } else {
+                showLabel = true;
+              }
+            }
+          }
+
+          ctx.save();
+          ctx.globalAlpha = alphaVal;
+
+          // Glowing Halo for Center Node
+          if (node.is_center) {
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, drawRadius + 7, 0, Math.PI * 2);
+            ctx.fillStyle = "rgba(129, 140, 248, 0.22)";
+            ctx.fill();
+            ctx.strokeStyle = "rgba(129, 140, 248, 0.7)";
+            ctx.lineWidth = 2;
+            ctx.stroke();
+          }
+
+          // Glowing Selection Ring
+          if (selectedNode && selectedNode.id === node.id) {
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, drawRadius + 5, 0, Math.PI * 2);
+            ctx.strokeStyle = "#38bdf8";
+            ctx.lineWidth = 2.5;
+            ctx.stroke();
+          }
+
+          // Search Match Highlight Ring
+          if (searchQuery.trim() && node.searchMatch && !hoveredNode && !selectedNode && selectedClusterId === null) {
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, drawRadius + 4, 0, Math.PI * 2);
+            ctx.strokeStyle = "#facc15";
+            ctx.lineWidth = 2;
+            ctx.stroke();
+          }
+
+          // Node Circle Body
+          // Default nodes inherit their community color so topic clusters are immediately recognizable.
+          // Center / pinned nodes retain their special styling.
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, drawRadius, 0, Math.PI * 2);
+          if (node.is_center) {
+            ctx.fillStyle = COLORS.nodeCenter;
+          } else if (node.pinned) {
+            ctx.fillStyle = COLORS.nodePinned;
+          } else if (node.community !== undefined && node.community !== null && node.community >= 0) {
+            ctx.fillStyle = getCommunityColor(node.community);
+          } else {
+            ctx.fillStyle = COLORS.nodeDefault;
+          }
+          ctx.fill();
+
+          ctx.strokeStyle = COLORS.nodeBorder;
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+
+          // Node Title Label (crisp labels when highlighted, hidden when non-highlighted in spotlight)
+          if (showLabel) {
+            const isCrisp = (spotlightNodeIds && spotlightNodeIds.has(node.id)) || Boolean(node.is_center) || (hoveredNode && hoveredNeighbors.has(node.id));
+            const citation = getShortCitation(node);
+
+            // Text shadow for high contrast and legibility over canvas edges and backgrounds
+            ctx.shadowColor = COLORS.textShadow || "rgba(15, 23, 42, 0.95)";
+            ctx.shadowBlur = 4;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "top";
+
+            const maxChars = isCrisp ? 40 : 24;
+            let displayTitle = node.title || node.id || "";
+            if (displayTitle.length > maxChars) {
+              displayTitle = displayTitle.slice(0, maxChars) + "...";
+            }
+
+            if (citation) {
+              // Line 1 (citation): 600 10px system-ui, sans-serif, color COLORS.textMuted or community accent
+              ctx.font = "600 10px system-ui, -apple-system, sans-serif";
+              const commColor = (node.community !== undefined && node.community !== null && node.community >= 0) ? getCommunityColor(node.community) : null;
+              ctx.fillStyle = commColor || COLORS.textMuted;
+              ctx.fillText(citation, node.x, node.y + drawRadius + 5);
+
+              // Line 2 (compact title): 10px system-ui, sans-serif, color COLORS.textDefault, truncated at 24 chars with ... (or up to 40 chars/crisp when selected/hovered/spotlighted)
+              ctx.font = `${isCrisp ? "600 10px" : "10px"} system-ui, -apple-system, sans-serif`;
+              ctx.fillStyle = COLORS.textDefault;
+              ctx.fillText(displayTitle, node.x, node.y + drawRadius + 18);
+            } else {
+              // If citation does not exist: draw compact title directly below node circle
+              ctx.font = `${isCrisp ? "600 11px" : "10px"} system-ui, -apple-system, sans-serif`;
+              ctx.fillStyle = COLORS.textDefault;
+              ctx.fillText(displayTitle, node.x, node.y + drawRadius + 5);
+            }
+
+            ctx.shadowBlur = 0;
+            ctx.shadowColor = "transparent";
+          }
+
+          ctx.restore();
+        }
+
+
+        ctx.restore();
+
+        // Continue animation frame if physics or camera active
+        if (alpha >= 0.003 || animTarget) {
+          requestRender();
+        }
+      }
+
+      // Inspector Drawer Logic
+      function openInspector(node) {
+        selectedNode = node;
+        selectedClusterId = null;
+        inspectorTitle.textContent = node.title || node.id;
+        inspectorKeyVal.textContent = node.id;
+        inspectorYearVal.textContent = node.year || "N/A";
+        inspectorTypeVal.textContent = node.type || "Document";
+        inspectorDegreeVal.textContent = node.degree || 0;
+
+        // Populate Topical Cluster Section
+        if (inspectorClusterCard) {
+          inspectorClusterCard.innerHTML = "";
+
+          const hasCommunity = (node.community !== undefined && node.community !== null && node.community >= 0);
+          const members = hasCommunity
+            ? activeNodes.filter(n => n.community === node.community)
+            : [];
+
+          if (members.length >= 2) {
+            const meta = communityMeta[node.community] || {};
+            const topicName = meta.topic || `Cluster ${node.community + 1}`;
+            const commColor = getCommunityColor(node.community);
+
+            const header = document.createElement("div");
+            header.className = "cluster-header";
+
+            const titleRow = document.createElement("div");
+            titleRow.className = "cluster-title-row";
+
+            const dot = document.createElement("span");
+            dot.className = "cluster-dot";
+            dot.style.backgroundColor = commColor;
+
+            const topicSpan = document.createElement("span");
+            topicSpan.className = "cluster-topic-name";
+            topicSpan.textContent = topicName;
+            topicSpan.title = topicName;
+
+            titleRow.appendChild(dot);
+            titleRow.appendChild(topicSpan);
+
+            const metaRow = document.createElement("div");
+            metaRow.className = "cluster-meta-row";
+
+            const subtitle = document.createElement("span");
+            subtitle.style.fontSize = "11px";
+            subtitle.style.color = "var(--text-muted, #94a3b8)";
+            subtitle.textContent = `${members.length} papers in library`;
+
+            const btnFocus = document.createElement("button");
+            btnFocus.type = "button";
+            btnFocus.className = "btn-focus-cluster";
+            btnFocus.innerHTML = `
+              <svg xmlns="http://www.w3.org/2000/svg" style="width:11px;height:11px;fill:currentColor;" viewBox="0 0 24 24"><path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0 0 13 3.06V1h-2v2.06A8.994 8.994 0 0 0 3.06 11H1v2h2.06A8.994 8.994 0 0 0 11 20.94V23h2v-2.06A8.994 8.994 0 0 0 20.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg>
+              <span>Focus Cluster in Graph</span>
+            `;
+            btnFocus.title = "Highlight and fit all members of this cluster in graph";
+            btnFocus.addEventListener("click", (e) => {
+              e.stopPropagation();
+              focusCluster(node.community);
+            });
+
+            metaRow.appendChild(subtitle);
+            metaRow.appendChild(btnFocus);
+
+            header.appendChild(titleRow);
+            header.appendChild(metaRow);
+            inspectorClusterCard.appendChild(header);
+
+            const membersLabel = document.createElement("div");
+            membersLabel.className = "cluster-members-label";
+            membersLabel.textContent = "Papers in this cluster:";
+            inspectorClusterCard.appendChild(membersLabel);
+
+            const membersList = document.createElement("div");
+            membersList.className = "cluster-members-list";
+
+            const sortedMembers = [...members].sort((a, b) => {
+              if (a.id === node.id) return -1;
+              if (b.id === node.id) return 1;
+              return (b.degree || 0) - (a.degree || 0);
+            });
+
+            sortedMembers.forEach(member => {
+              const item = document.createElement("div");
+              const isCurrent = (member.id === node.id);
+              item.className = "cluster-member-item" + (isCurrent ? " current" : "");
+
+              const titleEl = document.createElement("div");
+              titleEl.className = "cluster-member-title";
+              const citation = getShortCitation(member);
+              const memberTitle = member.title || member.id;
+              const fullText = citation ? `${citation} — ${memberTitle}` : memberTitle;
+              titleEl.textContent = fullText;
+              titleEl.title = fullText;
+              item.appendChild(titleEl);
+
+              if (isCurrent) {
+                const badge = document.createElement("span");
+                badge.className = "cluster-member-tag";
+                badge.textContent = "Current Paper";
+                item.appendChild(badge);
+              } else {
+                item.addEventListener("click", () => {
+                  openInspector(member);
+                  centerOnNode(member);
+                });
+              }
+
+              membersList.appendChild(item);
+            });
+
+            inspectorClusterCard.appendChild(membersList);
+          } else {
+            // Isolated paper (orphan / 1 paper)
+            const emptyState = document.createElement("div");
+            emptyState.className = "cluster-empty-state";
+
+            const titleRow = document.createElement("div");
+            titleRow.className = "cluster-title-row";
+
+            const dot = document.createElement("span");
+            dot.className = "cluster-dot";
+            dot.style.backgroundColor = "var(--text-muted, #94a3b8)";
+            dot.style.opacity = "0.5";
+
+            const titleSpan = document.createElement("span");
+            titleSpan.className = "cluster-topic-name";
+            titleSpan.style.color = "var(--text-muted, #94a3b8)";
+            titleSpan.textContent = "Isolated Paper";
+
+            titleRow.appendChild(dot);
+            titleRow.appendChild(titleSpan);
+
+            const subtitle = document.createElement("div");
+            subtitle.style.fontSize = "11px";
+            subtitle.style.color = "var(--text-muted, #94a3b8)";
+            subtitle.style.paddingLeft = "18px";
+            subtitle.textContent = "No connected cluster peers found in library.";
+
+            emptyState.appendChild(titleRow);
+            emptyState.appendChild(subtitle);
+
+            inspectorClusterCard.appendChild(emptyState);
+          }
+        }
+
+        // Populate Bibliographic Info
+        if (node.authors && node.authors.length > 0) {
+          inspectorAuthors.textContent = node.authors.join(", ");
+          inspectorAuthors.style.display = "block";
+          inspectorBibSection.style.display = "block";
+        } else {
+          inspectorAuthors.textContent = "";
+          inspectorAuthors.style.display = "none";
+        }
+
+        if (node.publication) {
+          inspectorPublication.textContent = node.publication;
+          inspectorPublication.style.display = "block";
+          inspectorBibSection.style.display = "block";
+        } else {
+          inspectorPublication.textContent = "";
+          inspectorPublication.style.display = "none";
+        }
+
+        if (!node.authors?.length && !node.publication) {
+          inspectorBibSection.style.display = "none";
+        }
+
+        // Populate Abstract
+        if (node.abstract && String(node.abstract).trim()) {
+          inspectorAbstract.textContent = String(node.abstract).trim();
+          inspectorAbstractSection.style.display = "block";
+        } else {
+          inspectorAbstract.textContent = "";
+          inspectorAbstractSection.style.display = "none";
+        }
+
+        // Populate keywords
+        inspectorKeywords.innerHTML = "";
+        if (node.keywords && node.keywords.length > 0) {
+          node.keywords.forEach(kw => {
+            const pill = document.createElement("span");
+            pill.className = "tag-pill";
+            pill.textContent = kw;
+            inspectorKeywords.appendChild(pill);
+          });
+        } else {
+          inspectorKeywords.innerHTML = '<span style="font-size:11px;color:#64748b;">No domain keywords available</span>';
+        }
+
+        // Find connected papers
+        inspectorConnections.innerHTML = "";
+        const incidentLinks = activeLinks.filter(l => l.source === node.id || l.target === node.id);
+        inspectorConnCount.textContent = incidentLinks.length;
+
+        if (incidentLinks.length > 0) {
+          // Sort by score descending
+          incidentLinks.sort((a, b) => b.score - a.score);
+          incidentLinks.forEach(link => {
+            const targetId = (link.source === node.id) ? link.target : link.source;
+            const targetNode = nodesMap.get(targetId);
+            if (!targetNode) return;
+
+            const card = document.createElement("div");
+            card.className = "connection-card";
+
+            let badgeClass = "badge-hybrid";
+            let badgeText = "Hybrid";
+            if (link.relation_type === "human_curated_and_hybrid_search") {
+              badgeClass = "badge-both";
+              badgeText = "Curated + Hybrid";
+            } else if (link.relation_type === "human_curated") {
+              badgeClass = "badge-curated";
+              badgeText = "Curated";
+            } else if (link.relation_type === "shared_tags") {
+              badgeClass = "badge-tags";
+              badgeText = "Shared Tags";
+            }
+
+            const pctScore = Math.round((link.score || 0) * 100);
+
+            const safeTitle = escapeHtml(targetNode.title || targetId);
+            const safeType = escapeHtml(targetNode.type || "Paper");
+            const safeId = escapeHtml(targetId);
+            const safeYear = targetNode.year ? escapeHtml(targetNode.year) + " • " : "";
+            const safeEvidence = link.evidence ? escapeHtml(link.evidence) : "";
+
+            card.innerHTML = `
+              <div class="connection-card-header">
+                <span class="relation-badge ${badgeClass}">${badgeText}</span>
+                <span style="font-size:11px;font-weight:700;color:#38bdf8;">${pctScore}%</span>
+              </div>
+              <div class="connection-card-title">${safeTitle}</div>
+              <div class="connection-card-meta">
+                <span>${safeYear}${safeType}</span>
+                <span>• Key: ${safeId}</span>
+              </div>
+              ${safeEvidence ? `<div class="connection-evidence">${safeEvidence}</div>` : ""}
+            `;
+
+            card.addEventListener("click", () => {
+              openInspector(targetNode);
+              centerOnNode(targetNode);
+            });
+
+            inspectorConnections.appendChild(card);
+          });
+        } else {
+          inspectorConnections.innerHTML = '<span style="font-size:11px;color:#64748b;">No active connections at current score threshold</span>';
+        }
+
+        inspectorDrawer.classList.add("open");
+        requestRender();
+      }
+
+      btnCloseInspector.addEventListener("click", () => {
+        inspectorDrawer.classList.remove("open");
+        selectedNode = null;
+        selectedClusterId = null;
+        requestRender();
+      });
+
+      // Mouse & Gesture Canvas Interaction Handlers
+      function findNodeAt(worldX, worldY) {
+        for (let i = activeNodes.length - 1; i >= 0; i--) {
+          const n = activeNodes[i];
+          const dx = worldX - n.x;
+          const dy = worldY - n.y;
+          if (dx * dx + dy * dy <= (n.radius + 4) * (n.radius + 4)) {
+            return n;
+          }
+        }
+        return null;
+      }
+
+      let mouseDownPos = { x: 0, y: 0 };
+      canvas.addEventListener("mousedown", (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const worldPos = screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+        mouseDownPos = { x: e.clientX, y: e.clientY };
+        hasDraggedSinceMouseDown = false;
+
+        const clickedNode = findNodeAt(worldPos.x, worldPos.y);
+        if (clickedNode) {
+          draggedNode = clickedNode;
+          draggedNode.pinned = true;
+          canvas.classList.add("dragging-node");
+          wakeSimulation();
+        } else {
+          isPanning = true;
+          panStartX = e.clientX - panX;
+          panStartY = e.clientY - panY;
+          canvas.classList.add("panning");
+        }
+      });
+
+      window.addEventListener("mousemove", (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        if (Math.hypot(e.clientX - mouseDownPos.x, e.clientY - mouseDownPos.y) > 4) {
+          hasDraggedSinceMouseDown = true;
+        }
+
+        if (draggedNode) {
+          const worldPos = screenToWorld(mouseX, mouseY);
+          draggedNode.x = worldPos.x;
+          draggedNode.y = worldPos.y;
+          wakeSimulation();
+          return;
+        }
+
+        if (isPanning) {
+          panX = e.clientX - panStartX;
+          panY = e.clientY - panStartY;
+          requestRender();
+          return;
+        }
+
+        // Hover test
+        const worldPos = screenToWorld(mouseX, mouseY);
+        const node = findNodeAt(worldPos.x, worldPos.y);
+        if (node !== hoveredNode) {
+          hoveredNode = node;
+          if (hoveredNode) {
+            const firstAuthor = (hoveredNode.authors && hoveredNode.authors.length > 0) ? `${hoveredNode.authors[0]} • ` : "";
+            const yearStr = hoveredNode.year ? `${hoveredNode.year} • ` : "";
+            tooltipTitle.textContent = hoveredNode.title || hoveredNode.id;
+            tooltipMeta.textContent = `${firstAuthor}${yearStr}${hoveredNode.type || "Document"} [${hoveredNode.id}]`;
+            tooltipConnections.textContent = `${hoveredNode.degree} connection${hoveredNode.degree === 1 ? "" : "s"}`;
+            tooltip.style.display = "block";
+          } else {
+            tooltip.style.display = "none";
+          }
+          requestRender();
+        }
+
+        if (hoveredNode) {
+          // Keep tooltip within window bounds
+          const tipX = Math.min(e.clientX + 16, window.innerWidth - 300);
+          const tipY = Math.min(e.clientY + 16, window.innerHeight - 100);
+          tooltip.style.left = tipX + "px";
+          tooltip.style.top = tipY + "px";
+        }
+      });
+
+      window.addEventListener("mouseup", (e) => {
+        if (draggedNode) {
+          canvas.classList.remove("dragging-node");
+          draggedNode = null;
+        }
+        if (isPanning) {
+          canvas.classList.remove("panning");
+          isPanning = false;
+        }
+
+        // If it was a clean click without significant drag
+        if (!hasDraggedSinceMouseDown) {
+          const rect = canvas.getBoundingClientRect();
+          const worldPos = screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+          const clickedNode = findNodeAt(worldPos.x, worldPos.y);
+          if (clickedNode) {
+            openInspector(clickedNode);
+          } else {
+            // Clicked canvas background: restore all nodes and links to full opacity
+            selectedNode = null;
+            selectedClusterId = null;
+            inspectorDrawer.classList.remove("open");
+            requestRender();
+          }
+        }
+      });
+
+      // Cursor-anchored Zoom (Wheel)
+      canvas.addEventListener("wheel", (e) => {
+        e.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+        const worldX = (mouseX - panX) / zoom;
+        const worldY = (mouseY - panY) / zoom;
+
+        const zoomFactor = e.deltaY < 0 ? 1.12 : 0.89;
+        const newZoom = Math.min(Math.max(zoom * zoomFactor, 0.15), 5.0);
+
+        panX = mouseX - worldX * newZoom;
+        panY = mouseY - worldY * newZoom;
+        zoom = newZoom;
+        requestRender();
+      }, { passive: false });
+
+      // Double Click Handlers: unpin node & center on it, or fit screen
+      canvas.addEventListener("dblclick", (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const worldPos = screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+        const clickedNode = findNodeAt(worldPos.x, worldPos.y);
+        if (clickedNode) {
+          // Unpin and smoothly center
+          clickedNode.pinned = false;
+          openInspector(clickedNode);
+          centerOnNode(clickedNode);
+        } else {
+          selectedClusterId = null;
+          fitScreen();
+        }
+      });
+
+      // Toolbar Controls Handlers
+      if (depthSlider) {
+        depthSlider.addEventListener("input", (e) => {
+          currentDepth = parseInt(e.target.value, 10) || 2;
+          if (depthVal) depthVal.textContent = String(currentDepth);
+
+          const urlParams = new URLSearchParams(window.location.search);
+          const centerKey = urlParams.get("center_key") || urlParams.get("center_keys");
+          if (centerKey) {
+            urlParams.set("depth", String(currentDepth));
+            urlParams.set("min_score", minScore.toFixed(2));
+            history.replaceState(null, "", "?" + urlParams.toString());
+            loadGraphData();
+          } else {
+            // Full library: if selectedNode is present, re-render to update spotlight neighborhood
+            requestRender();
+          }
+        });
+      }
+
+      btnFitScreen.addEventListener("click", fitScreen);
+
+      // Search Filter
+      searchInput.addEventListener("input", (e) => {
+        searchQuery = e.target.value;
+        applyFilters();
+      });
+
+      btnClearSearch.addEventListener("click", () => {
+        searchInput.value = "";
+        searchQuery = "";
+        applyFilters();
+        searchInput.focus();
+      });
+
+      // Confidence Slider
+      confidenceSlider.addEventListener("input", (e) => {
+        minScore = parseFloat(e.target.value);
+        minScoreVal.textContent = minScore.toFixed(2);
+        applyFilters();
+      });
+
+      // Edge Type Checkboxes
+      chkCurated.addEventListener("change", (e) => {
+        includeCurated = e.target.checked;
+        applyFilters();
+      });
+
+      chkHybrid.addEventListener("change", (e) => {
+        includeHybrid = e.target.checked;
+        applyFilters();
+      });
+
+      chkTags.addEventListener("change", (e) => {
+        includeTags = e.target.checked;
+        applyFilters();
+      });
+
+      // Initialize Graph from Backend
+      async function loadGraphData() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const centerKey = urlParams.get("center_key");
+        const centerKeys = urlParams.get("center_keys");
+        const collectionKey = urlParams.get("collection_key");
+        const collectionKeys = urlParams.get("collection_keys");
+        const depth = urlParams.get("depth") || "2";
+        const initialMinScore = urlParams.get("min_score") || "0.50";
+
+        currentDepth = parseInt(depth, 10) || 2;
+        if (depthSlider) depthSlider.value = String(currentDepth);
+        if (depthVal) depthVal.textContent = String(currentDepth);
+
+        minScore = parseFloat(initialMinScore);
+        confidenceSlider.value = initialMinScore;
+        minScoreVal.textContent = minScore.toFixed(2);
+
+        const apiParams = new URLSearchParams();
+        if (centerKey) apiParams.set("center_key", centerKey);
+        if (centerKeys) apiParams.set("center_keys", centerKeys);
+        if (collectionKey) apiParams.set("collection_key", collectionKey);
+        if (collectionKeys) apiParams.set("collection_keys", collectionKeys);
+        apiParams.set("depth", depth);
+        apiParams.set("min_score", "0.50"); // Load full candidate set for client slider responsiveness
+        apiParams.set("include_curated", "true");
+        apiParams.set("include_tags", "true");
+
+        try {
+          const resp = await fetch(`/graph/data?${apiParams.toString()}`);
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const data = await resp.json();
+
+          const centerNodesList = (data.nodes || []).filter(n => n.is_center);
+          const singleCenter = centerNodesList.length === 1;
+
+          rawNodes = (data.nodes || []).map((n) => {
+            const isSingleCenter = singleCenter && n.is_center;
+            return {
+              ...n,
+              x: 0,
+              y: 0,
+              vx: 0,
+              vy: 0,
+              pinned: Boolean(isSingleCenter),
+              radius: getNodeRadius(n.degree),
+              searchMatch: true
+            };
+          });
+
+          rawLinks = data.links || [];
+          nodesMap = new Map();
+          rawNodes.forEach(n => nodesMap.set(n.id, n));
+
+          // 1. Initial degree calculation on rawLinks
+          const counts = {};
+          rawNodes.forEach(n => { counts[n.id] = 0; });
+          rawLinks.forEach(link => {
+            counts[link.source] = (counts[link.source] || 0) + 1;
+            counts[link.target] = (counts[link.target] || 0) + 1;
+          });
+          rawNodes.forEach(n => {
+            n.degree = counts[n.id] || 0;
+            n.radius = getNodeRadius(n.degree);
+          });
+
+          // 2. Discover communities using Weighted LPA
+          detectCommunities(rawNodes, rawLinks, 5);
+
+          // 3. Seed macro cluster spatial layout
+          seedMacroClusterLayout(rawNodes, singleCenter);
+
+          selectedNode = null;
+          selectedClusterId = null;
+          hoveredNode = null;
+          draggedNode = null;
+          inspectorDrawer.classList.remove("open");
+
+          // Set initial camera
+          panX = window.innerWidth / 2;
+          panY = window.innerHeight / 2;
+          zoom = 1.0;
+
+          applyFilters();
+
+          // Hide loading overlay
+          loadingOverlay.style.opacity = "0";
+          setTimeout(() => { loadingOverlay.style.display = "none"; }, 320);
+
+          // If exactly 1 center node is present, open inspector drawer for it.
+          // If multiple center nodes exist, display network stats badge with center count
+          // and keep drawer closed until user clicks a node.
+          const centerNodes = rawNodes.filter(n => n.is_center);
+          if (centerNodes.length === 1) {
+            openInspector(centerNodes[0]);
+          } else if (centerNodes.length > 1) {
+            statsBadge.textContent = `${activeNodes.length} papers (${centerNodes.length} centers) • ${activeLinks.length} connections`;
+          }
+
+          fitScreen();
+        } catch (err) {
+          console.error("Failed to load graph data:", err);
+          const safeErrMsg = escapeHtml(err.message || "Network Error");
+          loadingOverlay.innerHTML = `
+            <div style="font-size: 16px; font-weight:600; color: #ef4444; margin-bottom:8px;">Failed to Load Graph</div>
+            <div style="font-size: 13px; color: #94a3b8;">${safeErrMsg}</div>
+          `;
+        }
+      }
+
+      // Startup
+      resizeCanvas();
+      loadGraphData();
+    })();
+  </script>
+</body>
+</html>

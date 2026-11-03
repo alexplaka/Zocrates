@@ -1,0 +1,19 @@
+{
+  "manifest_version": 2,
+  "name": "Zocrates",
+  "version": "0.90.0",
+  "description": "AI assistant plugin for Zotero.",
+  "author": "Alex Plakantonakis",
+  "icons": {
+    "48": "icon.png"
+  },
+  "applications": {
+    "zotero": {
+      "id": "zocrates@alexplaka.dev",
+      "update_url": "https://github.com/alexplaka/Zocrates/releases/latest/download/update.json",
+      "strict_min_version": "10.0.0",
+      "strict_max_version": "10.*"
+    }
+  },
+  "bootstrap": "bootstrap.js"
+}

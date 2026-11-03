@@ -1,0 +1,1162 @@
+<vbox xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+      xmlns:html="http://www.w3.org/1999/xhtml"
+      id="zocrates-preferences-vbox"
+      style="padding: 24px; max-width: 720px; width: 100%; box-sizing: border-box; overflow-y: auto;">
+  <html:style>
+    :root {
+      --zc-bg: #f8fafc;
+      --zc-card-bg: #ffffff;
+      --zc-border: #e2e8f0;
+      --zc-text-main: #0f172a;
+      --zc-text-muted: #64748b;
+      --zc-input-bg: #ffffff;
+      --zc-input-border: #cbd5e1;
+      --zc-accent: #6366f1;
+      --zc-accent-hover: #4f46e5;
+      --zc-hw-bg: #f8fafc;
+      --zc-info-bg: #f0f9ff;
+      --zc-info-border: #bae6fd;
+      --zc-info-title: #0369a1;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --zc-bg: #0f172a;
+        --zc-card-bg: #1e293b;
+        --zc-border: #334155;
+        --zc-text-main: #f8fafc;
+        --zc-text-muted: #94a3b8;
+        --zc-input-bg: #0f172a;
+        --zc-input-border: #334155;
+        --zc-accent: #818cf8;
+        --zc-accent-hover: #6366f1;
+        --zc-hw-bg: rgba(15, 23, 42, 0.6);
+        --zc-info-bg: rgba(12, 74, 110, 0.25);
+        --zc-info-border: rgba(56, 189, 248, 0.3);
+        --zc-info-title: #38bdf8;
+      }
+    }
+
+    .zc-container {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+      width: 100%;
+      color: var(--zc-text-main);
+    }
+
+    .zc-header {
+      border-bottom: 1px solid var(--zc-border);
+      padding-bottom: 16px;
+    }
+
+    .zc-header h1 {
+      font-size: 20px;
+      font-weight: 700;
+      margin: 0;
+      color: var(--zc-text-main);
+    }
+
+    .zc-card {
+      background: var(--zc-card-bg);
+      border: 1px solid var(--zc-border);
+      border-radius: 10px;
+      padding: 20px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+      color: var(--zc-text-main);
+    }
+
+    .zc-card-title {
+      font-size: 15px;
+      font-weight: 600;
+      margin-top: 0;
+      margin-bottom: 8px;
+      color: var(--zc-text-main);
+    }
+
+    .zc-card-desc {
+      font-size: 13px;
+      color: var(--zc-text-muted);
+      margin-bottom: 16px;
+      line-height: 1.5;
+    }
+
+    .zc-form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .zc-form-group-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .zc-form-group label {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--zc-text-main);
+    }
+
+    .zc-form-group-row label {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--zc-text-main);
+      cursor: pointer;
+    }
+
+    .zc-form-group select, .zc-form-group input:not([type="radio"]):not([type="checkbox"]) {
+      box-sizing: border-box;
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--zc-input-border);
+      background-color: var(--zc-input-bg);
+      color: var(--zc-text-main);
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    .zc-form-group input[type="radio"], .zc-form-group input[type="checkbox"],
+    .zc-form-group-row input[type="radio"], .zc-form-group-row input[type="checkbox"] {
+      appearance: auto;
+      -moz-appearance: auto;
+      -webkit-appearance: auto;
+      accent-color: var(--zc-accent);
+      width: 16px;
+      height: 16px;
+      margin: 0;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    button, html\:button {
+      font-family: inherit;
+      appearance: none;
+      -moz-appearance: none;
+      -webkit-appearance: none;
+      box-sizing: border-box;
+    }
+
+    .zc-chip-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 4px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: 12px;
+      border: 1px solid var(--zc-input-border);
+      background-color: var(--zc-input-bg);
+      color: var(--zc-text-muted);
+      cursor: pointer;
+      line-height: 1.2;
+      box-sizing: border-box;
+      appearance: none;
+      -moz-appearance: none;
+      -webkit-appearance: none;
+      transition: all 0.15s ease;
+    }
+
+    .zc-chip-btn:hover {
+      color: var(--zc-text-main);
+      border-color: var(--zc-accent);
+    }
+
+    .zc-chip-btn.active {
+      background-color: var(--zc-accent);
+      color: #ffffff;
+      border-color: var(--zc-accent);
+    }
+
+    .zc-form-group textarea {
+      box-sizing: border-box;
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--zc-input-border);
+      background-color: var(--zc-input-bg);
+      color: var(--zc-text-main);
+      font-family: inherit;
+      font-size: 13px;
+      line-height: 1.45;
+      resize: vertical;
+      overflow-y: auto;
+      outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    .zc-form-group textarea:focus {
+      border-color: var(--zc-accent);
+      box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+    }
+
+    #zocrates-research-profile {
+      min-height: 280px;
+      height: 280px;
+      overflow-y: auto;
+      overflow-x: hidden;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      display: block;
+    }
+
+    #zocrates-research-profile::placeholder {
+      color: var(--zc-text-muted);
+      opacity: 0.45;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      line-height: 1.4;
+    }
+
+    #zocrates-research-profile:focus::placeholder {
+      color: transparent;
+      opacity: 0;
+    }
+
+    .zc-form-group select:focus, .zc-form-group input:not([type="radio"]):not([type="checkbox"]):focus {
+      border-color: var(--zc-accent);
+      box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+    }
+
+    .zc-checkbox {
+      width: 16px;
+      height: 16px;
+      cursor: pointer;
+    }
+
+    .zc-hw-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-top: 12px;
+      margin-bottom: 16px;
+    }
+
+    .zc-hw-card {
+      border: 1px solid var(--zc-border);
+      border-radius: 8px;
+      padding: 14px;
+      background-color: var(--zc-hw-bg);
+      font-size: 12px;
+    }
+
+    .zc-text-success {
+      color: #10b981;
+    }
+
+    .zc-text-warning {
+      color: #f59e0b;
+    }
+
+    .zc-text-error {
+      color: #ef4444;
+    }
+
+    .zc-apply-btn {
+      width: 100%;
+      padding: 10px 16px;
+      cursor: pointer;
+      border-radius: 6px;
+      border: 1px solid var(--zc-accent);
+      background-color: var(--zc-accent);
+      color: #ffffff;
+      font-size: 13px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1.2;
+      box-sizing: border-box;
+      appearance: none;
+      -moz-appearance: none;
+      -webkit-appearance: none;
+      transition: background-color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+    }
+
+    .zc-apply-btn:hover:not(:disabled) {
+      background-color: var(--zc-accent-hover);
+      border-color: var(--zc-accent-hover);
+    }
+
+    .zc-secondary-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 6px 12px;
+      cursor: pointer;
+      border-radius: 6px;
+      border: 1px solid var(--zc-input-border);
+      background-color: var(--zc-input-bg);
+      color: var(--zc-text-main);
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1.2;
+      box-sizing: border-box;
+      appearance: none;
+      -moz-appearance: none;
+      -webkit-appearance: none;
+      transition: background-color 0.15s ease, border-color 0.15s ease;
+    }
+
+    .zc-secondary-btn:hover:not(:disabled) {
+      border-color: var(--zc-accent);
+      color: var(--zc-accent);
+    }
+
+    .zc-input-action-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 10px 14px;
+      cursor: pointer;
+      border-radius: 6px;
+      border: 1px solid var(--zc-input-border);
+      background-color: var(--zc-input-bg);
+      color: var(--zc-text-main);
+      font-size: 13px;
+      font-weight: 600;
+      line-height: 1.2;
+      box-sizing: border-box;
+      appearance: none;
+      -moz-appearance: none;
+      -webkit-appearance: none;
+      transition: background-color 0.15s ease, border-color 0.15s ease;
+    }
+
+    .zc-input-action-btn:hover:not(:disabled) {
+      border-color: var(--zc-accent);
+      color: var(--zc-accent);
+    }
+
+    .zc-refresh-icon-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2px 7px;
+      cursor: pointer;
+      border-radius: 4px;
+      border: 1px solid var(--zc-input-border);
+      background-color: var(--zc-input-bg);
+      color: var(--zc-text-main);
+      font-size: 13px;
+      line-height: 1.2;
+      box-sizing: border-box;
+      appearance: none;
+      -moz-appearance: none;
+      -webkit-appearance: none;
+      transition: background-color 0.15s ease, border-color 0.15s ease;
+    }
+
+    .zc-refresh-icon-btn:hover:not(:disabled) {
+      border-color: var(--zc-accent);
+      color: var(--zc-accent);
+    }
+
+    .zc-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 9999px;
+      font-size: 11px;
+      font-weight: 600;
+      background-color: var(--zc-hw-bg);
+      color: var(--zc-text-muted);
+      border: 1px solid var(--zc-border);
+    }
+
+    .zc-badge.zc-badge-online {
+      background-color: rgba(16, 185, 129, 0.15);
+      color: #10b981;
+      border-color: rgba(16, 185, 129, 0.3);
+    }
+
+    .zc-badge.zc-badge-offline {
+      background-color: rgba(239, 68, 68, 0.15);
+      color: #ef4444;
+      border-color: rgba(239, 68, 68, 0.3);
+    }
+
+    .zc-badge.zc-badge-checking {
+      background-color: rgba(245, 158, 11, 0.15);
+      color: #f59e0b;
+      border-color: rgba(245, 158, 11, 0.3);
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed !important;
+    }
+
+    .zc-status-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+
+    .zc-status-badge.hidden,
+    .hidden {
+      display: none !important;
+    }
+
+    .zc-card.zc-drawer {
+      padding: 0;
+      overflow: hidden;
+      display: grid;
+      grid-template-rows: auto 0fr;
+      transition: grid-template-rows 0.25s ease;
+    }
+
+    .zc-card.zc-drawer.open {
+      grid-template-rows: auto 1fr;
+    }
+
+    .zc-drawer-header {
+      all: unset;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+      box-sizing: border-box;
+      padding: 16px 20px;
+      cursor: pointer;
+      text-align: left;
+      background: transparent;
+      border: none;
+      transition: background-color 0.15s ease;
+    }
+
+    .zc-drawer-header:hover {
+      background-color: rgba(99, 102, 241, 0.05);
+    }
+
+    .zc-drawer-header:focus-visible {
+      outline: 2px solid var(--zc-accent);
+      outline-offset: -2px;
+    }
+
+    .zc-drawer-header-text {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding-right: 12px;
+    }
+
+    .zc-drawer-header-text .zc-card-title {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--zc-text-main);
+    }
+
+    .zc-drawer-header-text .zc-card-desc {
+      margin: 0;
+      font-size: 12.5px;
+      color: var(--zc-text-muted);
+      line-height: 1.4;
+    }
+
+    .zc-drawer-chevron {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-right: 2px solid var(--zc-text-muted);
+      border-bottom: 2px solid var(--zc-text-muted);
+      transform: rotate(-45deg);
+      transition: transform 0.2s ease, border-color 0.15s ease;
+      flex-shrink: 0;
+      margin-left: 16px;
+      margin-right: 4px;
+    }
+
+    .zc-drawer-header:hover .zc-drawer-chevron {
+      border-color: var(--zc-text-main);
+    }
+
+    .zc-drawer.open .zc-drawer-chevron {
+      transform: rotate(45deg);
+      border-color: var(--zc-accent);
+    }
+
+    .zc-card-body-wrap {
+      overflow: hidden;
+      min-height: 0;
+      visibility: hidden;
+      transition: visibility 0s linear 0.25s;
+    }
+
+    .zc-drawer.open .zc-card-body-wrap {
+      visibility: visible;
+      transition-delay: 0s;
+    }
+
+    .zc-card-body {
+      padding: 16px 20px 20px 20px;
+      border-top: 1px solid var(--zc-border);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .zc-card.zc-drawer,
+      .zc-card-body-wrap,
+      .zc-drawer-chevron {
+        transition: none !important;
+      }
+    }
+  </html:style>
+
+  <html:div class="zc-container">
+<!--    <html:div class="zc-header">-->
+<!--      <html:h1>Zocrates Settings</html:h1>-->
+<!--    </html:div>-->
+
+    <!-- Control Bar: Expand/Collapse All -->
+    <html:div style="display: flex; justify-content: flex-end; align-items: center; margin-bottom: -12px;">
+      <html:button type="button" id="expand-collapse-all-btn" style="background: none; border: none; color: var(--zc-accent); font-size: 12.5px; font-weight: 600; cursor: pointer; padding: 4px 8px; border-radius: 4px; transition: opacity 0.15s ease;">
+        Expand all
+      </html:button>
+    </html:div>
+
+    <!-- Research Profile & Directives Card (Top Section) -->
+    <html:div class="zc-card zc-drawer" id="research-profile-card">
+      <html:button type="button" class="zc-drawer-header" aria-expanded="false" aria-controls="research-profile-card-body">
+        <html:span class="zc-drawer-header-text">
+          <html:span class="zc-card-title">Research Profile &amp; Directives</html:span>
+          <html:span class="zc-card-desc">Specify your field of study, domain expertise level, formatting preferences, methodology focus, or any other instructions that you want Zocrates to adhere to.</html:span>
+        </html:span>
+        <html:span class="zc-drawer-chevron"></html:span>
+      </html:button>
+      <html:div class="zc-card-body-wrap" id="research-profile-card-body">
+        <html:div class="zc-card-body">
+          <html:div class="zc-form-group" style="margin-bottom: 0;">
+            <html:textarea id="zocrates-research-profile" rows="15" style="min-height: 280px; height: 280px; overflow-y: auto;" maxlength="1000" placeholder="I am a PhD researcher in Computational Biology specializing in spatial transcriptomics and single-cell RNA sequencing. My work focuses on cell-cell communication networks in tumor microenvironments.&#10;&#10;Guidelines &amp; Preferences:&#10;- Assume advanced background in molecular biology, gene regulatory networks, and bioinformatics pipelines; skip basic explanations of genetics, PCA, or clustering.&#10;- When discussing code, prefer Python (PyTorch, Scanpy, AnnData); ignore TensorFlow/JAX.&#10;- Emphasize empirical rigor, benchmark datasets (e.g., Visium, MERFISH), and methodological limitations over purely theoretical proofs."></html:textarea>
+            <html:div id="zocrates-research-profile-counter" class="zc-card-desc" style="margin-top: 6px; font-size: 12px; color: var(--zc-text-muted); text-align: right;">0 / 1000 characters</html:div>
+          </html:div>
+        </html:div>
+      </html:div>
+    </html:div>
+
+    <!-- Citations & References Settings Card -->
+    <html:div class="zc-card zc-drawer" id="citations-references-card">
+      <html:button type="button" class="zc-drawer-header" aria-expanded="false" aria-controls="citations-references-card-body">
+        <html:span class="zc-drawer-header-text">
+          <html:span class="zc-card-title">Chat &amp; Rendering</html:span>
+          <html:span class="zc-card-desc">Configure literature citations, bibliographic source lists, and other options for assistant responses.</html:span>
+        </html:span>
+        <html:span class="zc-drawer-chevron"></html:span>
+      </html:button>
+      <html:div class="zc-card-body-wrap" id="citations-references-card-body">
+        <html:div class="zc-card-body">
+
+          <html:div class="zc-form-group-row" style="margin-bottom: 10px;">
+            <html:input type="checkbox" id="enable-citations-checkbox" />
+            <html:label for="enable-citations-checkbox">Enable In-Text Citations</html:label>
+          </html:div>
+
+          <html:div class="zc-form-group-row" style="margin-bottom: 10px;">
+            <html:input type="checkbox" id="enable-references-checkbox" />
+            <html:label for="enable-references-checkbox">Enable References Section</html:label>
+          </html:div>
+
+          <html:div class="zc-form-group-row" style="margin-bottom: 10px;">
+            <html:input type="checkbox" id="enable-predictive-ghost-input-checkbox" checked="checked" />
+            <html:label for="enable-predictive-ghost-input-checkbox">Suggest next prompt after research turns</html:label>
+          </html:div>
+
+          <html:div class="zc-form-group-row" style="margin-bottom: 10px;">
+            <html:input type="checkbox" id="auto-render-mermaid-checkbox" checked="checked" />
+            <html:label for="auto-render-mermaid-checkbox">Auto-render Mermaid diagrams</html:label>
+          </html:div>
+
+        </html:div>
+      </html:div>
+    </html:div>
+
+    <!-- Literature Discovery Card -->
+    <html:div class="zc-card zc-drawer" id="literature-discovery-card">
+      <html:button type="button" class="zc-drawer-header" aria-expanded="false" aria-controls="literature-discovery-card-body">
+        <html:span class="zc-drawer-header-text">
+          <html:span class="zc-card-title">Literature Discovery &amp; Import</html:span>
+          <html:span class="zc-card-desc">Configure polite pool contact email for external academic APIs (OpenAlex, Crossref, Unpaywall).</html:span>
+        </html:span>
+        <html:span class="zc-drawer-chevron"></html:span>
+      </html:button>
+      <html:div class="zc-card-body-wrap" id="literature-discovery-card-body">
+        <html:div class="zc-card-body">
+          <html:div class="zc-form-group" style="margin-bottom: 0;">
+            <html:label for="scholar-polite-email-input">Polite Pool Contact Email</html:label>
+            <html:input type="email" id="scholar-polite-email-input" class="zc-input" placeholder="e.g. researcher@university.edu" />
+            <html:div class="zc-card-desc" style="margin-top: 6px; font-size: 12px; color: var(--zc-text-muted);">
+              Supplying an email routes discovery queries through the OpenAlex/Crossref polite pools for faster rates and higher reliability. If left blank, Zocrates will automatically use your Zotero sync account email when available.
+            </html:div>
+          </html:div>
+          <html:div class="zc-form-group" style="margin-top: 14px; margin-bottom: 0;">
+            <html:label for="openalex-api-key-input">OpenAlex API Key (Optional)</html:label>
+            <html:div style="display: flex; gap: 8px; align-items: center;">
+              <html:input type="password" id="openalex-api-key-input" class="zc-input" placeholder="OpenAlex API key..." style="flex: 1;" />
+              <html:button type="button" id="toggle-openalex-key-btn" class="zc-input-action-btn">Show</html:button>
+              <html:button type="button" id="test-openalex-key-btn" class="zc-input-action-btn">⚡ Test</html:button>
+            </html:div>
+            <html:div id="openalex-key-status-badge" style="display: none; font-size: 12px; margin-top: 4px;"></html:div>
+            <html:div class="zc-card-desc" style="margin-top: 6px; font-size: 12px; color: var(--zc-text-muted); line-height: 1.4;">
+              Optional. A free OpenAlex API key provides a 10× increase to your daily request quota and allows OpenAlex to track usage. Create or copy a free key at <html:a href="https://openalex.org/settings/api" target="_blank" style="color: var(--zc-accent);">openalex.org/settings/api</html:a>. Leave blank to use the default keyless budget.
+            </html:div>
+          </html:div>
+        </html:div>
+      </html:div>
+    </html:div>
+
+    <!-- OpenRouter API Key Panel (Top Section) -->
+    <html:div class="zc-card zc-drawer" id="openrouter-key-card">
+      <html:button type="button" class="zc-drawer-header" aria-expanded="false" aria-controls="openrouter-key-card-body">
+        <html:span class="zc-drawer-header-text">
+          <html:span class="zc-card-title">OpenRouter API Key</html:span>
+          <html:span class="zc-card-desc">Shared API key used for remote LLMs, embedding, reranker, and decision models on OpenRouter.</html:span>
+        </html:span>
+        <html:span class="zc-drawer-chevron"></html:span>
+      </html:button>
+      <html:div class="zc-card-body-wrap" id="openrouter-key-card-body">
+        <html:div class="zc-card-body">
+
+          <html:div class="zc-form-group" id="openrouter-key-group" style="margin-bottom: 0;">
+            <html:div class="zc-card-desc" style="margin-top: 0; margin-bottom: 8px; font-size: 12px; color: var(--zc-text-muted); line-height: 1.4;">
+              Stored securely in Zotero. Required for all OpenRouter models, including :free ones. Create an account at <html:a href="https://openrouter.ai/" target="_blank" style="color: var(--zc-accent);">https://openrouter.ai/</html:a> and create an API key.
+            </html:div>
+            <html:div style="display: flex; gap: 8px; align-items: center;">
+              <html:input type="password" id="openrouter-api-key-input" placeholder="sk-or-v1-..." aria-label="OpenRouter API Key" style="flex: 1;" />
+              <html:button type="button" id="toggle-openrouter-key-btn" class="zc-input-action-btn">Show</html:button>
+              <html:button type="button" id="test-openrouter-key-btn" class="zc-input-action-btn">⚡ Test</html:button>
+            </html:div>
+            <html:div id="openrouter-key-status-badge" style="display: none; font-size: 12px; margin-top: 4px;"></html:div>
+            <html:div id="openrouter-key-missing-notice" style="display: none; font-size: 12px; margin-top: 4px;" class="zc-text-warning">
+              &#x26A0;&#xFE0F; OPENROUTER_API_KEY missing. Remote LLMs and other cloud models disabled until key is provided or local provider selected.
+            </html:div>
+          </html:div>
+
+        </html:div>
+      </html:div>
+    </html:div>
+
+    <!-- Citation Verification Drawer Card -->
+    <html:div class="zc-card zc-drawer" id="citation-verification-card">
+      <html:button type="button" class="zc-drawer-header" aria-expanded="false" aria-controls="citation-verification-card-body">
+        <html:span class="zc-drawer-header-text">
+          <html:span class="zc-card-title">Citation Verification</html:span>
+          <html:span class="zc-card-desc">Probabilistic verification of synthesized claims against supporting source content using fast decision models.</html:span>
+        </html:span>
+        <html:span class="zc-drawer-chevron"></html:span>
+      </html:button>
+      <html:div class="zc-card-body-wrap" id="citation-verification-card-body">
+        <html:div class="zc-card-body">
+
+          <!-- Enable Toggle -->
+          <html:div class="zc-form-group-row" style="margin-bottom: 12px;">
+            <html:input type="checkbox" id="citation-verification-enabled-toggle" />
+            <html:label for="citation-verification-enabled-toggle">Enable Citation Verification</html:label>
+          </html:div>
+
+          <!-- Provider Select -->
+          <html:div class="zc-form-group" id="verification-provider-group">
+            <html:label for="verification-provider-select">Decision Model Provider</html:label>
+            <html:select id="verification-provider-select">
+              <html:option value="openrouter">OpenRouter (Remote Decision Models)</html:option>
+              <html:option value="local_laya">Laya Local Server (Offline / Private uv Tool)</html:option>
+            </html:select>
+          </html:div>
+
+          <!-- OpenRouter Model Group -->
+          <html:div class="zc-form-group" id="verification-openrouter-model-group">
+            <html:div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <html:label for="verification-model-select">Active Remote Model</html:label>
+              <html:button type="button" id="refresh-verification-models-btn" class="zc-refresh-icon-btn" title="Refresh decision model catalog from OpenRouter">&#x21BB;</html:button>
+            </html:div>
+            <html:select id="verification-model-select">
+              <html:option value="typesafe/jev-1.14">TypeSafe: Jev 1.14 (Fast, Calibrated)</html:option>
+              <html:option value="typesafe/jev-1.13">TypeSafe: Jev 1.13 (Fast, Calibrated)</html:option>
+              <html:option value="upstage/solar-decide">Upstage: Solar Decide (524k Context)</html:option>
+              <html:option value="togethercomputer/tev1-4b-experimental">Together: Tev1 4B (32k Context)</html:option>
+              <html:option value="inception/mercury-decide">Inception: Mercury Decide (32k Context)</html:option>
+              <html:option value="liquid/d1.1">Liquid: D1.1 (32k Context)</html:option>
+              <html:option value="perplexity/pplx-decider-v1.2">Perplexity: PPLX Decider v1.2 (32k Context)</html:option>
+            </html:select>
+            <html:div id="verification-model-metadata-box" style="display: none; margin-top: 6px;"></html:div>
+            <html:div class="zc-help-text" id="verification-privacy-notice" style="margin-top: 4px; font-size: 11.5px; opacity: 0.8;">
+              Remote verification sends claim and source chunk text to OpenRouter.
+            </html:div>
+          </html:div>
+
+          <!-- Local Laya Group -->
+          <html:div class="zc-form-group" id="verification-local-url-group" style="display: none;">
+            <html:div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <html:label>Laya Local Server</html:label>
+              <html:span id="laya-status-pill" class="zc-badge">Checking...</html:span>
+            </html:div>
+
+            <!-- Bootstrapping Actions Row -->
+            <html:div style="display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap;">
+              <html:button type="button" id="install-laya-btn" class="zc-secondary-btn" style="display: none;">&#x26A1; Install Laya (uv tool)</html:button>
+              <html:button type="button" id="start-laya-btn" class="zc-secondary-btn" style="display: none;">&#x25B6; Start Local Server</html:button>
+              <html:button type="button" id="stop-laya-btn" class="zc-secondary-btn" style="display: none;">&#x23F9; Stop Server</html:button>
+            </html:div>
+
+            <html:div class="zc-form-group-row" style="margin-top: 10px; margin-bottom: 0;">
+              <html:input type="checkbox" id="auto-start-laya-toggle" checked="checked" />
+              <html:label for="auto-start-laya-toggle" style="font-size: 12px;">Automatically start and manage Laya daemon with Zocrates</html:label>
+            </html:div>
+
+            <html:div class="zc-help-text" style="margin-top: 6px; font-size: 11.5px; opacity: 0.8;">
+              Runs 100% offline via uv tool: <html:code>LAYA_HOST=127.0.0.1 LAYA_PORT=8005 LAYA_DEVICE=cpu LAYA_MODELS=english laya-serve</html:code>
+            </html:div>
+          </html:div>
+
+          <!-- Threshold Input with Stepper -->
+          <html:div class="zc-form-group">
+            <html:label for="verification-threshold-input">Support Probability Threshold (&#964;)</html:label>
+            <html:div style="display: flex; align-items: center; gap: 10px; margin-top: 4px;">
+              <html:input type="number" id="verification-threshold-input" min="0.00" max="0.95" step="0.05" value="0.60" style="max-width: 110px; padding: 6px 10px; font-weight: 600; font-size: 13px; text-align: center;" />
+              <html:span style="font-size: 12px; color: var(--zc-text-muted);">(Range: 0.00 &#8211; 0.95, default: 0.60)</html:span>
+            </html:div>
+            <html:div class="zc-help-text" style="margin-top: 6px; font-size: 11.5px; opacity: 0.8;">
+              Citations with calibrated support probability p &lt; &#964; are removed from in-text citations and moved to Other Considered Sources.
+            </html:div>
+          </html:div>
+
+          <!-- Test Connection Button -->
+          <html:div style="display: flex; gap: 10px; align-items: center; margin-top: 14px;">
+            <html:button type="button" id="verification-test-btn" class="zc-secondary-btn">&#x26A1; Test Connection</html:button>
+            <html:span id="verification-test-status" style="display: none; font-size: 12px;"></html:span>
+          </html:div>
+
+          <!-- Unsaved Changes Warning -->
+          <html:div id="verification-unsaved-warning" style="display: none; margin-top: 8px; font-size: 11px;" class="zc-text-warning">
+            ⚠️ You have unsaved changes. Click 'Apply Verification Settings' to activate.
+          </html:div>
+
+          <!-- Apply Action Row (Primary, at the bottom) -->
+          <html:div style="margin-top: 14px;">
+            <html:button type="button" id="verification-apply-btn" class="zc-apply-btn" disabled="disabled">Apply Verification Settings</html:button>
+          </html:div>
+
+        </html:div>
+      </html:div>
+    </html:div>
+
+    <!-- LLM Provider Settings Card (Top Priority) -->
+    <html:div class="zc-card zc-drawer" id="llm-provider-card">
+      <html:button type="button" class="zc-drawer-header" aria-expanded="false" aria-controls="llm-provider-card-body">
+        <html:span class="zc-drawer-header-text">
+          <html:span class="zc-card-title">LLM Provider and Model</html:span>
+          <html:span class="zc-card-desc">Configure remote or local LLMs used by Zocrates.</html:span>
+        </html:span>
+        <html:span class="zc-drawer-chevron"></html:span>
+      </html:button>
+      <html:div class="zc-card-body-wrap" id="llm-provider-card-body">
+        <html:div class="zc-card-body">
+
+      <!-- LLM Provider Select -->
+      <html:div class="zc-form-group">
+        <html:label for="llm-provider-select">LLM Provider</html:label>
+        <html:select id="llm-provider-select">
+          <html:option value="openrouter_llm">OpenRouter (Remote Models)</html:option>
+          <html:option value="ollama">Ollama (Local Server)</html:option>
+          <html:option value="vllm">vLLM (Local Server)</html:option>
+          <html:option value="openai_compatible">Custom OpenAI API</html:option>
+        </html:select>
+      </html:div>
+
+      <!-- Base URL Input for Local Providers -->
+      <html:div class="zc-form-group" id="llm-base-url-group" style="display: none;">
+        <html:label for="llm-base-url-input">Server Base URL</html:label>
+        <html:input type="text" id="llm-base-url-input" placeholder="http://localhost:11434" />
+      </html:div>
+
+      <!-- LLM Model Selection -->
+      <html:div class="zc-form-group" id="llm-model-group">
+        <html:label for="llm-model-select">LLM</html:label>
+        <!-- Quick Filter Chips -->
+        <html:div id="llm-filter-chips" style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;">
+          <html:button type="button" class="zc-chip-btn zc-chip-active" data-filter="all">All</html:button>
+          <html:button type="button" class="zc-chip-btn" data-filter="free">🟢 Free</html:button>
+          <html:button type="button" class="zc-chip-btn" data-filter="anthropic">Anthropic</html:button>
+          <html:button type="button" class="zc-chip-btn" data-filter="google">Google</html:button>
+          <html:button type="button" class="zc-chip-btn" data-filter="openai">OpenAI</html:button>
+          <html:button type="button" class="zc-chip-btn" data-filter="deepseek">DeepSeek</html:button>
+          <html:button type="button" class="zc-chip-btn" data-filter="meta">Meta</html:button>
+          <html:button type="button" class="zc-chip-btn" data-filter="mistral ai">Mistral AI</html:button>
+          <html:button type="button" class="zc-chip-btn" data-filter="qwen">Qwen</html:button>
+          <html:button type="button" class="zc-chip-btn" data-filter="nvidia">NVIDIA</html:button>
+          <html:button type="button" class="zc-chip-btn" data-filter="moonshotai">MoonshotAI</html:button>
+          <html:button type="button" class="zc-chip-btn" data-filter="xai">xAI</html:button>
+          <html:button type="button" class="zc-chip-btn" data-filter="z.ai">Z.ai</html:button>
+        </html:div>
+
+        <html:div id="llm-model-search-container" style="position: relative; width: 100%; box-sizing: border-box; margin-bottom: 6px;">
+          <html:input type="text" id="llm-model-search-input" placeholder="🔍 Search (e.g., free, claude, etc.)" style="width: 100%; box-sizing: border-box; padding-right: 80px;" />
+          <html:span id="llm-model-count-badge" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 11px; font-weight: 600; color: var(--zc-text-muted); pointer-events: none;"></html:span>
+        </html:div>
+
+        <html:select id="llm-model-select" style="width: 100%; box-sizing: border-box;">
+          <html:option value="google/gemini-3.8-flash">Loading OpenRouter Models...</html:option>
+        </html:select>
+        <html:div id="llm-model-metadata-box" style="display: none;"></html:div>
+        <html:input type="text" id="llm-model-custom-input" placeholder="Enter the model name" style="display: none; width: 100%; box-sizing: border-box;" />
+      </html:div>
+
+      <!-- Secondary Actions Row (Refresh & Test Connection above Apply) -->
+      <html:div style="display: flex; gap: 10px; align-items: center; margin-top: 14px;">
+        <html:button type="button" id="llm-refresh-btn" class="zc-secondary-btn">🔄 Refresh Models</html:button>
+        <html:button type="button" id="llm-test-btn" class="zc-secondary-btn">⚡ Test Connection</html:button>
+      </html:div>
+
+      <!-- Test Status Message (Underneath secondary buttons, on its own line) -->
+      <html:div id="llm-test-status-badge" style="display: none; margin-top: 8px; font-size: 12px; font-weight: 600; word-break: break-word; line-height: 1.4;"></html:div>
+
+      <!-- Unsaved Changes Warning -->
+      <html:div id="llm-unsaved-warning" style="display: none; margin-top: 8px; font-size: 11px;" class="zc-text-warning">
+        ⚠️ You have unsaved changes. Click 'Apply LLM Settings' to activate.
+      </html:div>
+
+      <!-- Apply Action Row (Primary, at the bottom) -->
+      <html:div style="margin-top: 14px;">
+        <html:button type="button" id="llm-apply-btn" class="zc-apply-btn" disabled="disabled">Apply LLM Settings</html:button>
+      </html:div>
+
+      <!-- vLLM Helper Guidance Box -->
+      <html:div id="vllm-guidance-box" style="display: none; margin-top: 16px; padding: 12px; border-radius: 8px; background: var(--zc-info-bg); border: 1px solid var(--zc-info-border); font-size: 12px;">
+        <html:div style="font-weight: 700; color: var(--zc-info-title); margin-bottom: 4px;">💡 vLLM Tool Calling Configuration</html:div>
+        <html:div style="color: var(--zc-text-muted); margin-bottom: 6px;">For function tool calls to work correctly with local vLLM, launch your vLLM server with auto tool choice enabled:</html:div>
+        <html:code style="display: block; padding: 6px 10px; background: var(--zc-input-bg); border: 1px solid var(--zc-input-border); border-radius: 4px; font-family: monospace; font-size: 11px; word-break: break-all;">
+          vllm serve &lt;model-name&gt; --port 8000 --enable-auto-tool-choice --tool-call-parser hermes
+        </html:code>
+      </html:div>
+
+        </html:div>
+      </html:div>
+    </html:div>
+
+    <!-- Document Converter Selection Card -->
+    <html:div class="zc-card zc-drawer" id="document-converter-card">
+      <html:button type="button" class="zc-drawer-header" aria-expanded="false" aria-controls="document-converter-card-body">
+        <html:span class="zc-drawer-header-text">
+          <html:span class="zc-card-title">Document Converter</html:span>
+          <html:span class="zc-card-desc">Select the document conversion engine used for processing attachments.</html:span>
+        </html:span>
+        <html:span class="zc-drawer-chevron"></html:span>
+      </html:button>
+      <html:div class="zc-card-body-wrap" id="document-converter-card-body">
+        <html:div class="zc-card-body">
+
+      <!-- Converter Engine Selector -->
+      <html:div class="zc-form-group">
+        <html:select id="document-converter-select">
+          <html:option value="markitdown">Markitdown (Local)</html:option>
+          <html:option value="docling_local">Docling (Local)</html:option>
+          <html:option value="datalab">Datalab (Cloud)</html:option>
+        </html:select>
+      </html:div>
+
+      <!-- Datalab API Key Panel -->
+      <html:div class="zc-form-group" id="datalab-key-group" style="display: none; margin-top: 8px;">
+        <html:label for="datalab-api-key-input">Datalab API Key</html:label>
+        <html:div style="display: flex; gap: 8px; align-items: center;">
+          <html:input type="password" id="datalab-api-key-input" placeholder="datalab-api-key-..." style="flex: 1;" />
+          <html:button type="button" id="toggle-datalab-key-btn" class="zc-input-action-btn">Show</html:button>
+          <html:button type="button" id="test-datalab-key-btn" class="zc-input-action-btn">⚡ Test</html:button>
+        </html:div>
+        <html:div id="datalab-key-status-badge" style="display: none; font-size: 12px; margin-top: 4px;"></html:div>
+        <html:div id="datalab-pricing-info" style="font-size: 11px; color: var(--zc-text-muted); margin-top: 6px; line-height: 1.4;">
+          Pricing: Balanced mode $0.004/page • Accurate mode $0.010/page.<br />
+          Datalab's Free plan includes a <html:b>$10/month credit</html:b> (~2,500 pages in balanced mode).<br />
+          Register for a free account at <html:a href="https://www.datalab.to/" target="_blank" style="color: var(--zc-accent);">https://www.datalab.to/</html:a>
+        </html:div>
+      </html:div>
+
+      <!-- Datalab Merge Cross Page Setting (Visible only when Datalab is selected) -->
+      <html:div class="zc-form-group" id="datalab-merge-cross-page-container" style="display: none; margin-top: 12px; padding: 12px; border-radius: 8px; background-color: var(--zc-hw-bg); border: 1px solid var(--zc-border);">
+        <html:label style="display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; color: var(--zc-text-main); cursor: pointer; margin-bottom: 4px;">
+          <html:input type="checkbox" id="datalab-merge-cross-page-checkbox" />
+          <html:span>Merge tables &amp; paragraphs across page breaks</html:span>
+        </html:label>
+        <html:div style="font-size: 11px; color: var(--zc-text-muted); line-height: 1.4;">
+          Stitches multi-page tables and split paragraphs into cohesive blocks.<html:br />
+          ⚠️ <html:b>Incurs a variable Datalab compute surcharge</html:b> per document (typically a few cents).
+        </html:div>
+      </html:div>
+
+      <!-- Datalab Non-PDF Fallback Setting (Visible only when Datalab is selected) -->
+      <html:div class="zc-form-group" id="datalab-fallback-container" style="display: none; margin-top: 12px; padding: 12px; border-radius: 8px; background-color: var(--zc-hw-bg); border: 1px solid var(--zc-border);">
+        <html:label style="font-weight: 600; font-size: 13px; color: var(--zc-text-main); margin-bottom: 4px; display: block;">Non-PDF Fallback Converter</html:label>
+        <html:div style="font-size: 12px; color: var(--zc-text-muted); margin-bottom: 8px;">
+          Datalab only accepts PDF attachments. Choose an offline engine to process HTML web snapshots and other non-PDF files:
+        </html:div>
+        <html:div style="display: flex; flex-direction: column; gap: 8px;">
+          <html:label style="display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: normal; cursor: pointer;">
+            <html:input type="radio" name="datalab-non-pdf-fallback" id="datalab-fallback-markitdown" value="markitdown" checked="checked" />
+            <html:span><html:b>MarkItDown (Local)</html:b> — Fast baseline, minimal CPU/memory</html:span>
+          </html:label>
+          <html:label style="display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: normal; cursor: pointer;">
+            <html:input type="radio" name="datalab-non-pdf-fallback" id="datalab-fallback-docling" value="docling_local" />
+            <html:span><html:b>Docling (Local)</html:b> — Better quality layout analysis, tables, and images</html:span>
+          </html:label>
+        </html:div>
+      </html:div>
+
+      <!-- Multimodal Figure Enrichment (VLM Captioning) Section -->
+      <html:div class="zc-form-group" id="vlm-enrichment-card-section" style="margin-top: 16px; padding: 14px; border-radius: 8px; background-color: var(--zc-hw-bg); border: 1px solid var(--zc-border);">
+        <html:label style="display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; color: var(--zc-text-main); cursor: pointer; margin-bottom: 4px;">
+          <html:input type="checkbox" id="enable-vlm-captioning-checkbox" checked="checked" />
+          <html:span>Automatically caption figures &amp; diagrams during conversion</html:span>
+        </html:label>
+        <html:div style="font-size: 11px; color: var(--zc-text-muted); margin-bottom: 12px; line-height: 1.4;">
+          Uses a Vision-Language Model (VLM) to generate structured visual descriptions, making plots, flowcharts, and diagrams searchable via hybrid RAG.
+        </html:div>
+
+        <html:div id="vlm-captioning-settings-container" style="display: flex; flex-direction: column; gap: 10px;">
+          <!-- Provider Radio Selection -->
+          <html:div style="display: flex; gap: 16px; align-items: center; font-size: 12px;">
+            <html:label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+              <html:input type="radio" name="vlm-captioning-provider" id="vlm-provider-openrouter" value="openrouter" checked="checked" />
+              <html:span><html:b>OpenRouter</html:b> (Cloud)</html:span>
+            </html:label>
+            <html:label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+              <html:input type="radio" name="vlm-captioning-provider" id="vlm-provider-ollama" value="ollama" />
+              <html:span><html:b>Ollama</html:b> (Local)</html:span>
+            </html:label>
+          </html:div>
+
+          <!-- Cloud VLM Model Dropdowns -->
+          <html:div class="zc-form-group" id="vlm-cloud-model-group" style="margin: 0; display: flex; flex-direction: column; gap: 10px;">
+            <!-- Primary VLM Select -->
+            <html:div class="zc-form-group" style="margin: 0;">
+              <html:label for="vlm-primary-model-select">Primary VLM Model (Cloud)</html:label>
+              <html:select id="vlm-primary-model-select" style="width: 100%; box-sizing: border-box;">
+                <html:option value="openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free">nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free (Free)</html:option>
+              </html:select>
+              <html:div id="vlm-primary-model-metadata-box" style="display: none;"></html:div>
+            </html:div>
+
+            <!-- Fallback VLM Select -->
+            <html:div class="zc-form-group" style="margin: 0;">
+              <html:label for="vlm-backup-model-select">Fallback VLM Model (Cloud)</html:label>
+              <html:select id="vlm-backup-model-select" style="width: 100%; box-sizing: border-box;">
+                <html:option value="openrouter/qwen/qwen3.7-flash">qwen/qwen3.7-flash</html:option>
+              </html:select>
+              <html:div id="vlm-backup-model-metadata-box" style="display: none;"></html:div>
+              <html:div style="font-size: 11px; color: var(--zc-text-muted); margin-top: 4px;">
+                Automatically used if primary model encounters a rate limit or server error.
+              </html:div>
+            </html:div>
+          </html:div>
+
+          <!-- Local Model Input -->
+          <html:div class="zc-form-group" id="vlm-local-model-group" style="display: none; margin: 0;">
+            <html:label for="vlm-local-model-input">Local Ollama Vision Model</html:label>
+            <html:input type="text" id="vlm-local-model-input" placeholder="e.g. llava:latest, minicpm-v:latest" style="width: 100%; box-sizing: border-box;" />
+          </html:div>
+
+          <!-- Max Images per Doc Input -->
+          <html:div class="zc-form-group-row" id="vlm-max-images-group" style="margin: 0; justify-content: space-between;">
+            <html:label for="vlm-max-images-input" style="font-size: 13px; margin: 0;">Max Images / Document</html:label>
+            <html:input type="number" id="vlm-max-images-input" min="1" max="200" value="100" style="width: 70px; text-align: center;" />
+          </html:div>
+        </html:div>
+      </html:div>
+
+      <!-- Hardware Diagnostics & Docling Profile Message -->
+      <html:div id="converter-info-message" style="display: none;"></html:div>
+
+      <!-- Unsaved Changes Warning -->
+      <html:div id="document-converter-warning" style="display: none; margin-top: 8px; font-size: 11px;" class="zc-text-warning">
+        ⚠️ You have unsaved changes. Click 'Apply Converter Settings' to activate.
+      </html:div>
+
+      <!-- Status Message Container -->
+      <html:div id="document-converter-status-badge" style="display: none; margin-top: 8px; font-size: 12px; font-weight: 600;" class="zc-text-success"></html:div>
+
+      <!-- Apply Action Row -->
+      <html:div style="margin-top: 14px;">
+        <html:button type="button" id="document-converter-apply-btn" class="zc-apply-btn" disabled="disabled">Apply Converter Settings</html:button>
+      </html:div>
+
+        </html:div>
+      </html:div>
+    </html:div>
+
+    <!-- Embeddings Mode &amp; Model Card -->
+    <html:div class="zc-card zc-drawer" id="embeddings-card">
+      <html:button type="button" class="zc-drawer-header" aria-expanded="false" aria-controls="embeddings-card-body">
+        <html:span class="zc-drawer-header-text">
+          <html:span class="zc-card-title">Embeddings Provider &amp; Model</html:span>
+          <html:span class="zc-card-desc">Configure embeddings mode (local vs cloud provider) and embedding model.</html:span>
+        </html:span>
+        <html:span class="zc-drawer-chevron"></html:span>
+      </html:button>
+      <html:div class="zc-card-body-wrap" id="embeddings-card-body">
+        <html:div class="zc-card-body">
+
+      <!-- Embedding Mode Selection Selector -->
+      <html:div class="zc-form-group">
+        <html:label for="embedding-mode-select">Embeddings Mode</html:label>
+        <html:select id="embedding-mode-select">
+          <html:option value="local">Local</html:option>
+          <html:option value="cloud">Cloud (OpenRouter)</html:option>
+        </html:select>
+      </html:div>
+
+      <!-- Key Missing Warning Callout for Cloud Embeddings -->
+      <html:div id="embedding-key-missing-notice" style="display: none; font-size: 12px; margin-bottom: 16px;" class="zc-text-warning">
+        ⚠️ OPENROUTER_API_KEY missing. Cloud embeddings disabled until key is provided or Local mode selected.
+      </html:div>
+
+      <!-- Permanent Embeddings Model Selector -->
+      <html:div class="zc-form-group" id="embedding-model-group">
+        <html:label for="embedding-model-select">Embeddings Model</html:label>
+        <html:select id="embedding-model-select" style="width: 100%; box-sizing: border-box;">
+          <html:option value="jinaai/jina-embeddings-v5-text-nano">jinaai/jina-embeddings-v5-text-nano (768d)</html:option>
+        </html:select>
+        <html:div id="embedding-model-metadata-box" style="display: none; margin-top: 8px;"></html:div>
+      </html:div>
+
+      <!-- Secondary Actions Row (Refresh & Test Connection above Apply) -->
+      <html:div style="display: flex; gap: 10px; align-items: center; margin-top: 14px;">
+        <html:button type="button" id="embedding-refresh-btn" class="zc-secondary-btn">🔄 Refresh Embedding Models</html:button>
+        <html:button type="button" id="embedding-test-btn" class="zc-secondary-btn">⚡ Test Connection</html:button>
+      </html:div>
+
+      <!-- Test Status Message -->
+      <html:div id="embedding-test-status-badge" style="display: none; margin-top: 8px; font-size: 12px; font-weight: 600; word-break: break-word; line-height: 1.4;"></html:div>
+
+      <!-- Unsaved Changes Warning -->
+      <html:div id="embedding-unsaved-warning" style="display: none; margin-top: 8px; font-size: 11px;" class="zc-text-warning">
+        ⚠️ You have unsaved changes. Click 'Apply Embeddings Settings' to activate.
+      </html:div>
+
+      <!-- Apply Action Row -->
+      <html:div style="margin-top: 14px;">
+        <html:button type="button" id="embedding-apply-btn" class="zc-apply-btn" disabled="disabled">Apply Embeddings Settings</html:button>
+      </html:div>
+
+        </html:div>
+      </html:div>
+    </html:div>
+
+    <!-- Local MCP Server Settings Card -->
+    <html:div class="zc-card zc-drawer" id="mcp-server-card">
+      <html:button type="button" class="zc-drawer-header" aria-expanded="false" aria-controls="mcp-server-card-body">
+        <html:span class="zc-drawer-header-text">
+          <html:span class="zc-card-title">Model Context Protocol (MCP) Server</html:span>
+          <html:span class="zc-card-desc">Local MCP server integration for external AI clients.</html:span>
+        </html:span>
+        <html:span class="zc-drawer-chevron"></html:span>
+      </html:button>
+      <html:div class="zc-card-body-wrap" id="mcp-server-card-body">
+        <html:div class="zc-card-body">
+
+          <html:div class="zc-form-group-row" style="margin-bottom: 0;">
+            <html:input type="checkbox" id="enable-mcp-server-checkbox" checked="checked" />
+            <html:label for="enable-mcp-server-checkbox">Enable Local MCP Server</html:label>
+          </html:div>
+          <html:div class="zc-card-desc" style="margin-top: 6px; font-size: 12px; color: var(--zc-text-muted);">
+            Allows external AI tools (Claude, Antigravity, Cursor, Pi, etc.) to query your library via Model Context Protocol.
+          </html:div>
+
+          <!-- Client Configuration Panel -->
+          <html:div style="margin-top: 14px; padding: 14px; border-radius: 8px; background: var(--zc-hw-bg); border: 1px solid var(--zc-border);">
+            <html:div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <html:span style="font-size: 13px; font-weight: 600; color: var(--zc-text-main);">Client Configuration</html:span>
+              <html:button type="button" id="copy-mcp-config-btn" class="zc-secondary-btn" style="display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; font-size: 11px;">📋 Copy Config</html:button>
+            </html:div>
+            <html:div style="font-size: 12px; color: var(--zc-text-muted); margin-bottom: 10px; line-height: 1.4;">
+              Add to the <html:code style="font-family: monospace; font-size: 11px; padding: 1px 4px; border-radius: 3px; background: var(--zc-input-bg); border: 1px solid var(--zc-input-border); color: var(--zc-text-main);">mcpServers</html:code> section of your AI client configuration:
+            </html:div>
+            <!-- Static placeholder only: updateMcpConfigSnippet() in preferences.js
+                 regenerates this snippet with the live URL from
+                 Zotero.Zocrates.getBackendUrl() whenever preferences load. -->
+            <html:pre id="mcp-config-snippet" style="margin: 0; padding: 10px 12px; background: var(--zc-input-bg); border: 1px solid var(--zc-input-border); border-radius: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; font-size: 11.5px; line-height: 1.45; color: var(--zc-text-main); overflow-x: auto; white-space: pre;">"zocrates": {
+  "command": "uv",
+  "args": [
+    "--directory",
+    "/path/to/zocrates",
+    "run",
+    "python",
+    "-m",
+    "zocrates.mcp"
+  ],
+  "env": {
+    "PYTHONUNBUFFERED": "1",
+    "ZOCRATES_BACKEND_URL": "http://127.0.0.1:8765"
+  }
+}</html:pre>
+          </html:div>
+
+        </html:div>
+      </html:div>
+    </html:div>
+
+    <!-- Chat Sessions & Storage Card -->
+    <html:div class="zc-card zc-drawer" id="session-maintenance-card">
+      <html:button type="button" class="zc-drawer-header" aria-expanded="false" aria-controls="session-maintenance-card-body">
+        <html:span class="zc-drawer-header-text">
+          <html:span class="zc-card-title">Chat Sessions &amp; Storage</html:span>
+          <html:span class="zc-card-desc">Configure conversation retention policies, automatic empty chat pruning, and database space reclamation.</html:span>
+        </html:span>
+        <html:span class="zc-drawer-chevron"></html:span>
+      </html:button>
+      <html:div class="zc-card-body-wrap" id="session-maintenance-card-body">
+        <html:div class="zc-card-body">
+
+          <!-- Retention Days -->
+          <html:div class="zc-form-group" style="margin-bottom: 16px;">
+            <html:label for="session-retention-days-input" class="zc-label">Session Retention Limit (Days)</html:label>
+            <html:div style="display: flex; align-items: center; gap: 10px;">
+              <html:input type="number" id="session-retention-days-input" class="zc-input" min="0" max="3650" step="1" style="width: 120px;" />
+              <html:span class="zc-text-muted" style="font-size: 12.5px;">days</html:span>
+            </html:div>
+            <html:div class="zc-help-text">Sessions older than this are automatically pruned on startup. Set to 0 to retain conversations indefinitely (Default: 180).</html:div>
+          </html:div>
+
+          <!-- Max Saved Sessions -->
+          <html:div class="zc-form-group" style="margin-bottom: 16px;">
+            <html:label for="max-saved-sessions-input" class="zc-label">Maximum Saved Sessions</html:label>
+            <html:div style="display: flex; align-items: center; gap: 10px;">
+              <html:input type="number" id="max-saved-sessions-input" class="zc-input" min="0" max="5000" step="1" style="width: 120px;" />
+              <html:span class="zc-text-muted" style="font-size: 12.5px;">sessions</html:span>
+            </html:div>
+            <html:div class="zc-help-text">Caps the total number of chat sessions. When exceeded, the oldest conversations are pruned. Set to 0 for unlimited (Default: 100).</html:div>
+          </html:div>
+
+          <!-- Prune Empty Chats Checkbox -->
+          <html:div class="zc-form-group-row" style="margin-bottom: 12px;">
+            <html:input type="checkbox" id="prune-empty-sessions-checkbox" checked="checked" />
+            <html:label for="prune-empty-sessions-checkbox">Automatically prune abandoned empty chats (0 messages, older than 24 hours)</html:label>
+          </html:div>
+
+          <!-- Auto-Vacuum Checkbox -->
+          <html:div class="zc-form-group-row" style="margin-bottom: 16px;">
+            <html:input type="checkbox" id="session-auto-vacuum-checkbox" checked="checked" />
+            <html:label for="session-auto-vacuum-checkbox">Reclaim database space on startup when deletions leave free space (VACUUM)</html:label>
+          </html:div>
+
+          <!-- Manual Action & Status Row -->
+          <html:div style="display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--zc-border); padding-top: 14px; margin-top: 8px;">
+            <html:div style="font-size: 12.5px; color: var(--zc-text-muted);" id="session-db-storage-status">
+              Database: <html:strong id="session-db-file-size" style="color: var(--zc-text-main);">Checking...</html:strong> (<html:span id="session-db-total-count">0</html:span> sessions)
+            </html:div>
+            <html:div style="display: flex; align-items: center; gap: 8px;">
+              <html:span id="session-maintenance-status-badge" class="zc-status-badge hidden" style="font-size: 11px;"></html:span>
+              <html:button type="button" id="run-session-maintenance-btn" class="zc-btn zc-btn-secondary zc-secondary-btn" style="font-size: 12px; padding: 4px 10px;">
+                Clean Up Now
+              </html:button>
+            </html:div>
+          </html:div>
+
+        </html:div>
+      </html:div>
+    </html:div>
+  </html:div>
+</vbox>
