@@ -41,10 +41,12 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Build documentation
+      - name: Build documentation & stage website
         env:
           DISABLE_MKDOCS_2_WARNING: "true"
-        run: uv run --only-group docs mkdocs build --strict
+        run: |
+          uv run --only-group docs mkdocs build --strict -d site/docs
+          cp -r website/* site/
 
       - name: Setup Pages
         if: github.event_name != 'pull_request'

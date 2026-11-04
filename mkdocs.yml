@@ -1,6 +1,6 @@
 site_name: Zocrates
 site_description: An LLM-powered assistant copilot for Zotero.
-site_url: https://alexplaka.github.io/Zocrates/
+site_url: https://alexplaka.github.io/Zocrates/docs/
 repo_url: https://github.com/alexplaka/Zocrates
 exclude_docs: "gen_ref_pages.py"
 
