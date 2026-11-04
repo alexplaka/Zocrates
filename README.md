@@ -240,6 +240,19 @@ Zocrates operates as an extension inside Zotero and inherits the platform baseli
 
 ### Setup & Local Deployment
 
+You can test or deploy Zocrates using either pre-built CI artifacts or a local developer build:
+
+#### Option A: Download Pre-Built CI Add-on (`.xpi`) Artifact
+If you want to test a Pull Request or the latest commit on `main` without setting up a local Python build toolchain:
+1. Navigate to the [Build Add-on Actions tab](https://github.com/alexplaka/Zocrates/actions/workflows/build-addon.yml) on GitHub.
+2. Select the latest **Build Add-on** workflow run (or click **Details** next to the `Build Add-on` check on any Pull Request).
+3. Scroll down to the **Artifacts** section at the bottom and download **`zocrates-xpi`**.
+4. Unzip `zocrates-xpi.zip` to extract the `zocrates.xpi` file.
+5. In Zotero, open **Tools** → **Add-ons**, click the gear icon (⚙️) in the top-right corner, select **Install Add-on From File...**, and choose `zocrates.xpi`.
+
+#### Option B: Local Source Deployment (`./local_deploy.sh`)
+For active development on the frontend extension and Python backend:
+
 ```bash
 # 1. Clone the repository
 git clone https://github.com/alexplaka/Zocrates.git
