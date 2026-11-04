@@ -56,6 +56,23 @@ plugins:
 
 nav:
   - Home: index.md
+  - Architecture:
+      - Dialogue Agent & Coordination: architecture/dialogue-agent.md
+      - Human-In-The-Loop Deep Research: architecture/hitl-deep-research.md
+      - Citations & Decision-Model Verification: architecture/citations-and-verification.md
+      - Document Conversion & Layouts: architecture/document-conversion.md
+      - OKF Document Bundles & Invariants: architecture/okf-bundles-and-invariants.md
+      - Embeddings & Hybrid Search: architecture/embeddings-and-search.md
+      - Reader Excerpts & Context Pills: architecture/reader-and-context-pills.md
+      - Paper Relations Graph & Visualizer: architecture/paper-relations-graph.md
+      - Mermaid Diagrams & Sidebar: architecture/mermaid-diagrams.md
+      - Models & Provider Hybridization: architecture/models-and-providers.md
+      - Security, IPC & Privilege Isolation: architecture/security-and-ipc.md
+      - Backend Distribution & Supervision: architecture/distribution-and-runtime.md
+      - Session Lifecycle & Space Reclamation: architecture/session-lifecycle.md
+  - User Guides:
+      - "Why Zocrates: A Guide for Scholars": guides/why-zocrates.md
+      - Local MCP Server Client Setup: guides/mcp-server-setup.md
   - API Reference: reference/
 
 markdown_extensions:

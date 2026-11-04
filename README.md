@@ -288,7 +288,7 @@ Zocrates provides transparent, file-locked configuration via `zocrates_config.js
 
 1. Open Zotero → **Preferences** (or **Settings** on macOS) → **Zocrates** tab.
 2. Configure your desired LLM providers:
-   * **OpenRouter (Recommended)**: Enter your OpenRouter API key. Gives access to frontier reasoning models (Gemini 2.5 Flash, Claude 3.7 Sonnet, GPT-4o, DeepSeek R1, Qwen 2.5) with endpoints supporting Zero Data Retention (ZDR) where offered.
+   * **OpenRouter (Recommended)**: Enter your OpenRouter API key. Gives access to frontier reasoning models (Gemini, Claude Sonnet, GPT-6, DeepSeek Flash, Qwen) with endpoints supporting Zero Data Retention (ZDR) where offered.
    * **Local Models (Ollama / vLLM)**: Enter your local inference endpoint (e.g., `http://localhost:11434`) and local model identifiers for fully offline, air-gapped workflows.
    * **Google Gemini**: Direct Google AI Studio Gemini API key.
    * **Scholar Polite Email**: Enter your academic email to access polite rate-limit tiers on OpenAlex and Unpaywall.
@@ -299,9 +299,9 @@ Zocrates provides transparent, file-locked configuration via `zocrates_config.js
 Zocrates does not force you into an all-cloud or all-local trade-off. You can mix and match models and providers across different layers of the system to optimize for privacy, speed, and cost:
 
 * **Per-Agent Multi-Model Pinning (`override_agent_models`)**: In `zocrates_config.json`, you can assign different models and providers to individual subagent roles:
-  - **Coordinator (`coordinator`)**: Fast local model (e.g. `ollama/lfm2.5-thinking:1.2b`, `llama3.1:8b`) for snappy conversational turns.
+  - **Coordinator (`coordinator`)**: Fast local model (e.g. `ollama/llama3`, `ollama/mistral`) for snappy conversational turns.
   - **Retrieval Subagent (`search`)**: Fast local model (Ollama or vLLM) executing the autonomous ReAct retrieval loop, querying local vector and keyword indices without sending raw library search queries over the network.
-  - **Synthesizer Subagent (`synthesizer`)**: Frontier cloud reasoning model (e.g. `anthropic/claude-3.7-sonnet`, `deepseek/deepseek-r1`, `google/gemini-2.5-pro` via OpenRouter) for deep inductive synthesis, cross-paper comparison, and rigorous attribution.
+  - **Synthesizer Subagent (`synthesizer`)**: Frontier cloud reasoning model (e.g. `anthropic/claude-sonnet`, `deepseek/deepseek-flash`, `google/gemini-pro` via OpenRouter) for deep inductive synthesis, cross-paper comparison, and rigorous attribution.
   - **Discovery Subagents (`online_search` & `online_synthesizer`)**: Local or remote models for autonomous external literature discovery and candidate staging.
 * **Component-Level Decoupling**:
   - **Embeddings**: Keep dense vectors 100% offline via hardware-accelerated Jina v5 (`jina-embeddings-v5-text-nano`, running in-process via PyTorch on CPU/GPU with zero cloud costs and zero VRAM clash) while freely using cloud reasoning models for conversation.
