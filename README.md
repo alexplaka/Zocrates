@@ -5,10 +5,9 @@
 <p align="center">
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.12%2B%20%283.13%20default%29-3776AB.svg?style=flat&logo=python&logoColor=white" alt="Python 3.12+ (3.13 default)" /></a>
   <a href="https://www.zotero.org/"><img src="https://img.shields.io/badge/zotero-10.0.x-CC292B.svg?style=flat&logo=zotero&logoColor=white" alt="Zotero 10.0.x" /></a>
-  <a href="https://github.com/astral-sh/uv"><img src="https://img.shields.io/badge/package%20manager-astral%20uv-DE5FE9.svg?style=flat&logo=uv&logoColor=white" alt="Astral uv" /></a>
   <a href="https://alexplaka.github.io/Zocrates/"><img src="https://img.shields.io/badge/docs-GitHub%20Pages-24292e.svg?style=flat&logo=githubpages&logoColor=white" alt="GitHub Pages" /></a>
   <a href="https://github.com/alexplaka/Zocrates/actions/workflows/test.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/alexplaka/Zocrates/badges/coverage.json" alt="Coverage" /></a>
-  <a href="#architecture-overview"><img src="https://img.shields.io/badge/architecture-Local--First%20%26%20Multi--Agent-008080.svg?style=flat" alt="Local-First & Multi-Agent" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg?style=flat" alt="AGPL-3.0 License" /></a>
 </p>
 
 ---
