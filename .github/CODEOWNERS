@@ -1,0 +1,23 @@
+# Lines starting with '#' are comments.
+# Each line is a file pattern followed by one or more owners.
+# More details: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default code owner for all files across the repository
+*                       @alexplaka
+
+# CI/CD Workflows & GitHub Configurations
+/.github/               @alexplaka
+
+# Zotero Frontend Add-on
+/zotero-plugin/         @alexplaka
+
+# Local Backend & Multi-Agent Architecture
+/zocrates/              @alexplaka
+
+# Test Suites
+/tests/                 @alexplaka
+
+# Scripts & Tooling
+/scripts/               @alexplaka
+local_deploy.sh         @alexplaka
+pyproject.toml          @alexplaka
