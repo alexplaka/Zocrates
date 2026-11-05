@@ -161,7 +161,72 @@ For the vast majority of researchers, **connecting to cloud models via OpenRoute
 
 ---
 
-## 3. Scholarly Rigor: Citations You Can Truly Trust
+## 3. Beyond Naive RAG: Combined Semantic Discovery & Structural (Vectorless) Reading
+
+Most generic "Chat with your PDF" tools rely on naive vector Retrieval-Augmented Generation (RAG). While vector similarity is effective for scanning broad corporate documentation or customer support wikis, academic research exposes two fundamental failure modes in naive RAG:
+
+1. **The "Chunk Salad" Trap (Naive Vector RAG)**: Academic papers are not disconnected paragraphs; they are cumulative intellectual arguments. A theorem in Section 4 relies on definitions established in Section 2; empirical conclusions in the Abstract are qualified by baseline assumptions in the Discussion. Naive RAG slices papers into arbitrary 300–500 token chunks. When an agent queries the vector store, it retrieves 5 isolated fragments scattered across 30 pages. The resulting answer is a "chunk salad": definitions are missing, mathematical derivations are sliced in half, tables are severed mid-row, and the LLM hallucinates connections between unrelated paragraphs.
+2. **The "Token Dump" Trap (Pure Long-Context Ingestion)**: Stuffing entire 40-page papers into a large context window is mathematically impossible across a 1,000-paper library. Even for 2–3 papers, dumping 80,000 tokens of raw text inflates latency, multiplies API costs, and triggers well-documented *"lost-in-the-middle"* attention degradation.
+
+Zocrates fundamentally re-architects literature retrieval by combining **Global Semantic RAG** with **Structural (Vectorless) Reading** into a single autonomous search harness:
+
+```mermaid
+graph TD
+    subgraph "The Academic Research Retrieval Challenge"
+        QUERY[Researcher Query] --> MODE{Query Scope & Intent}
+    end
+
+    subgraph "Channel 1: Global Semantic RAG (Broad Discovery)"
+        MODE -->|Whole Library or Multi-Paper Scope| CORPUS["search_corpus(query, item_key=None)<br/>Hybrid Jina v5 Dense Vectors + SQLite FTS5 BM25 with RRF"]
+        CORPUS --> DISCOVER[Candidate Papers & Key Topical Passages]
+    end
+
+    subgraph "Channel 2: Structural Vectorless Reading (Targeted Precision)"
+        MODE -->|Context Chips: 1–3 Selected Papers| PRE_TOC[Pre-Injected Dual-Key Table of Contents]
+        DISCOVER --> TRANSITION[Autonomous ReAct Transition]
+        TRANSITION --> TOC["get_document_toc(item_key)<br/>Inspect Abstract, Section Hierarchy, Figures & Tables"]
+        PRE_TOC --> TOC
+        TOC --> READ["read_document(item_key, asset_id=['s2', 's3', 'f1'])<br/>Surgical Ingestion of Complete Cohesive Sections"]
+    end
+
+    subgraph "Epistemic Grounding & Synthesis"
+        READ --> RERANK[Substantive Filter + Cross-Encoder Reranker]
+        RERANK --> SYNTH[Grounded Academic Synthesis]
+        SYNTH --> VERIFY[AI Decision-Model Per-Occurrence Verification]
+    end
+```
+
+### Retrieving Sections is Still RAG: Search vs. Targeted Reading
+
+Retrieving targeted sections from a converted paper is still retrieval-augmented generation. The critical difference lies in **how retrieval is performed**:
+
+* **Statistical Search (Vector RAG)**: Chops text into arbitrary token boundaries and calculates cosine similarity against query vectors. This is ideal for **broad queries** when the researcher does not know which papers or sections hold the answer.
+* **Targeted Structural Reading (Vectorless RAG)**: Leverages the author's own intellectual architecture—the Table of Contents (`toc.json` / `toc.md`). The agent inspects section headings (`s1`, `s2`, `s3`), figures (`f1`), and tables (`t1`), and reads **entire cohesive sections** as unclipped, continuous prose.
+
+By equipping the ReAct search agent (`library_search_agent`) with both statistical search (`search_corpus`) and structural reading tools (`get_document_toc`, `read_document`), Zocrates delivers the best of both worlds:
+
+1. **Broad Queries (Global Semantic Reach)**: When a researcher asks an exploratory question across hundreds of papers (*"Which papers evaluate solid electrolyte degradation under mechanical stack pressure?"*), the agent uses hybrid dense vector and sparse keyword search across the full library to identify candidate papers.
+2. **Targeted Queries (Vectorless Structural Precision)**: Once candidate papers are identified—or when the researcher focuses the conversation on 1–3 specific papers using Context Chips—the agent switches immediately to **vectorless structural reading**. It reads the exact methodology or results sections as cohesive wholes, preserving complete mathematical derivations, experimental controls, and context.
+3. **Maximum Semantic Relationships & Extreme Token Efficiency**: Rather than dumping an entire 40,000-token paper into the context window, surgical section reading ingests only the relevant 1,500–3,000 words. Because the section is ingested in its entirety, semantic relationships, sentence-to-sentence logic, and authorial qualifications remain 100% intact.
+4. **First-Class Multimodal Assets**: High-resolution figures (`f1`, `f2`) with synthetic VLM captions and structured Markdown tables (`t1`, `t2`) are retrieved as distinct structural units rather than lost inside unstructured text chunks.
+5. **Structure-Aware Chunking Minimizes Abrupt Cut-Offs**: Even during broad library-wide searches, Zocrates avoids crude fixed-token character slicing. The chunking engine splits along Markdown header hierarchies (`#` → `##` → `###`), recurses through natural paragraph and sentence boundaries, merges with controlled overlap, and masks code fences and semantic `<figure>` blocks so equations, code syntax, and data tables are never severed mid-block.
+
+### Architectural Comparison: Retrieval Paradigms in AI Research
+
+| Capability | Naive Vector RAG | Pure Long-Context Dump | Zocrates Combined Architecture |
+| :--- | :--- | :--- | :--- |
+| **Whole-Library Discovery** | Yes (chunk similarity) | Impossible (>10M tokens) | **Yes (Dense + Sparse Hybrid RRF)** |
+| **Chunking & Boundary Quality** | Fixed-size token slices (abrupt cut-offs) | N/A (no chunking) | **Structure-aware (header/sentence splits, masked blocks) + whole-section reading** |
+| **Argument & Derivation Integrity** | Broken (isolated 500-token chunks) | Preserved | **Preserved (Unbroken section spans via `sX`)** |
+| **Mathematical Formulas** | Often truncated mid-equation | Preserved | **Preserved (Full LaTeX expressions)** |
+| **Tables & Figures** | Severed or mutilated | Unstructured text dump | **First-class structural assets (`tX`, `fX`)** |
+| **Token Budget & Latency** | Moderate tokens / Low context quality | Prohibitive (~40k–120k tokens/query) | **Optimal (~1.5k–4k tokens surgical read)** |
+| **Active Context Chips (1–3 Papers)** | Still fragments into chunks | Stuffs entire document text | **Instant vectorless structural reading** |
+| **Epistemic Attributions** | Heuristic chunk metadata | Unstructured prompt text | **Section breadcrumbs & decision verifier** |
+
+---
+
+## 4. Scholarly Rigor: Citations You Can Truly Trust
 
 A major risk of conversational AI in academic work is the appearance of plausible but fabricated assertions, subtle numerical errors, and omitted counter-evidence. Zocrates treats attribution as an absolute priority.
 
@@ -216,7 +281,7 @@ To catch subtle misattributions and over-claiming:
 
 ---
 
-## 4. Fluid In-Zotero Workflow & Rich Scholarly Presentation
+## 5. Fluid In-Zotero Workflow & Rich Scholarly Presentation
 
 Zocrates fits naturally into the way scholars actually read, organize, and interpret literature, providing rich visual formatting that respects academic conventions.
 
@@ -250,7 +315,7 @@ Scholarly communication relies on precise notation, visual evidence, and executa
 
 ---
 
-## 5. Agentic Online Literature Discovery & One-Click Import
+## 6. Agentic Online Literature Discovery & One-Click Import
 
 A researcher's questions frequently extend beyond the papers already in their library. Discovering relevant external literature usually means jumping to external web search engines, filtering through irrelevancies, manually checking if a paper is already in Zotero, downloading PDFs, and importing them one by one.
 
@@ -301,7 +366,7 @@ sequenceDiagram
 
 ---
 
-## 6. Deep Document Ingestion & Multimodal Understanding
+## 7. Deep Document Ingestion & Multimodal Understanding
 
 Academic literature contains dense layouts, mathematical notation, multi-panel figures, and personal annotations. Zocrates standardizes this rich material into clean, accessible formats:
 
@@ -313,7 +378,7 @@ Academic literature contains dense layouts, mathematical notation, multi-panel f
 
 ---
 
-## 7. Exploring Literature Relationships Without Hallucinations
+## 8. Exploring Literature Relationships Without Hallucinations
 
 Discovering how papers relate to one another across your library is essential for literature reviews, understanding academic debates, and identifying research lineages:
 
@@ -345,7 +410,7 @@ Standard graph tools often force every paper to connect to a set number of neigh
 
 ---
 
-## 8. Responsive Long-Running Research Conversations
+## 9. Responsive Long-Running Research Conversations
 
 Deep scholarly inquiries often take dozens of turns—exploring alternative theories, testing counter-arguments, and refining summaries. Zocrates ensures that extended dialogues remain fast, focused, and responsive:
 
@@ -357,7 +422,7 @@ Deep scholarly inquiries often take dozens of turns—exploring alternative theo
 
 ---
 
-## 9. Summary: The Zocrates Value Matrix
+## 10. Summary: The Zocrates Value Matrix
 
 | Dimension | Native Zotero Experience | With Zocrates Enabled |
 | :--- | :--- | :--- |
@@ -378,7 +443,7 @@ Deep scholarly inquiries often take dozens of turns—exploring alternative theo
 
 ---
 
-## 10. Conclusion: A Companion on Your Own Terms
+## 11. Conclusion: A Companion on Your Own Terms
 
 Zocrates does not replace Zotero; it unlocks the full intellectual potential of what you have already built. By honoring the curation in your library and providing verifiable attribution, complete data privacy, and flexible ways to work, Zocrates transforms a static archive into an active intellectual workspace.
 

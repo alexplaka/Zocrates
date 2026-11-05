@@ -20,6 +20,17 @@ The architecture decouples conversational interaction from autonomous retrieval 
 * **Inner Autonomous Search Pipeline (`search_library_pipeline_node`, `@node(rerun_on_resume=True)`)**: When a research question requires literature grounding, the coordinator delegates execution to the `search_library` tool. This invokes an on-demand dynamic workflow with an isolated autonomous ReAct search subagent, shared cross-encoder reranking, and grounded academic synthesis.
 * **Human-In-The-Loop (HITL) Deep Research Extensions**: When literature queries require deeper or broader investigation, the dynamic workflow suspends execution deterministically, presenting an interactive checkpoint card directly inside the chat turn. The researcher can grant up to 2 extensions (simultaneously scaling calls by +5, words by +3,750, and rerank chunks by +5, up to a hard cap of 20 calls, 15,000 words, and 25 chunks) with optional steering guidance, or synthesize immediately with existing evidence.
 
+### 1.2 The Dual-Channel Retrieval Paradigm: Global Semantic RAG & Structural (Vectorless) Reading
+
+A central innovation of Zocrates is rejecting naive chunk-only RAG in favor of a flexible **Dual-Channel Retrieval Paradigm**:
+
+1. **Broad Discovery via Global Semantic RAG (`search_corpus`)**:
+   When exploring an entire library or surveying multiple collections, the ReAct search agent executes hybrid dense vector (Jina v5) and sparse lexical BM25 (SQLite FTS5) searches with Reciprocal Rank Fusion (RRF). This enables rapid identification of candidate papers and topical passages across thousands of items without prior knowledge of document structure.
+2. **Targeted Precision via Structural (Vectorless) Reading (`get_document_toc`, `read_document`)**:
+   Retrieving sections from an academic paper is still retrieval-augmented generation—what changes is the retrieval mechanism. Rather than slicing a paper into arbitrary 500-token chunks (which breaks mathematical derivations, fragments multi-page methodology arguments, and truncates tables), the agent switches to **vectorless structural navigation**. It inspects the author's Table of Contents (`s0...`, `f1...`, `t1...`) and reads **entire cohesive sections** (`read_document(asset_id="s2")`) as continuous, unclipped prose.
+3. **Instant Vectorless Focus on Active Context (Context Chips)**:
+   When 1 to 3 papers are selected in Zotero, `search_library_pipeline_node` triggers the **Complete Active Coverage Gate**: it bypasses vector similarity search entirely and pre-injects the dual-key Table of Contents into the search subagent's prompt. The agent reads targeted sections, figures, and tables directly with zero chunk fragmentation and maximum token efficiency (~1.5k–3k tokens vs. 40k+ tokens for raw whole-paper stuffing).
+
 For detailed specifications of checkpoint state machines, replay sequence barriers, SQLite rehydration, scope recovery, and wire protocols, see the [Human-In-The-Loop Deep Research Architecture](hitl-deep-research.md) documentation.
 
 ```mermaid

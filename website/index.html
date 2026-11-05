@@ -82,6 +82,7 @@
           </div>
 
           <div class="hero-trust-pills">
+            <span class="trust-pill">🎯 Combined Semantic &amp; Vectorless Reading</span>
             <span class="trust-pill">🔒 100% Local Indices, Bundles &amp; Deterministic Graphs</span>
             <span class="trust-pill">⚖️ Per-Occurrence Citation Verification</span>
             <span class="trust-pill">📝 User-Curated Memory via Zotero Notes</span>
@@ -377,6 +378,10 @@
               </li>
               <li>
                 <span class="check-bullet">✦</span>
+                <div><strong>Beyond Naive RAG (Combined Semantic &amp; Vectorless Reading):</strong> Blends hybrid vector/keyword search for broad exploratory queries with surgical, vectorless Table of Contents reading (<code>read_document(asset_id='sX')</code>) for targeted investigations—preserving complete arguments, unbroken mathematical proofs, and tables without chunk salad fragmentation.</div>
+              </li>
+              <li>
+                <span class="check-bullet">✦</span>
                 <div><strong>Autonomous Academic Search:</strong> Navigates semantic and keyword indices, reads hierarchical outlines and section headings, and synthesizes the most relevant findings.</div>
               </li>
               <li>
@@ -623,7 +628,48 @@
             </div>
           </article>
 
-          <!-- Bento 3: Evidence-Gated Paper Relations Network (Span 6) -->
+          <!-- Bento 3: Beyond Naive RAG (Combined Semantic & Vectorless Reading) (Span 6) -->
+          <article class="bento-card span-6">
+            <div>
+              <span class="bento-tag">Beyond Naive RAG • Dual-Channel Architecture</span>
+              <h3>Combined Semantic &amp; Vectorless Reading</h3>
+              <p style="margin-top:0.5rem;">
+                Standard AI search tools chop papers into arbitrary fragments, scattering sentences, breaking equations, and severing tables. Zocrates combines <strong>broad semantic search</strong> across your entire library with <strong>targeted, vectorless reading</strong>: the search agent inspects the author's Table of Contents and reads entire cohesive sections (<code>read_document(asset_id='sX')</code>), preserving complete arguments and narrative context with maximum token efficiency.
+              </p>
+            </div>
+
+            <div class="interactive-widget">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.4rem;">
+                <span style="font-size:0.8rem; font-weight:700; color:var(--text-main);">🎯 Retrieval Paradigm Comparison</span>
+                <span class="mini-badge novel">Whole-Section Reading</span>
+              </div>
+              <div style="display:grid; grid-template-columns: 1fr 1fr; gap:0.5rem; font-size:0.75rem;">
+                <div style="background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.25); border-radius:6px; padding:0.5rem;">
+                  <div style="font-weight:700; color:#ef4444; margin-bottom:0.25rem;">❌ Arbitrary Chunk Slicing</div>
+                  <div style="color:var(--text-secondary); line-height:1.4;">
+                    • Slices text into disconnected fragments<br/>
+                    • Formulas truncated mid-equation<br/>
+                    • Tables severed or omitted<br/>
+                    • Hallucinates links between disconnected scraps
+                  </div>
+                </div>
+                <div style="background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); border-radius:6px; padding:0.5rem;">
+                  <div style="font-weight:700; color:#10b981; margin-bottom:0.25rem;">✓ Zocrates Dual-Channel</div>
+                  <div style="color:var(--text-secondary); line-height:1.4;">
+                    • Broad queries: Library-wide semantic search<br/>
+                    • Targeted queries: Full section reading<br/>
+                    • Full LaTeX math &amp; tables intact<br/>
+                    • Active papers: Direct Table of Contents focus
+                  </div>
+                </div>
+              </div>
+              <div style="font-size:0.72rem; color:var(--text-muted); margin-top:0.4rem;">
+                Reading complete sections preserves nuanced arguments, experimental controls, and mathematical derivations that arbitrary chunking breaks.
+              </div>
+            </div>
+          </article>
+
+          <!-- Bento 4: Evidence-Gated Paper Relations Network (Span 6) -->
           <article class="bento-card span-6">
             <div>
               <span class="bento-tag">100% Strictly Local • Deterministic Algorithms • 0 Cloud Calls</span>
@@ -674,13 +720,13 @@
             </div>
           </article>
 
-          <!-- Bento 5: Guided Deep Research & Adaptive Context Compaction (Span 6) -->
+          <!-- Bento 6: Interactive Research Checkpoints (Human-in-the-Loop) (Span 6) -->
           <article class="bento-card span-6">
             <div>
-              <span class="bento-tag">Guided In-Depth Research • Adaptive Context Compaction</span>
-              <h3>Interactive Research Checkpoints &amp; Adaptive Context Compaction</h3>
+              <span class="bento-tag">Human-in-the-Loop • Steerable Autonomous Retrieval</span>
+              <h3>Interactive Research Checkpoints</h3>
               <p style="margin-top:0.5rem;">
-                When exploring complex, multi-paper research questions, Zocrates investigates deeply and pauses at natural milestones with a clear checkpoint summary of what has been discovered and what remains open. You decide whether to extend the search to uncover more papers or synthesize the findings right away. Meanwhile, <strong>adaptive context compaction</strong> intelligently consolidates earlier conversational turns in the background, keeping extended multi-turn research sessions fast, responsive, and within model token budgets without losing context.
+                Autonomous research agents should never be uncontrollable black boxes. When exploring complex topics or comparing literature, Zocrates investigates deeply and pauses at natural milestones with a clear checkpoint summary of what has been discovered and what remains open. You decide whether to extend the search with custom guidance or synthesize the findings right away.
               </p>
             </div>
 
@@ -689,7 +735,7 @@
                 <span style="font-size:0.8rem; font-weight:700; color:var(--warning);">⏸️ Research Investigation Checkpoint</span>
                 <span class="mono" style="font-size:0.72rem; color:var(--text-muted);">6 papers investigated • Ready for your guidance</span>
               </div>
-              <p style="font-size:0.8rem; color:var(--text-secondary);">
+              <p style="font-size:0.8rem; color:var(--text-secondary); margin:0.4rem 0;">
                 <strong>Synthesized:</strong> Attention memory complexity and IO-aware tiling across 6 papers in your library.<br/>
                 <strong>Open Question:</strong> Multi-node communication benchmarks on long sequence workloads.
               </p>
@@ -697,13 +743,84 @@
                 <button type="button" id="btn-hitl-extend" class="btn btn-primary btn-sm">Extend Investigation (Search Further)</button>
                 <button type="button" id="btn-hitl-synthesize" class="btn btn-secondary btn-sm">Synthesize Current Findings</button>
               </div>
-              <div id="hitl-budget-status" style="font-size:0.75rem; color:var(--text-muted);">
+              <div id="hitl-budget-status" style="font-size:0.75rem; color:var(--text-muted); margin-top:0.35rem;">
                 Pause points ensure you always steer deep research without running up unexpected cloud or computing costs.
               </div>
             </div>
           </article>
 
-          <!-- Bento 6: Rich Scholarly Presentation & Multimodal Figure Captioning (Span 12) -->
+          <!-- Bento 7: Autonomous Adaptive Context Compaction (Span 6) -->
+          <article class="bento-card span-6">
+            <div>
+              <span class="bento-tag">SelfCompact Algorithm • Zero-Latency Background Optimization</span>
+              <h3>Adaptive Context Compaction &amp; 50+ Turn Scaling</h3>
+              <p style="margin-top:0.5rem;">
+                Extended multi-turn literature reviews quickly hit model context limits or inflate token costs. Running in the background with zero latency impact, an AI decision model evaluates topic closure to compact earlier turns while retaining the latest completed turns 100% verbatim. Raw search loops and chunk payloads are consolidated, keeping multi-hour research conversations fast, affordable, and context-rich.
+              </p>
+            </div>
+
+            <div class="interactive-widget">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.4rem;">
+                <span style="font-size:0.8rem; font-weight:700; color:var(--text-main);">🧠 Verbatim Sliding Window Architecture</span>
+                <span class="mini-badge novel">0ms First-Token Latency</span>
+              </div>
+              <div style="display:flex; flex-direction:column; gap:0.45rem; font-size:0.75rem;">
+                <div style="background:rgba(59,130,246,0.08); border:1px solid rgba(59,130,246,0.25); border-radius:6px; padding:0.5rem; display:flex; justify-content:space-between; align-items:center;">
+                  <div>
+                    <span style="font-weight:700; color:var(--accent);">Turns 1…N-2</span>
+                    <span style="color:var(--text-muted);"> • Consolidated Rolling Summary</span>
+                  </div>
+                  <span class="mini-badge" style="background:var(--accent-soft); color:var(--accent);">~85% Token Reduction</span>
+                </div>
+                <div style="background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); border-radius:6px; padding:0.5rem; display:flex; justify-content:space-between; align-items:center;">
+                  <div>
+                    <span style="font-weight:700; color:var(--success);">Turns N-1 &amp; N</span>
+                    <span style="color:var(--text-muted);"> • 100% Verbatim Retention</span>
+                  </div>
+                  <span class="mini-badge oa">Full Context Fidelity</span>
+                </div>
+              </div>
+              <div style="font-size:0.72rem; color:var(--text-muted); margin-top:0.4rem;">
+                Decision models trigger only after natural topic transitions, preventing hallucination while preserving user chat history.
+              </div>
+            </div>
+          </article>
+
+          <!-- Bento 8: Micro-Focal PDF Reader Excerpts & Area Crops (Span 6) -->
+          <article class="bento-card span-6">
+            <div>
+              <span class="bento-tag">Zotero 10 Reader Bridge • Multimodal Vision Snippets</span>
+              <h3>Micro-Focal PDF Reader Excerpts &amp; Area Crops</h3>
+              <p style="margin-top:0.5rem;">
+                Anchor conversations directly to specific passages, figures, or equations while reading in Zotero's PDF reader. Right-click any highlighted text or draw an area annotation box around a diagram or chart to add it directly to your chat context. Visual crops are passed natively to vision-capable models, with automatic parent paper linking and live annotation resize tracking.
+              </p>
+            </div>
+
+            <div class="interactive-widget">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.4rem;">
+                <span style="font-size:0.8rem; font-weight:700; color:var(--text-main);">📑 Reader Bridge Context Injection</span>
+                <span class="mini-badge oa">Multimodal Vision Ready</span>
+              </div>
+              <div style="background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:0.65rem; font-size:0.78rem;">
+                <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.35rem;">
+                  <span style="background:var(--accent); color:#fff; border-radius:4px; padding:0.15rem 0.4rem; font-size:0.68rem; font-weight:700;">TEXT EXCERPT</span>
+                  <span style="color:var(--text-muted); font-size:0.72rem;">Vaswani et al. (2017) • Page 3, §3.2.1</span>
+                </div>
+                <p style="color:var(--text-secondary); margin:0; font-style:italic;">
+                  "Multi-head attention allows the model to jointly attend to information from different representation subspaces..."
+                </p>
+                <div style="display:flex; align-items:center; gap:0.5rem; margin-top:0.45rem; padding-top:0.45rem; border-top:1px dashed var(--border);">
+                  <span style="background:var(--primary); color:#fff; border-radius:4px; padding:0.15rem 0.4rem; font-size:0.68rem; font-weight:700;">AREA CROP</span>
+                  <span style="color:var(--text-muted); font-size:0.72rem;">Figure 1: Transformer Model Architecture (128 KB JPEG crop)</span>
+                </div>
+              </div>
+              <div style="font-size:0.72rem; color:var(--text-muted); margin-top:0.4rem;">
+                Right-click "Zocrates: Add to Context" auto-anchors the parent paper and switches scope to focal reading mode.
+              </div>
+            </div>
+          </article>
+
+          <!-- Bento 9: Rich Scholarly Presentation & Multimodal Figure Captioning (Span 12) -->
           <article class="bento-card span-12">
             <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:1.75rem; align-items:center;">
               <div>
