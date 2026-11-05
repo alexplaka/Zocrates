@@ -57,24 +57,28 @@ plugins:
 nav:
   - Home: index.md
   - Architecture:
-      - Dialogue Agent & Coordination: architecture/dialogue-agent.md
-      - Human-In-The-Loop Deep Research: architecture/hitl-deep-research.md
-      - Citations & Decision-Model Verification: architecture/citations-and-verification.md
-      - Adaptive Context Compaction: architecture/adaptive-context-compaction.md
-      - Online Literature Discovery & Import: architecture/online-literature-discovery.md
-      - Predictive Next-Prompt Engine: architecture/predictive-next-prompt.md
-      - Long-Term Memory & User Directives: architecture/user-curated-memory.md
-      - Document Conversion & Layouts: architecture/document-conversion.md
-      - OKF Document Bundles & Invariants: architecture/okf-bundles-and-invariants.md
-      - Embeddings & Hybrid Search: architecture/embeddings-and-search.md
-      - Reader Excerpts & Context Pills: architecture/reader-and-context-pills.md
-      - Paper Relations Graph & Visualizer: architecture/paper-relations-graph.md
-      - Mermaid Diagrams & Sidebar: architecture/mermaid-diagrams.md
-      - Models & Provider Hybridization: architecture/models-and-providers.md
-      - Security, IPC & Privilege Isolation: architecture/security-and-ipc.md
-      - Backend Distribution & Supervision: architecture/distribution-and-runtime.md
-      - Opt-In Error & Diagnostic Reporting: architecture/diagnostic-reporting.md
-      - Session Lifecycle & Space Reclamation: architecture/session-lifecycle.md
+      - Agent Orchestration & Discovery:
+          - Dialogue Agent & Coordination: architecture/dialogue-agent.md
+          - Human-In-The-Loop Deep Research: architecture/hitl-deep-research.md
+          - Citations & Decision-Model Verification: architecture/citations-and-verification.md
+          - Adaptive Context Compaction: architecture/adaptive-context-compaction.md
+          - Online Literature Discovery & Import: architecture/online-literature-discovery.md
+          - Predictive Next-Prompt Engine: architecture/predictive-next-prompt.md
+      - Document Ingestion & Knowledge Bundles:
+          - Document Conversion & Layouts: architecture/document-conversion.md
+          - OKF Document Bundles & Invariants: architecture/okf-bundles-and-invariants.md
+          - Embeddings & Hybrid Search: architecture/embeddings-and-search.md
+          - Long-Term Memory & User Directives: architecture/user-curated-memory.md
+      - Desktop Bridge & Visualizations:
+          - Reader Excerpts & Context Pills: architecture/reader-and-context-pills.md
+          - Paper Relations Graph & Visualizer: architecture/paper-relations-graph.md
+          - Mermaid Diagrams & Sidebar: architecture/mermaid-diagrams.md
+      - Runtime, Security & Governance:
+          - Models & Provider Hybridization: architecture/models-and-providers.md
+          - Security, IPC & Privilege Isolation: architecture/security-and-ipc.md
+          - Backend Distribution & Supervision: architecture/distribution-and-runtime.md
+          - Session Lifecycle & Space Reclamation: architecture/session-lifecycle.md
+          - Opt-In Error & Diagnostic Reporting: architecture/diagnostic-reporting.md
   - User Guides:
       - "Why Zocrates: A Guide for Scholars": guides/why-zocrates.md
       - Local MCP Server Client Setup: guides/mcp-server-setup.md
