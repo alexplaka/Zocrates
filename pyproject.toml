@@ -60,7 +60,7 @@ lint = [
 ]
 
 [tool.codespell]
-ignore-words-list = "rouge,ans,ure,nin,ths,unparseable,disjointness,re-uses,pre-selected,pre-select,pre-selecting,pre-emptive,pre-emptively,astroid,discreet"
+ignore-words-list = "rouge,ans,ure,nin,ths,unparseable,disjointness,re-uses,pre-selected,pre-select,pre-selecting,pre-emptive,pre-emptively,astroid,discreet,asai"
 skip = "./locust_env/*,uv.lock,.venv,./frontend,**/package-lock.json,./scratch/*,*mermaid.min.js,*.min.js,*.min.css,*.pdf,*.json,*.log,./site/*,./build_dist/*,./scripts/datalab_experiment/*,./scripts/dialogue_agent_proto_evals/*,./tests/*"
 
 

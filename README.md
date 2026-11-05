@@ -1,11 +1,11 @@
 # Zocrates
 
-> **An LLM-Powered Research Assistant Copilot for Zotero**
+> **An Agentic Research Assistant for Zotero**
 
 <p align="center">
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.12%2B%20%283.13%20default%29-3776AB.svg?style=flat&logo=python&logoColor=white" alt="Python 3.12+ (3.13 default)" /></a>
   <a href="https://www.zotero.org/"><img src="https://img.shields.io/badge/zotero-10.0.x-CC292B.svg?style=flat&logo=zotero&logoColor=white" alt="Zotero 10.0.x" /></a>
-  <a href="https://alexplaka.github.io/Zocrates/"><img src="https://img.shields.io/badge/docs-GitHub%20Pages-24292e.svg?style=flat&logo=githubpages&logoColor=white" alt="GitHub Pages" /></a>
+  <a href="https://alexplaka.github.io/Zocrates/docs/"><img src="https://img.shields.io/badge/docs-GitHub%20Pages-24292e.svg?style=flat&logo=githubpages&logoColor=white" alt="GitHub Pages Documentation" /></a>
   <a href="https://github.com/alexplaka/Zocrates/actions/workflows/test.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/alexplaka/Zocrates/badges/coverage.json" alt="Coverage" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg?style=flat" alt="AGPL-3.0 License" /></a>
 </p>
@@ -41,6 +41,7 @@ Companion       Bundles     Coding Agents
 ### Core Pillars
 
 * **🔒 Local-First Privacy & Defense-in-Depth Security**: Your search indices, converted documents, strictly local deterministic relation graphs, and chat history remain 100% on your machine. Fortified with 256-bit cryptographic loopback token authentication, strict CORS isolation, DOM allowlist sanitization protecting Gecko `SystemPrincipal` privileges, path traversal containment, and encrypted credential storage via Mozilla's Login Manager (`Services.passwords`).
+* **🎯 Beyond Naive RAG (Combined Semantic & Structural Vectorless Reading)**: Replaces crude, fixed-token "chunk salad" with a flexible dual-channel engine. When indexing and performing library-wide search, Zocrates uses **structure-aware chunking** that splits along Markdown headers, respects natural paragraph and sentence boundaries, and masks code blocks and figures to minimize abrupt cut-offs. For targeted investigations, the ReAct agent switches immediately to surgical, vectorless Table of Contents reading (`read_document(asset_id='sX')`), ingesting complete, unfragmented sections to preserve complex derivations, experimental context, and tables with optimal token efficiency.
 * **⚖️ Epistemic Honesty & Verifiable Attribution**: Automated per-occurrence claim verification using fast AI decision models, strict Two-Tier Source reporting (`# Cited Sources` and `## Other Considered Sources` so no evaluated literature is silently dropped), and interactive Evidence Peek popovers showing verbatim quotes and section breadcrumbs.
 * **🤖 Autonomous Multi-Agent Dynamic Orchestration**: Powered by Google ADK dynamic workflows (`@node`), featuring a conversational Coordinator agent, an autonomous ReAct retrieval agent with tool budget enforcement, pre-rerank substantive chunk filtering, cross-encoder rerankers, and specialized academic synthesizers.
 * **🖥️ Deep Native Desktop Integration**: In-Zotero split-pane sidebar, two-way Zotero PDF reader text and bounding-box area cropping, offline Canvas 2D paper relations visualizer with physics clustering, user-curated long-term memory via native Zotero notes, predictive ghost text input, and one-click online paper discovery and import.
@@ -229,7 +230,7 @@ Zocrates operates as an extension inside Zotero and inherits the platform baseli
   * **RAM**: Minimum 2 GB RAM (4 GB recommended for standalone Zotero).
   * **Disk**: ~500 MB for the base Zotero desktop application.
 
-#### 2. Additional Requirements for Zocrates AI Copilot
+#### 2. Additional Requirements for Zocrates AI Assistant
 * **Python Runtime**: Python `3.12+` compatible (the extension automatically provisions an isolated, hermetic Python `3.13` runtime and `.venv` via [Astral `uv`](https://github.com/astral-sh/uv) under `<zotero-data>/zocrates-data/` without modifying your system Python).
 * **Windows Runtime**: [Microsoft Visual C++ 2015–2022 Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe) is required on Windows for local document conversion engines (MarkItDown, Docling) and ONNX runtime dependencies. Zocrates setup automatically verifies this runtime at startup and prompts for installation if absent.
 * **Hardware & Memory**:
@@ -288,7 +289,7 @@ Zocrates provides transparent, file-locked configuration via `zocrates_config.js
 
 1. Open Zotero → **Preferences** (or **Settings** on macOS) → **Zocrates** tab.
 2. Configure your desired LLM providers:
-   * **OpenRouter (Recommended)**: Enter your OpenRouter API key. Gives access to frontier reasoning models (Gemini 2.5 Flash, Claude 3.7 Sonnet, GPT-4o, DeepSeek R1, Qwen 2.5) with endpoints supporting Zero Data Retention (ZDR) where offered.
+   * **OpenRouter (Recommended)**: Enter your OpenRouter API key. Gives access to frontier reasoning models (Gemini, Claude Sonnet, GPT-6, DeepSeek Flash, Qwen) with endpoints supporting Zero Data Retention (ZDR) where offered.
    * **Local Models (Ollama / vLLM)**: Enter your local inference endpoint (e.g., `http://localhost:11434`) and local model identifiers for fully offline, air-gapped workflows.
    * **Google Gemini**: Direct Google AI Studio Gemini API key.
    * **Scholar Polite Email**: Enter your academic email to access polite rate-limit tiers on OpenAlex and Unpaywall.
@@ -299,9 +300,9 @@ Zocrates provides transparent, file-locked configuration via `zocrates_config.js
 Zocrates does not force you into an all-cloud or all-local trade-off. You can mix and match models and providers across different layers of the system to optimize for privacy, speed, and cost:
 
 * **Per-Agent Multi-Model Pinning (`override_agent_models`)**: In `zocrates_config.json`, you can assign different models and providers to individual subagent roles:
-  - **Coordinator (`coordinator`)**: Fast local model (e.g. `ollama/lfm2.5-thinking:1.2b`, `llama3.1:8b`) for snappy conversational turns.
+  - **Coordinator (`coordinator`)**: Fast local model (e.g. `ollama/llama3`, `ollama/mistral`) for snappy conversational turns.
   - **Retrieval Subagent (`search`)**: Fast local model (Ollama or vLLM) executing the autonomous ReAct retrieval loop, querying local vector and keyword indices without sending raw library search queries over the network.
-  - **Synthesizer Subagent (`synthesizer`)**: Frontier cloud reasoning model (e.g. `anthropic/claude-3.7-sonnet`, `deepseek/deepseek-r1`, `google/gemini-2.5-pro` via OpenRouter) for deep inductive synthesis, cross-paper comparison, and rigorous attribution.
+  - **Synthesizer Subagent (`synthesizer`)**: Frontier cloud reasoning model (e.g. `anthropic/claude-sonnet`, `deepseek/deepseek-flash`, `google/gemini-pro` via OpenRouter) for deep inductive synthesis, cross-paper comparison, and rigorous attribution.
   - **Discovery Subagents (`online_search` & `online_synthesizer`)**: Local or remote models for autonomous external literature discovery and candidate staging.
 * **Component-Level Decoupling**:
   - **Embeddings**: Keep dense vectors 100% offline via hardware-accelerated Jina v5 (`jina-embeddings-v5-text-nano`, running in-process via PyTorch on CPU/GPU with zero cloud costs and zero VRAM clash) while freely using cloud reasoning models for conversation.
@@ -314,7 +315,8 @@ Zocrates does not force you into an all-cloud or all-local trade-off. You can mi
 
 Comprehensive architecture guides, API specifications, and design documents are available:
 
-* **Online Documentation**: [https://alexplaka.github.io/Zocrates/](https://alexplaka.github.io/Zocrates/)
+* **Project Website**: [https://alexplaka.github.io/Zocrates/](https://alexplaka.github.io/Zocrates/)
+* **Technical Documentation**: [https://alexplaka.github.io/Zocrates/docs/](https://alexplaka.github.io/Zocrates/docs/)
 * **Local Documentation Server**:
   ```bash
   uv run --group docs mkdocs serve

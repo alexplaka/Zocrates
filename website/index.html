@@ -1,0 +1,1371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Zocrates — Local-First AI Research Assistant for Zotero</title>
+  <meta name="description" content="Transform your personal Zotero library into an active, verifiable, and local-first research partner with multi-agent search, vectorless section reading, and local MCP server." />
+  <meta name="keywords" content="Zotero, Zotero agentic assistant, AI research assistant, Zotero AI plugin, academic assistant, RAG, vectorless reading, literature discovery, Open Knowledge Format, MCP server, local LLM, academic research tool" />
+  <meta name="author" content="Alex Plaka" />
+  <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
+  <meta name="theme-color" content="#0f172a" />
+
+  <!-- Canonical URL -->
+  <link rel="canonical" href="https://alexplaka.github.io/Zocrates/" />
+
+  <!-- Open Graph Meta Tags (Facebook, LinkedIn, Discord, Slack) -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Zocrates" />
+  <meta property="og:url" content="https://alexplaka.github.io/Zocrates/" />
+  <meta property="og:title" content="Zocrates — Local-First AI Research Assistant for Zotero" />
+  <meta property="og:description" content="Transform your personal Zotero library into an active, verifiable, and local-first research partner with multi-agent search, vectorless section reading, and local MCP server." />
+  <meta property="og:image" content="https://alexplaka.github.io/Zocrates/assets/Zocrates-logo.png" />
+  <meta property="og:image:alt" content="Zocrates - Local-First AI Research Assistant for Zotero" />
+  <meta property="og:locale" content="en_US" />
+
+  <!-- X (formerly Twitter) Card Meta Tags — Crawlers (Twitterbot, Discord, Slack) officially parse the twitter: namespace -->
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:url" content="https://alexplaka.github.io/Zocrates/" />
+  <meta name="twitter:title" content="Zocrates — Local-First AI Research Assistant for Zotero" />
+  <meta name="twitter:description" content="Transform your personal Zotero library into an active, verifiable, and local-first research partner with multi-agent search and vectorless reading." />
+  <meta name="twitter:image" content="https://alexplaka.github.io/Zocrates/assets/Zocrates-logo.png" />
+  <meta name="twitter:image:alt" content="Zocrates - Local-First AI Research Assistant for Zotero" />
+
+  <!-- Structured Data (JSON-LD) for Rich Google Search Results -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        "@id": "https://alexplaka.github.io/Zocrates/#software",
+        "name": "Zocrates",
+        "url": "https://alexplaka.github.io/Zocrates/",
+        "description": "A local-first, privacy-respecting AI research assistant and companion extension for Zotero 10+.",
+        "applicationCategory": "EducationalApplication",
+        "operatingSystem": "Linux, macOS, Windows",
+        "softwareVersion": "0.90.0",
+        "license": "https://www.gnu.org/licenses/agpl-3.0.html",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "author": {
+          "@type": "Person",
+          "name": "Alex Plaka",
+          "url": "https://github.com/alexplaka"
+        },
+        "image": "https://alexplaka.github.io/Zocrates/assets/Zocrates-logo.png",
+        "featureList": [
+          "Native Zotero 10 Split-Pane Sidebar",
+          "Combined Semantic Search and Vectorless Table of Contents Reading",
+          "Evidence-Gated Strictly Local Paper Relations Graph",
+          "Per-Occurrence Citation Verification",
+          "Open Knowledge Format (OKF v0.2) Markdown Bundles",
+          "Local Model Context Protocol (MCP) Server Bridge",
+          "Adaptive Context Compaction for 50+ Turn Sessions",
+          "One-Click Online Literature Discovery and Zotero Import",
+          "Zotero 10 PDF Reader Text Excerpt and Area Snippet Bridge"
+        ]
+      },
+      {
+        "@type": "WebSite",
+        "@id": "https://alexplaka.github.io/Zocrates/#website",
+        "url": "https://alexplaka.github.io/Zocrates/",
+        "name": "Zocrates",
+        "description": "An LLM-Powered Research Assistant for Zotero",
+        "inLanguage": "en-US"
+      }
+    ]
+  }
+  </script>
+
+  <link rel="icon" type="image/png" href="assets/Zocrates-logo.png" />
+  <link rel="apple-touch-icon" href="assets/Zocrates-logo.png" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body data-theme="slate">
+
+  <!-- Ambient Glow Background -->
+  <div class="ambient-bg" aria-hidden="true">
+    <div class="ambient-orb orb-1"></div>
+    <div class="ambient-orb orb-2"></div>
+    <div class="ambient-orb orb-3"></div>
+  </div>
+
+  <!-- ====================================================================
+       STICKY NAVIGATION HEADER
+       ==================================================================== -->
+  <header class="site-header">
+    <div class="container nav-inner">
+      <a href="#" class="brand-link">
+        <img src="assets/Zocrates-logo.png" alt="Zocrates Logo" class="brand-logo" />
+        <div class="brand-text-col">
+          <span class="brand-title">Zocrates</span>
+          <span class="brand-subtitle">For Zotero 10+</span>
+        </div>
+      </a>
+
+      <nav aria-label="Main Navigation">
+        <ul class="nav-links">
+          <li><a href="#commitments">Why Zocrates</a></li>
+          <li><a href="#modes">Workflows</a></li>
+          <li><a href="#capabilities">Capabilities</a></li>
+          <li><a href="#privacy-security">Privacy</a></li>
+          <li><a href="#installation">Install</a></li>
+          <li><a href="#value-matrix">Comparison</a></li>
+          <!-- <li><a href="#pricing-preview" title="Pricing information page coming next">Pricing <span class="nav-pill-soon">Soon</span></a></li> -->
+        </ul>
+      </nav>
+
+      <div class="nav-actions">
+        <a href="#installation" class="btn btn-primary btn-sm">Get on GitHub</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- ====================================================================
+       HERO SECTION & INTERACTIVE SPLIT-PANE ZOTERO WORKBENCH
+       ==================================================================== -->
+  <main>
+    <section class="hero-section">
+      <div class="container">
+        <div class="hero-header">
+          <div class="eyebrow-banner">
+            <span class="eyebrow-dot"></span>
+            <span>Built for Zotero 10+ • Local-First Privacy • Verifiable Academic Attribution</span>
+          </div>
+
+          <h1 class="hero-title">
+            Transform Your Zotero Library into an <span class="gradient-text">Active, Verifiable Research Partner</span>
+          </h1>
+
+          <p class="hero-subtitle">
+            Your Zotero library represents years of careful curation—hundreds or thousands of papers, annotations, and personal notes. Zocrates pairs state-of-the-art multi-agent AI with uncompromising scholarly rigor directly on your desktop.
+          </p>
+
+          <div class="hero-cta-group">
+            <a href="#installation" class="btn btn-primary">
+              <span>Install from GitHub</span>
+              <span>→</span>
+            </a>
+            <a href="#modes" class="btn btn-secondary">
+              <span>Explore 3 Ways to Work</span>
+            </a>
+            <a href="docs/" target="_blank" rel="noopener noreferrer" class="btn btn-secondary">
+              <span>Documentation ↗</span>
+            </a>
+          </div>
+
+          <div class="hero-trust-pills">
+            <span class="trust-pill">🎯 Combined Semantic &amp; Whole-Section Reading</span>
+            <span class="trust-pill">⚖️ Verifiable Citations &amp; Live Evidence Peeks</span>
+            <span class="trust-pill">📑 Native Zotero PDF Reader Excerpts &amp; Area Crops</span>
+            <span class="trust-pill">🌐 Agentic Online Discovery &amp; 1-Click Import</span>
+            <span class="trust-pill">📝 Searchable Memory via Native Zotero Notes</span>
+            <span class="trust-pill">🔒 100% Local-First (Your Library Stays on Your Machine)</span>
+          </div>
+        </div>
+
+        <!-- Interactive Zotero 10 + Zocrates Split-Pane Workbench -->
+        <div class="workbench-frame" aria-label="Interactive Zocrates inside Zotero 10 Preview">
+          <div class="workbench-titlebar">
+            <div class="window-dots" aria-hidden="true">
+              <span></span><span></span><span></span>
+            </div>
+            <div class="workbench-tabs">
+              <span id="tab-my-library" class="workbench-tab">My Library (1,420 items)</span>
+              <span class="workbench-tab active">📄 Vaswani et al. (2017) — Attention Is All You Need.pdf</span>
+              <span class="workbench-tab">🕸️ Paper Relations Network</span>
+            </div>
+          </div>
+
+          <div class="workbench-split">
+            <!-- Left Pane: Simulated Zotero 10+ PDF Reader -->
+            <div id="zotero-reader-pane" class="zotero-reader-pane">
+              <div class="reader-toolbar">
+                <span id="reader-status-label">Zotero 10+ Built-in PDF Reader • Page 4 of 15</span>
+                <span class="mono" style="color:var(--text-muted);">Scope: Papers Mode (Auto-Anchored)</span>
+              </div>
+
+              <div class="pdf-page-canvas">
+                <div class="pdf-paper-header">
+                  <div class="pdf-paper-title">Attention Is All You Need</div>
+                  <div class="pdf-paper-meta">Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit et al. • NeurIPS 2017</div>
+                </div>
+
+                <div class="pdf-section-heading">3.2.2 Multi-Head Attention</div>
+
+                <div id="pdf-passage-1" class="pdf-highlight-passage">
+                  "Multi-head attention allows the model to jointly attend to information from different representation subspaces at different positions. With a single attention head, averaging inhibits this."
+                </div>
+
+                <div id="pdf-passage-2" class="pdf-equation-text">
+                  Where the projections are parameter matrices <i>W<sub>i</sub><sup>Q</sup></i> ∈ ℝ<sup><i>d</i><sub>model</sub> × <i>d<sub>k</sub></i></sup>, <i>W<sub>i</sub><sup>K</sup></i> ∈ ℝ<sup><i>d</i><sub>model</sub> × <i>d<sub>k</sub></i></sup>, <i>W<sub>i</sub><sup>V</sup></i> ∈ ℝ<sup><i>d</i><sub>model</sub> × <i>d<sub>v</sub></i></sup>, and <i>W<sup>O</sup></i> ∈ ℝ<sup><i>h d<sub>v</sub></i> × <i>d</i><sub>model</sub></sup>. In this work we employ <i>h</i> = 8 parallel attention layers, or heads.
+                </div>
+
+                <!-- Simulated Bounding-Box Area Crop in Zotero 10 Reader -->
+                <div class="pdf-area-crop-box" title="Right-click any figure or equation in Zotero's PDF Reader to send a high-res crop (<150KB JPEG) directly to vision-capable models">
+                  <div class="crop-box-header">
+                    <span>📐 Area Annotation Box (Figure 2 — Ablation Perplexity vs. Head Count)</span>
+                    <span>&lt;150KB JPEG • Live Resize Tracked</span>
+                  </div>
+                  <div class="mini-chart-bars" aria-hidden="true">
+                    <div class="chart-bar-group">
+                      <div class="chart-bar" style="height: 28px;"></div>
+                      <span class="chart-bar-label">h=1 (25.8)</span>
+                    </div>
+                    <div class="chart-bar-group">
+                      <div class="chart-bar" style="height: 40px;"></div>
+                      <span class="chart-bar-label">h=4 (25.1)</span>
+                    </div>
+                    <div class="chart-bar-group">
+                      <div class="chart-bar" style="height: 52px;"></div>
+                      <span class="chart-bar-label">h=8 (24.9 ★)</span>
+                    </div>
+                    <div class="chart-bar-group">
+                      <div class="chart-bar" style="height: 36px;"></div>
+                      <span class="chart-bar-label">h=16 (25.0)</span>
+                    </div>
+                    <div class="chart-bar-group">
+                      <div class="chart-bar" style="height: 22px;"></div>
+                      <span class="chart-bar-label">h=32 (25.4)</span>
+                    </div>
+                  </div>
+                  <div class="context-menu-badge">
+                    <span>🖱️ Right-Click →</span>
+                    <span style="color:var(--accent);">"Zocrates: Add to Context"</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right Pane: Simulated Zocrates Split-Pane Sidebar -->
+            <div class="zocrates-sidebar-pane">
+              <div class="sidebar-top-bar">
+                <div class="sidebar-brand">
+                  <img src="assets/Zocrates-logo.png" alt="Zocrates Logo" />
+                  <span>Zocrates</span>
+                  <span class="brand-badge">Coordinator + ReAct Pipeline</span>
+                </div>
+                <span class="mono" style="font-size:0.72rem; color:var(--success);">● Local Backend :8765</span>
+              </div>
+
+              <!-- Chat Stream -->
+              <div class="chat-stream-area">
+                <div class="chat-bubble-user">
+                  Why does multi-head attention outperform single-head attention in Fig. 2, and how does FlashAttention optimize its memory footprint?
+                </div>
+
+                <div class="chat-bubble-assistant">
+                  <p>
+                    Projecting queries, keys, and values into <i>h</i> = 8 lower-dimensional subspaces (<i>d<sub>k</sub></i> = <i>d<sub>v</sub></i> = <i>d</i><sub>model</sub>/<i>h</i> = 64) allows the model to jointly attend to distinct representation subspaces at different positions without averaging inhibition
+                    <button type="button" class="citation-pill hero-citation-pill active" data-cite="1">Vaswani et al. (2017)</button>.
+                  </p>
+
+                  <div class="math-formula-block">
+                    <span class="math-rendered">MultiHead(<i>Q</i>, <i>K</i>, <i>V</i>) = Concat(head<sub>1</sub>, …, head<sub><i>h</i></sub>)<i>W</i><sup><i>O</i></sup></span>
+                  </div>
+
+                  <p>
+                    While standard multi-head attention materializes the full <i>N</i> × <i>N</i> intermediate attention matrix in GPU memory, IO-aware tiling partitions inputs into fast on-chip SRAM blocks <button type="button" class="citation-pill hero-citation-pill" data-cite="2">Dao et al. (2022)</button>, while sparse attention combines local sliding windows with global tokens for linear 𝒪(<i>N</i>) sequence scaling <button type="button" class="citation-pill hero-citation-pill" data-cite="3">Beltagy et al. (2020)</button>.
+                  </p>
+
+                  <!-- Live Interactive Evidence Peek Popover -->
+                  <div class="evidence-popover" aria-live="polite">
+                    <div class="popover-top">
+                      <span id="popover-doc-title" class="popover-doc-title">Vaswani et al. (2017) — Attention Is All You Need</span>
+                      <span id="popover-confidence" class="confidence-badge">Verified Support: 94%</span>
+                    </div>
+                    <div id="popover-section" class="popover-section-crumb">§ 3.2.2 Multi-Head Attention (Lines 142–168)</div>
+                    <blockquote id="popover-quote" class="popover-quote">
+                      "Multi-head attention allows the model to jointly attend to information from different representation subspaces at different positions. With a single attention head, averaging inhibits this."
+                    </blockquote>
+                    <div class="popover-actions">
+                      <button type="button" id="btn-open-in-reader" class="popover-btn">📖 Open in Reader</button>
+                      <button type="button" id="btn-select-in-library" class="popover-btn">🗂️ Select in Library</button>
+                      <span id="popover-action-status" class="popover-action-status" aria-live="polite"></span>
+                    </div>
+                  </div>
+
+                  <!-- Two-Tier Sources Guarantee (Complete Source Transparency) -->
+                  <div class="two-tier-sources">
+                    <div class="tier-heading">
+                      <span>Cited Sources (3 Verified)</span>
+                      <span style="color:var(--success); font-size:0.72rem;">✓ Complete Source Transparency</span>
+                    </div>
+                    <ul class="tier-list">
+                      <li>• <strong>Vaswani et al. (2017)</strong> — <em>Attention Is All You Need</em></li>
+                      <li>• <strong>Dao et al. (2022)</strong> — <em>FlashAttention: Fast and Memory-Efficient Exact Attention</em></li>
+                      <li>• <strong>Beltagy et al. (2020)</strong> — <em>Longformer: The Long-Document Transformer</em></li>
+                    </ul>
+                    <details class="tier-2-details">
+                      <summary>Other Consulted Sources (2 Evaluated, Not Directly Cited)</summary>
+                      <ul class="tier-list" style="margin-top:0.35rem; padding-left:0.5rem;">
+                        <li>• <strong>Child et al. (2019)</strong> — <em>Generating Long Sequences with Sparse Transformers</em></li>
+                        <li>• <strong>Kitaev et al. (2020)</strong> — <em>Reformer: The Efficient Transformer</em></li>
+                      </ul>
+                    </details>
+                  </div>
+
+                  <!-- Message Actions Bar (Actions on the Entire Response) -->
+                  <div class="message-action-bar">
+                    <div class="message-action-buttons">
+                      <button type="button" id="btn-save-as-note" class="message-action-btn" title="Save this response as a native Zotero rich-text note">
+                        📝 Save as Note
+                      </button>
+                      <button type="button" id="btn-copy-msg" class="message-action-btn" title="Copy response to clipboard">
+                        📋 Copy
+                      </button>
+                      <button type="button" class="message-action-btn" title="View turn provenance & token details">
+                        ℹ️ Info
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Active Context Chips Row (Positioned right above the message input bar, faithful to Zocrates) -->
+              <div class="chips-strip">
+                <span style="color:var(--text-muted); font-weight:600;">Active Context:</span>
+                <span class="context-chip">📄 Vaswani et al. (2017)</span>
+                <span class="context-chip">📄 Dao et al. (2022)</span>
+                <span class="context-chip excerpt-pill">🖼️ Crop: Fig. 2 Head Ablation (p. 4) ✕</span>
+              </div>
+
+              <!-- Predictive Ghost Text Input Bar -->
+              <div id="hero-ghost-bar" class="ghost-input-bar" role="button" tabindex="0" aria-label="Accept predictive prompt suggestion" title="Click or press Enter/Tab to accept the Predictive Next-Prompt suggestion">
+                <span id="hero-ghost-text" class="ghost-text-content">
+                  How does FlashAttention partition work across thread blocks to reduce memory overhead?
+                </span>
+                <span id="hero-ghost-badge" class="tab-key-badge">Accept [Tab ⇥]</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================================
+         SECTION 1: FOUR FUNDAMENTAL COMMITMENTS (WHY ZOCRATES)
+         ==================================================================== -->
+    <section id="commitments" class="section section-alt">
+      <div class="container">
+        <div class="section-header">
+          <span class="section-tag">Core Philosophy</span>
+          <h2 class="section-title">Engineered Around Four Fundamental Commitments</h2>
+          <p class="section-desc">
+            Rather than locking your curated library behind closed proprietary clouds or treating academic PDFs as opaque text dumps, Zocrates respects how scholars read, verify, and think.
+          </p>
+        </div>
+
+        <div class="philosophy-callout-card">
+          <div class="philosophy-callout-badge">
+            <span class="philosophy-badge-icon">🏛️</span>
+            <span>Why "Zocrates"?</span>
+          </div>
+          <p class="philosophy-callout-text">
+            The name <strong>Zocrates</strong> is a portmanteau of <strong>Zotero</strong> and <strong>Socrates</strong>, honoring the classical philosopher renowned for dialectical inquiry and intellectual honesty. Rather than acting as an ungrounded oracle, Zocrates embodies the Socratic method by actively questioning literature, probing research gaps, and demanding verifiable evidence for every claim. It transforms your personal Zotero collection from a passive repository into an inquisitive, rigorous dialogue partner.
+          </p>
+        </div>
+
+        <div class="commitments-grid">
+          <article class="commitment-card">
+            <div class="commitment-icon">🧭</div>
+            <h3>1. Multiple Ways to Work</h3>
+            <p>
+              Use Zocrates as an embedded split-pane companion inside Zotero, as an open Markdown knowledge bundle engine on your filesystem, or as a local Model Context Protocol (MCP) server for external assistants like Claude Desktop, Cursor, Pi &amp; others (any application that supports MCP).
+            </p>
+          </article>
+
+          <article class="commitment-card">
+            <div class="commitment-icon">🛡️</div>
+            <h3>2. Local-First &amp; Hardened by Design</h3>
+            <p>
+              Your search indices, converted Markdown bundles, <strong>strictly local deterministic paper relation graphs</strong>, and chat histories live 100% on your machine—fortified by 256-bit loopback auth, strict CORS isolation, safe DOM sanitization, and encrypted credential storage.
+            </p>
+          </article>
+
+          <article class="commitment-card">
+            <div class="commitment-icon">⚖️</div>
+            <h3>3. Scholarly Rigor &amp; Verifiable Truth</h3>
+            <p>
+              Every synthesized claim is anchored in exact document passages, checked on a per-occurrence basis by fast AI decision verifiers, and backed by Two-Tier Source reporting so zero evaluated literature is ever silently dropped.
+            </p>
+          </article>
+
+          <article class="commitment-card">
+            <div class="commitment-icon">🔭</div>
+            <h3>4. End-to-End Scholarly Experience</h3>
+            <p>
+              From native KaTeX mathematics, inline extracted paper figures, and user-curated long-term memory via native Zotero notes to autonomous online literature discovery across OpenAlex, Crossref, and Unpaywall with one-click Zotero collection import.
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================================
+         SECTION 2: THREE FLEXIBLE WAYS TO WORK (INTERACTIVE MODE EXPLORER)
+         ==================================================================== -->
+    <section id="modes" class="section">
+      <div class="container">
+        <div class="section-header">
+          <span class="section-tag">Workflow Adaptability</span>
+          <h2 class="section-title">Three Flexible Ways to Work with Your Library</h2>
+          <p class="section-desc">
+            Every researcher has a distinct technical setup. Switch between modes below—or use all three simultaneously against the same local knowledge base.
+          </p>
+        </div>
+
+        <!-- Mode Selector Tabs -->
+        <div class="modes-tabs-nav" role="tablist">
+          <button type="button" class="mode-tab-btn active" data-mode="1" role="tab">
+            <span class="mode-tab-num">Mode 01 • Embedded Desktop</span>
+            <span class="mode-tab-title">Native Zotero Companion</span>
+            <span class="mode-tab-sub">Split-pane sidebar, PDF visual crops &amp; deep research controls</span>
+          </button>
+
+          <button type="button" class="mode-tab-btn" data-mode="2" role="tab">
+            <span class="mode-tab-num">Mode 02 • Filesystem &amp; Plain Text</span>
+            <span class="mode-tab-title">Open Markdown Bundles</span>
+            <span class="mode-tab-sub">Self-contained OKF v0.2 folders for direct agent exploration</span>
+          </button>
+
+          <button type="button" class="mode-tab-btn" data-mode="3" role="tab">
+            <span class="mode-tab-num">Mode 03 • External AI Coding Agents</span>
+            <span class="mode-tab-title">Local MCP Server Bridge</span>
+            <span class="mode-tab-sub">Connect Claude, Cursor, Pi &amp; others via standard MCP</span>
+          </button>
+        </div>
+
+        <!-- Mode 1 Panel -->
+        <div id="mode-panel-1" class="mode-panel active">
+          <div class="mode-details">
+            <span class="mode-scope-badge">✓ Scales to Thousands of Papers (Hybrid Search &amp; Outline Navigation)</span>
+            <h3>Mode 1: The Native Companion Inside Zotero</h3>
+            <p style="color:var(--text-secondary);">
+              Designed for researchers who want a deeply integrated desktop workspace without ever leaving Zotero's window.
+            </p>
+            <ul class="mode-feature-list">
+              <li>
+                <span class="check-bullet">✦</span>
+                <div><strong>Embedded Split-Pane Workspace:</strong> Lives natively inside Zotero and synchronizes with 5 themes (Slate, AMOLED, Zotero Dark, Zotero Light, Sepia).</div>
+              </li>
+              <li>
+                <span class="check-bullet">✦</span>
+                <div><strong>Beyond Naive RAG (Combined Semantic &amp; Vectorless Reading):</strong> Blends hybrid vector/keyword search for broad exploratory queries with surgical, vectorless Table of Contents reading (<code>read_document(asset_id='sX')</code>) for targeted investigations—preserving complete arguments, unbroken mathematical proofs, and tables without chunk salad fragmentation.</div>
+              </li>
+              <li>
+                <span class="check-bullet">✦</span>
+                <div><strong>Autonomous Academic Search:</strong> Navigates semantic and keyword indices, reads hierarchical outlines and section headings, and synthesizes the most relevant findings.</div>
+              </li>
+              <li>
+                <span class="check-bullet">✦</span>
+                <div><strong>Micro-Focal PDF Reader Integration:</strong> Right-click highlighted passages or draw bounding-box area crops around figures and equations to inject them directly into chat.</div>
+              </li>
+              <li>
+                <span class="check-bullet">✦</span>
+                <div><strong>In-Depth Research Checkpoints &amp; Online Import:</strong> Conduct thorough cross-paper investigations with checkpoint controls and import novel Open Access papers in one click.</div>
+              </li>
+              <li>
+                <span class="check-bullet">✦</span>
+                <div><strong>Save to Native Zotero Notes (User-Curated Memory):</strong> Save any message, synthesis, or entire research session as a native Zotero note. Saved notes are automatically indexed alongside PDFs into your local search engine, making previous research permanently searchable in future sessions.</div>
+              </li>
+            </ul>
+          </div>
+
+          <div class="mode-visual-box">
+            <div style="color:var(--accent); font-weight:700; margin-bottom:0.65rem;">
+              // How Zocrates Investigates Your Research Questions
+            </div>
+            <pre style="white-space:pre-wrap; line-height:1.6; color:#cbd5e1;">1. Your Research Question &amp; Context
+   • Focus on specific papers, collections, or your whole library
+   • Right-click text selections or crop figures and formulas in Zotero's reader
+
+2. In-Depth Literature Investigation
+   • Reads paper structures, section headings, and full text
+   • Follows thematic links and connected literature across your library
+   • Extracts key methodology, evidence, and substantive arguments
+
+3. Rigorous Claim Verification
+   • Evaluates every assertion against cited source passages
+   • Only attaches citation pills to claims backed by source text
+   • Accounts for all consulted papers with complete transparency
+
+4. Scholar-Ready Synthesis
+   • Interactive Author-Year citation pills with live Evidence Peeks
+   • Clean mathematical formulas and inline paper figures
+   • Anticipates your next research questions with smart suggestions
+   • 1-click save to native Zotero notes for cross-session searchable memory</pre>
+          </div>
+        </div>
+
+        <!-- Mode 2 Panel -->
+        <div id="mode-panel-2" class="mode-panel">
+          <div class="mode-details">
+            <span class="mode-scope-badge">✓ Ideal for Focused Collections (Hundreds of Papers)</span>
+            <h3>Mode 2: Open Markdown Knowledge Bundles (OKF v0.2)</h3>
+            <p style="color:var(--text-secondary);">
+              For researchers who love plain text, Unix philosophy, and direct filesystem ownership. Point Cursor, Claude Code, Pi, or other favorite coding agent straight at your <code>corpus/</code> directory—zero external bridges required.
+            </p>
+            <ul class="mode-feature-list">
+              <li>
+                <span class="check-bullet">✦</span>
+                <div><strong>Self-Contained Item Bundles:</strong> Every paper and Zotero note is converted into clean Markdown with YAML bibliographic frontmatter, extracted figures (<code>images/</code>), and tables (<code>tables/</code>).</div>
+              </li>
+              <li>
+                <span class="check-bullet">✦</span>
+                <div><strong>Out-of-the-Box Agent Navigation:</strong> Includes an auto-generated root <code>index.md</code> catalog and <code>AGENTS.md</code> structural guide so any coding agent understands your library immediately.</div>
+              </li>
+              <li>
+                <span class="check-bullet">✦</span>
+                <div><strong>100% Copy-Paste Portability:</strong> Engineered with self-contained relative paths (never hardcoding machine-specific file paths) so bundles can be moved across folders, operating systems, or machines without breaking links.</div>
+              </li>
+            </ul>
+          </div>
+
+          <div class="mode-visual-box">
+            <div style="display:flex; justify-content:space-between; margin-bottom:0.6rem; color:var(--accent); font-weight:700;">
+              <span>📁 Interactive Bundle Explorer (Click a file)</span>
+              <span>OKF v0.2</span>
+            </div>
+            <div class="file-tree-interactive">
+              <div class="tree-root-label">📁 corpus/</div>
+              <div class="tree-item tree-depth-1 active" data-file="AGENTS.md">
+                <span class="tree-file-name"><span class="tree-guide">├──</span> 🤖 AGENTS.md</span>
+                <span class="tree-file-desc">LLM Navigation Guide</span>
+              </div>
+              <div class="tree-item tree-depth-1" data-file="index.md">
+                <span class="tree-file-name"><span class="tree-guide">├──</span> 🗂️ index.md</span>
+                <span class="tree-file-desc">Root Library Catalog</span>
+              </div>
+              <div class="tree-item tree-depth-1 tree-folder" data-file="document.md">
+                <span class="tree-file-name"><span class="tree-guide">└──</span> 📂 A8F92K1L/</span>
+                <span class="tree-file-desc">Paper Item Bundle</span>
+              </div>
+              <div class="tree-item tree-depth-2" data-file="document.md">
+                <span class="tree-file-name"><span class="tree-guide">    ├──</span> 📄 document.md</span>
+                <span class="tree-file-desc">YAML + Clean Markdown</span>
+              </div>
+              <div class="tree-item tree-depth-2" data-file="toc.json">
+                <span class="tree-file-name"><span class="tree-guide">    ├──</span> 📑 toc.json &amp; toc.md</span>
+                <span class="tree-file-desc">Section &amp; Asset Line Offsets</span>
+              </div>
+              <div class="tree-item tree-depth-2" data-file="item_relations.md">
+                <span class="tree-file-name"><span class="tree-guide">    └──</span> 🕸️ item_relations.md</span>
+                <span class="tree-file-desc">1-Hop Verified Neighborhood</span>
+              </div>
+            </div>
+            <pre id="tree-preview-content" class="tree-preview-box"># Zocrates OKF v0.2 Navigation Protocol for Coding Agents
+1. Inspect `index.md` to locate relevant attachment keys.
+2. Read `&lt;item_key&gt;/toc.md` or `toc.json` first for section line offsets (s0..sN) &amp; figure/table catalogs (f1..fN, t1..tN).
+3. Read targeted line ranges in `&lt;item_key&gt;/document.md` and traverse `item_relations.md` for 1-hop corroborated papers.</pre>
+          </div>
+        </div>
+
+        <!-- Mode 3 Panel -->
+        <div id="mode-panel-3" class="mode-panel">
+          <div class="mode-details">
+            <span class="mode-scope-badge">✓ Scales to Any Library Size • Zero Duplicate Memory</span>
+            <h3>Mode 3: Local Model Context Protocol (MCP) Server</h3>
+            <p style="color:var(--text-secondary);">
+              Give external AI coding tools and desktop assistants (<strong>Claude Desktop</strong>, <strong>Cursor</strong>, <strong>Pi</strong> or any other agentic application that supports the open Model Context Protocol) precision access to your entire Zotero library while you write code or draft manuscripts.
+            </p>
+            <ul class="mode-feature-list">
+              <li>
+                <span class="check-bullet">✦</span>
+                <div><strong>Thin Local Bridge:</strong> Runs locally on your workstation over the open Model Context Protocol (<code>python -m zocrates.mcp</code>), allowing external AI assistants to talk to Zocrates with zero data duplication.</div>
+              </li>
+              <li>
+                <span class="check-bullet">✦</span>
+                <div><strong>Comprehensive Library Access:</strong> External agents can search your library using natural language, inspect outlines, read specific sections, and explore related papers.</div>
+              </li>
+              <li>
+                <span class="check-bullet">✦</span>
+                <div><strong>Full Autonomy for Your Tools:</strong> External assistants run their own autonomous reasoning workflows without artificial constraints.</div>
+              </li>
+            </ul>
+          </div>
+
+          <div class="mode-visual-box">
+            <div style="color:var(--accent); font-weight:700; margin-bottom:0.65rem;">
+              // Connect External Assistants via Model Context Protocol (MCP)
+            </div>
+            <pre style="white-space:pre-wrap; line-height:1.55; color:#cbd5e1;">{
+  "mcpServers": {
+    "zocrates": {
+      "command": "python",
+      "args": ["-m", "zocrates.mcp"]
+    }
+  }
+}
+
+── What This Enables in Claude, Cursor, Pi &amp; Other MCP Assistants ──
+• Semantic &amp; keyword search across your entire Zotero library
+• Inspect paper outlines, section headings, figures, and tables
+• Read targeted excerpts and full converted Markdown documents
+• Traverse verified citations and thematic paper relationships
+• Dedicated literature review prompts and library indexes</pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================================
+         SECTION 3: INTERACTIVE BENTO FEATURE SHOWCASES
+         ==================================================================== -->
+    <section id="capabilities" class="section section-alt">
+      <div class="container">
+        <div class="section-header">
+          <span class="section-tag">Deep Capabilities</span>
+          <h2 class="section-title">Designed for the Realities of Academic Research</h2>
+          <p class="section-desc">
+            Every subsystem in Zocrates is built to eliminate hallucinations, surface visual and mathematical nuance, and accelerate literature discovery.
+          </p>
+        </div>
+
+        <div class="bento-grid">
+          <!-- Bento 1: Verifiable Citations & Clean Manuscript Export (Span 7) -->
+          <article class="bento-card span-7">
+            <div>
+              <span class="bento-tag">Epistemic Honesty • Per-Occurrence Claim Verification</span>
+              <h3>Citations You Can Trust &amp; Distraction-Free Manuscript Export</h3>
+              <p style="margin-top:0.5rem;">
+                Calibrated AI verification models check each claim against the source text. If an in-text citation references multiple papers and one does not support the claim, the unsupported citation is automatically pruned while preserving the verified one. Toggle between interactive author-year pills, manuscript copy format, and distraction-free reading below:
+              </p>
+            </div>
+
+            <div class="interactive-widget">
+              <div class="widget-toolbar">
+                <span style="font-size:0.78rem; font-weight:700; color:var(--text-secondary);">Live Citation Mode Switcher:</span>
+                <div class="toggle-btn-group">
+                  <button type="button" class="toggle-pill-btn cite-mode-btn active" data-citemode="pills">Interactive Citation Pills</button>
+                  <button type="button" class="toggle-pill-btn cite-mode-btn" data-citemode="manuscript">Manuscript Copy (APA)</button>
+                  <button type="button" class="toggle-pill-btn cite-mode-btn" data-citemode="clean">Distraction-Free Prose</button>
+                </div>
+              </div>
+              <div id="cite-mode-display" style="display:flex; flex-direction:column; gap:0.65rem;">
+                <p style="font-size:0.86rem; color:var(--text-main);">
+                  Exact tiling algorithms eliminate redundant memory reads and writes during attention forward and backward passes
+                  <span class="citation-pill">Dao et al. (2022)</span>, achieving a 3.2× speedup over standard baselines
+                  <span class="citation-pill">Dao (2023)</span>.
+                </p>
+                <div style="font-size:0.75rem; color:var(--success); display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                  <span>✓ Claim Verification: Both assertions verified against source papers</span>
+                  <span>• If a paper does not support a claim, the unsupported citation is automatically pruned</span>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <!-- Bento 2: Agentic Online Discovery & One-Click Import (Span 5) -->
+          <article class="bento-card span-5">
+            <div>
+              <span class="bento-tag">OpenAlex • Crossref • Unpaywall</span>
+              <h3>Agentic Online Discovery &amp; 1-Click Import</h3>
+              <p style="margin-top:0.5rem;">
+                Queries scholarly databases, deduplicates against your local Zotero library (via DOI, arXiv ID, and title Levenshtein similarity), stages verified Open Access PDFs, and writes directly into your target collection.
+              </p>
+            </div>
+
+            <div class="interactive-widget">
+              <div class="candidate-card-item checked">
+                <input type="checkbox" checked aria-label="Select FlashAttention-2" style="margin-top:0.2rem;" />
+                <div>
+                  <div style="font-weight:700; color:var(--text-main);"><span class="mono" style="color:var(--accent); font-weight:700;">[1]</span> FlashAttention-2: Faster Attention with Better Parallelism</div>
+                  <div style="font-size:0.74rem; color:var(--text-muted);">Tri Dao • ICLR 2024 • DOI: 10.48550/arXiv.2307.08691</div>
+                  <div class="candidate-meta-badges">
+                    <span class="mini-badge novel">✓ Novel (Not in Library)</span>
+                    <span class="mini-badge oa">📄 OA PDF Ready</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="candidate-card-item checked">
+                <input type="checkbox" checked aria-label="Select Ring Attention" style="margin-top:0.2rem;" />
+                <div>
+                  <div style="font-weight:700; color:var(--text-main);"><span class="mono" style="color:var(--accent); font-weight:700;">[2]</span> Ring Attention with Blockwise Transformers for Near-Infinite Context</div>
+                  <div style="font-size:0.74rem; color:var(--text-muted);">Hao Liu, Matei Zaharia, Pieter Abbeel • ICLR 2024</div>
+                  <div class="candidate-meta-badges">
+                    <span class="mini-badge novel">✓ Novel (Not in Library)</span>
+                    <span class="mini-badge oa">📄 OA PDF Ready</span>
+                  </div>
+                </div>
+              </div>
+
+              <div style="display:flex; align-items:center; justify-content:space-between; gap:0.5rem; flex-wrap:wrap;">
+                <span style="font-size:0.75rem; color:var(--text-muted);">Target: 📁 <strong>Efficient Transformers</strong></span>
+                <button type="button" id="btn-simulate-import" class="btn btn-primary btn-sm">Import Selected to Zotero</button>
+              </div>
+              <div id="import-sim-status" style="font-size:0.74rem; color:var(--text-muted);">
+                Results from online discovery display reference numbers [1], [2]. Once imported into Zotero, Zocrates provides clickable author-year citation pills with live Evidence Peeks.
+              </div>
+            </div>
+          </article>
+
+          <!-- Bento 3: Beyond Naive RAG (Combined Semantic Search & Vectorless Reading) (Span 6) -->
+          <article class="bento-card span-6">
+            <div>
+              <span class="bento-tag">Beyond Naive RAG • Dual-Channel Architecture</span>
+              <h3>Combined Semantic Search &amp; Vectorless Reading</h3>
+              <p style="margin-top:0.5rem;">
+                Standard AI search tools chop papers into arbitrary fragments, scattering sentences, breaking equations, and severing tables. Zocrates combines <strong>broad semantic search</strong> across your entire library with <strong>targeted, vectorless reading</strong>: the search agent inspects the author's Table of Contents and reads entire cohesive sections (<code>read_document(asset_id='sX')</code>), preserving complete arguments and narrative context with maximum token efficiency.
+              </p>
+            </div>
+
+            <div class="interactive-widget">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.4rem;">
+                <span style="font-size:0.8rem; font-weight:700; color:var(--text-main);">🎯 Retrieval Paradigm Comparison</span>
+                <span class="mini-badge novel">Whole-Section Reading</span>
+              </div>
+              <div style="display:grid; grid-template-columns: 1fr 1fr; gap:0.5rem; font-size:0.75rem;">
+                <div style="background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.25); border-radius:6px; padding:0.5rem;">
+                  <div style="font-weight:700; color:#ef4444; margin-bottom:0.25rem;">❌ Arbitrary Chunk Slicing</div>
+                  <div style="color:var(--text-secondary); line-height:1.4;">
+                    • Slices text into disconnected fragments<br/>
+                    • Formulas truncated mid-equation<br/>
+                    • Tables severed or omitted<br/>
+                    • Hallucinates links between disconnected scraps
+                  </div>
+                </div>
+                <div style="background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); border-radius:6px; padding:0.5rem;">
+                  <div style="font-weight:700; color:#10b981; margin-bottom:0.25rem;">✓ Zocrates Dual-Channel</div>
+                  <div style="color:var(--text-secondary); line-height:1.4;">
+                    • Broad queries: Library-wide semantic search<br/>
+                    • Targeted queries: Full section reading<br/>
+                    • Full LaTeX math &amp; tables intact<br/>
+                    • Active papers: Direct Table of Contents focus
+                  </div>
+                </div>
+              </div>
+              <div style="font-size:0.72rem; color:var(--text-muted); margin-top:0.4rem;">
+                Reading complete sections preserves nuanced arguments, experimental controls, and mathematical derivations that arbitrary chunking breaks.
+              </div>
+            </div>
+          </article>
+
+          <!-- Bento 4: Evidence-Gated Paper Relations Network (Span 6) -->
+          <article class="bento-card span-6">
+            <div>
+              <span class="bento-tag">100% Strictly Local • Deterministic Algorithms • 0 Cloud Calls</span>
+              <h3>Evidence-Gated Paper Relations (Strictly Local)</h3>
+              <p style="margin-top:0.5rem;">
+                Generated <strong>strictly locally using deterministic algorithms</strong> (statistical keyphrase extraction and reciprocal rank fusion hybrid scoring)—requiring <strong>zero LLM calls and zero cloud requests</strong>. Standard graph tools force every paper to connect to a fixed number of neighbors, hallucinating links between unrelated topics. Zocrates forms edges <strong>only</strong> when dense semantic vectors and statistical keyphrases corroborate each other mathematically. Click any node in the live graph below:
+              </p>
+            </div>
+
+            <div class="graph-canvas-wrap">
+              <canvas id="relations-canvas" aria-label="Interactive Paper Relations Graph Demo"></canvas>
+              <div class="graph-inspector-pill">
+                <span id="graph-inspector-text" style="color:var(--text-main); font-weight:500;">
+                  Vaswani et al. (2017) • 3 verified edges • Keyphrases: "multi-head attention", "scaled dot-product" • 100% Deterministic Local Algorithm
+                </span>
+              </div>
+            </div>
+          </article>
+
+          <!-- Bento 4: User-Curated Long-Term Memory via Native Zotero Notes (Span 6) -->
+          <article class="bento-card span-6">
+            <div>
+              <span class="bento-tag">Native Zotero Notes • Searchable Cross-Session Memory</span>
+              <h3>User-Curated Long-Term Memory via Zotero Notes</h3>
+              <p style="margin-top:0.5rem;">
+                Save individual assistant answers, comparative syntheses, or entire research sessions directly into Zotero as native rich-text notes with a single click. Because Zocrates converts and indexes your Zotero notes alongside PDFs into its local vector and full-text engines, <strong>your past discoveries automatically become searchable in future sessions</strong>.
+              </p>
+            </div>
+
+            <div class="interactive-widget">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.4rem;">
+                <span style="font-size:0.8rem; font-weight:700; color:var(--text-main);">📝 Native Note Integration Demo</span>
+                <span class="mini-badge oa">Instant Local Re-indexing</span>
+              </div>
+              <div class="note-preview-box" style="background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:0.75rem; font-size:0.8rem; color:var(--text-secondary); line-height:1.5;">
+                <div style="font-weight:600; color:var(--accent); margin-bottom:0.25rem;">📄 Note: FlashAttention vs. Standard Attention Breakdown</div>
+                <div style="color:var(--text-muted); font-size:0.72rem; margin-bottom:0.4rem;">Saved from Session: "Attention Mechanics Deep Dive" • Attached to Vaswani et al. (2017)</div>
+                <div>• Eliminates HBM memory roundtrips using GPU SRAM blockwise tiling.<br/>
+                     • Reduces runtime memory overhead from quadratic 𝒪(<i>N</i>²) to linear 𝒪(<i>N</i>).</div>
+              </div>
+              <div style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:0.65rem;">
+                <button type="button" id="btn-save-note-sim" class="btn btn-primary btn-sm">💾 Save Message as Note</button>
+                <button type="button" id="btn-save-session-sim" class="btn btn-secondary btn-sm">📚 Save Full Session as Note</button>
+              </div>
+              <div id="note-sim-status" style="font-size:0.74rem; color:var(--success); margin-top:0.35rem;">
+                ✓ 1-Click Save: Creates native rich-text note in Zotero &amp; indexes for future chat retrieval.
+              </div>
+            </div>
+          </article>
+
+          <!-- Bento 6: Interactive Research Checkpoints (Human-in-the-Loop) (Span 6) -->
+          <article class="bento-card span-6">
+            <div>
+              <span class="bento-tag">Human-in-the-Loop • Steerable Autonomous Retrieval</span>
+              <h3>Interactive Research Checkpoints</h3>
+              <p style="margin-top:0.5rem;">
+                Autonomous research agents should never be uncontrollable black boxes. When exploring complex topics or comparing literature, Zocrates investigates deeply and pauses at natural milestones with a clear checkpoint summary of what has been discovered and what remains open. You decide whether to extend the search with custom guidance or synthesize the findings right away.
+              </p>
+            </div>
+
+            <div class="interactive-widget">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:0.8rem; font-weight:700; color:var(--warning);">⏸️ Research Investigation Checkpoint</span>
+                <span class="mono" style="font-size:0.72rem; color:var(--text-muted);">6 papers investigated • Ready for your guidance</span>
+              </div>
+              <p style="font-size:0.8rem; color:var(--text-secondary); margin:0.4rem 0;">
+                <strong>Synthesized:</strong> Attention memory complexity and IO-aware tiling across 6 papers in your library.<br/>
+                <strong>Open Question:</strong> Multi-node communication benchmarks on long sequence workloads.
+              </p>
+              <div style="display:flex; gap:0.6rem; flex-wrap:wrap;">
+                <button type="button" id="btn-hitl-extend" class="btn btn-primary btn-sm">Extend Investigation (Search Further)</button>
+                <button type="button" id="btn-hitl-synthesize" class="btn btn-secondary btn-sm">Synthesize Current Findings</button>
+              </div>
+              <div id="hitl-budget-status" style="font-size:0.75rem; color:var(--text-muted); margin-top:0.35rem;">
+                Pause points ensure you always steer deep research without running up unexpected cloud or computing costs.
+              </div>
+            </div>
+          </article>
+
+          <!-- Bento 7: Autonomous Adaptive Context Compaction (Span 6) -->
+          <article class="bento-card span-6">
+            <div>
+              <span class="bento-tag">SelfCompact Algorithm • Zero-Latency Background Optimization</span>
+              <h3>Adaptive Context Compaction &amp; 50+ Turn Scaling</h3>
+              <p style="margin-top:0.5rem;">
+                Extended multi-turn literature reviews quickly hit model context limits or inflate token costs. Running in the background with zero latency impact, an AI decision model evaluates topic closure to compact earlier turns while retaining the latest completed turns 100% verbatim. Raw search loops and chunk payloads are consolidated, keeping multi-hour research conversations fast, affordable, and context-rich.
+              </p>
+            </div>
+
+            <div class="interactive-widget">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.4rem;">
+                <span style="font-size:0.8rem; font-weight:700; color:var(--text-main);">🧠 Verbatim Sliding Window Architecture</span>
+                <span class="mini-badge novel">0ms First-Token Latency</span>
+              </div>
+              <div style="display:flex; flex-direction:column; gap:0.45rem; font-size:0.75rem;">
+                <div style="background:rgba(59,130,246,0.08); border:1px solid rgba(59,130,246,0.25); border-radius:6px; padding:0.5rem; display:flex; justify-content:space-between; align-items:center;">
+                  <div>
+                    <span style="font-weight:700; color:var(--accent);">Turns 1…N-2</span>
+                    <span style="color:var(--text-muted);"> • Consolidated Rolling Summary</span>
+                  </div>
+                  <span class="mini-badge" style="background:var(--accent-soft); color:var(--accent);">~85% Token Reduction</span>
+                </div>
+                <div style="background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); border-radius:6px; padding:0.5rem; display:flex; justify-content:space-between; align-items:center;">
+                  <div>
+                    <span style="font-weight:700; color:var(--success);">Turns N-1 &amp; N</span>
+                    <span style="color:var(--text-muted);"> • 100% Verbatim Retention</span>
+                  </div>
+                  <span class="mini-badge oa">Full Context Fidelity</span>
+                </div>
+              </div>
+              <div style="font-size:0.72rem; color:var(--text-muted); margin-top:0.4rem;">
+                Decision models trigger only after natural topic transitions, preventing hallucination while preserving user chat history.
+              </div>
+            </div>
+          </article>
+
+          <!-- Bento 8: Micro-Focal PDF Reader Excerpts & Area Crops (Span 6) -->
+          <article class="bento-card span-6">
+            <div>
+              <span class="bento-tag">Zotero 10 Reader Bridge • Multimodal Vision Snippets</span>
+              <h3>Micro-Focal PDF Reader Excerpts &amp; Area Crops</h3>
+              <p style="margin-top:0.5rem;">
+                Anchor conversations directly to specific passages, figures, or equations while reading in Zotero's PDF reader. Right-click any highlighted text or draw an area annotation box around a diagram or chart to add it directly to your chat context. Visual crops are passed natively to vision-capable models, with automatic parent paper linking and live annotation resize tracking.
+              </p>
+            </div>
+
+            <div class="interactive-widget">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.4rem;">
+                <span style="font-size:0.8rem; font-weight:700; color:var(--text-main);">📑 Reader Bridge Context Injection</span>
+                <span class="mini-badge oa">Multimodal Vision Ready</span>
+              </div>
+              <div style="background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:0.65rem; font-size:0.78rem;">
+                <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.35rem;">
+                  <span style="background:var(--accent); color:#fff; border-radius:4px; padding:0.15rem 0.4rem; font-size:0.68rem; font-weight:700;">TEXT EXCERPT</span>
+                  <span style="color:var(--text-muted); font-size:0.72rem;">Vaswani et al. (2017) • Page 3, §3.2.1</span>
+                </div>
+                <p style="color:var(--text-secondary); margin:0; font-style:italic;">
+                  "Multi-head attention allows the model to jointly attend to information from different representation subspaces..."
+                </p>
+                <div style="display:flex; align-items:center; gap:0.5rem; margin-top:0.45rem; padding-top:0.45rem; border-top:1px dashed var(--border);">
+                  <span style="background:var(--primary); color:#fff; border-radius:4px; padding:0.15rem 0.4rem; font-size:0.68rem; font-weight:700;">AREA CROP</span>
+                  <span style="color:var(--text-muted); font-size:0.72rem;">Figure 1: Transformer Model Architecture (128 KB JPEG crop)</span>
+                </div>
+              </div>
+              <div style="font-size:0.72rem; color:var(--text-muted); margin-top:0.4rem;">
+                Right-click "Zocrates: Add to Context" auto-anchors the parent paper and switches scope to focal reading mode.
+              </div>
+            </div>
+          </article>
+
+          <!-- Bento 9: Rich Scholarly Presentation & Multimodal Figure Captioning (Span 12) -->
+          <article class="bento-card span-12">
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:1.75rem; align-items:center;">
+              <div>
+                <span class="bento-tag">KaTeX Math • Inline Paper Figures • VLM Captioning • Mermaid v11</span>
+                <h3>Rich Scholarly Presentation &amp; Multimodal Figure Enrichment</h3>
+                <p style="margin-top:0.6rem;">
+                  Academic communication demands more than plain text. Zocrates natively renders inline and block <strong>LaTeX equations via KaTeX</strong>, displays <strong>high-resolution figures extracted directly from your papers</strong> inside chat responses, and enriches uncaptioned diagrams with Vision-Language Model <code>&lt;synthetic_caption&gt;</code> blocks indexed in both ChromaDB and SQLite FTS5.
+                </p>
+                <p style="margin-top:0.6rem;">
+                  Complex taxonomies, biological pathways, and system architectures render as <strong>100% offline Mermaid diagrams</strong> with a non-destructive toggle to copy the raw diagram code into your manuscript.
+                </p>
+              </div>
+
+              <div class="interactive-widget">
+                <div class="widget-toolbar">
+                  <span style="font-size:0.78rem; font-weight:700; color:var(--text-main);">Interactive Mermaid Concept Map</span>
+                  <button type="button" id="btn-toggle-mermaid" class="popover-btn">Show Raw Mermaid Code</button>
+                </div>
+
+                <div id="mermaid-visual-view" style="display:flex; align-items:center; justify-content:space-around; gap:0.5rem; padding:1rem 0.5rem; flex-wrap:wrap;">
+                  <div style="padding:0.6rem 0.9rem; border-radius:8px; background:var(--primary-soft); border:1px solid var(--primary); font-size:0.78rem; font-weight:700;">
+                    PDF / Note Ingestion
+                  </div>
+                  <span style="color:var(--accent); font-weight:700;">──►</span>
+                  <div style="padding:0.6rem 0.9rem; border-radius:8px; background:var(--accent-soft); border:1px solid var(--accent); font-size:0.78rem; font-weight:700;">
+                    VLM &lt;synthetic_caption&gt;
+                  </div>
+                  <span style="color:var(--accent); font-weight:700;">──►</span>
+                  <div style="padding:0.6rem 0.9rem; border-radius:8px; background:var(--success-soft); border:1px solid var(--success); font-size:0.78rem; font-weight:700;">
+                    Chroma Vector + FTS5 Index
+                  </div>
+                </div>
+
+                <pre id="mermaid-code-view" style="display:none; background:var(--code-bg); color:#e2e8f0; padding:0.85rem; border-radius:8px; font-size:0.76rem; overflow-x:auto;">graph LR
+    A[PDF / Note Ingestion] --&gt; B[VLM &lt;synthetic_caption&gt;]
+    B --&gt; C[Chroma Vector + FTS5 Index]
+    C --&gt; D[Inline Figure Display in Chat]</pre>
+              </div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================================
+         SECTION 4: LOCAL-FIRST PRIVACY, SECURITY & PRAGMATIC COMPUTE
+         ==================================================================== -->
+    <section id="privacy-security" class="section">
+      <div class="container">
+        <div class="section-header">
+          <span class="section-tag">Privacy, Security &amp; Compute Transparency</span>
+          <h2 class="section-title">100% Local Data Ownership.<br />Freedom of Compute.</h2>
+          <p class="section-desc">
+            Unpublished manuscripts and proprietary datasets belong on your workstation. Zocrates keeps every database and converted bundle on your disk while giving you pragmatic choice over inference compute.
+          </p>
+        </div>
+
+        <div class="privacy-compute-grid">
+          <!-- Left: Pragmatic Recommendation (OpenRouter Cloud + Local Storage) -->
+          <div class="arch-panel highlight-border">
+            <div class="arch-panel-header">
+              <h3 style="font-size:1.35rem;">⚡ Cloud Models via OpenRouter</h3>
+              <span class="mode-scope-badge" style="margin-bottom:0;">Recommended for Speed &amp; Depth</span>
+            </div>
+            <p style="color:var(--text-secondary); font-size:0.93rem; margin-bottom:1rem;">
+              Running state-of-the-art reasoning models locally requires heavy GPUs with generous VRAM. For most researchers, connecting to <strong>OpenRouter</strong> delivers the best balance of frontier intelligence, speed, and zero hardware strain:
+            </p>
+            <ul class="mode-feature-list">
+              <li>
+                <span class="check-bullet">✓</span>
+                <div><strong>State-of-the-Art Reasoning:</strong> Access leading model families including <strong>Gemini</strong>, <strong>Claude</strong>, <strong>GPT</strong>, <strong>DeepSeek</strong>, and <strong>Qwen</strong> on standard laptops with zero thermal throttling.</div>
+              </li>
+              <li>
+                <span class="check-bullet">✓</span>
+                <div><strong>All Databases &amp; Graphs Stay 100% Local:</strong> Your SQLite session database, Chroma vector database, FTS5 full-text index, converted Markdown bundles, and <strong>strictly local deterministic paper relation graphs (computed with zero AI or cloud calls)</strong> never leave your workstation. Only the minimal text excerpts needed to answer your active question are sent.</div>
+              </li>
+              <li>
+                <span class="check-bullet">✓</span>
+                <div><strong>Zero Data Retention (ZDR) Support:</strong> Choose OpenRouter models with strict Zero Data Retention policies—with recommended presets available—guaranteeing your prompts and excerpts are never logged or used for training.</div>
+              </li>
+            </ul>
+          </div>
+
+          <!-- Right: 100% Offline Air-Gapped Local Stack -->
+          <div class="arch-panel">
+            <div class="arch-panel-header">
+              <h3 style="font-size:1.35rem;">🔒 100% Offline &amp; Air-Gapped Stack</h3>
+              <span class="brand-badge">Zero External Network Calls</span>
+            </div>
+            <p style="color:var(--text-secondary); font-size:0.93rem; margin-bottom:1rem;">
+              Working with strictly confidential clinical data, embargoed patents, or air-gapped laboratory machines? Run Zocrates completely disconnected from the internet:
+            </p>
+            <ul class="mode-feature-list">
+              <li>
+                <span class="check-bullet">✓</span>
+                <div><strong>Local LLM Engines:</strong> Connect directly to local <strong>Ollama</strong> or <strong>vLLM</strong> engines.</div>
+              </li>
+              <li>
+                <span class="check-bullet">✓</span>
+                <div><strong>Hardware-Accelerated Local Embeddings:</strong> Runs local embeddings with automatic acceleration across NVIDIA CUDA, Apple Silicon Metal, AMD ROCm, Intel XPU, or CPU fallback.</div>
+              </li>
+              <li>
+                <span class="check-bullet">✓</span>
+                <div><strong>Deterministic Local Paper Relations Graph:</strong> Maps relationships and thematic clusters across your entire library using deterministic statistical algorithms—100% offline with zero cloud dependencies and zero hallucinated links.</div>
+              </li>
+              <li>
+                <span class="check-bullet">✓</span>
+                <div><strong>Local Verification &amp; Session Storage:</strong> Every session database, vector database, full-text index, and claim verification check runs entirely offline on your workstation.</div>
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Mix-and-Match Hybrid Architecture Callout -->
+        <div class="arch-panel highlight-border" style="margin-top: 1.5rem; margin-bottom: 1.5rem; background: var(--bg-card);">
+          <div class="arch-panel-header">
+            <h3 style="font-size:1.35rem;">🔀 Mix-and-Match Multi-Model Flexibility</h3>
+            <span class="brand-badge">Hybrid Orchestration</span>
+          </div>
+          <p style="color:var(--text-secondary); font-size:0.93rem; margin-bottom:1.25rem;">
+            You are never locked into an all-or-nothing choice between cloud and local. Zocrates allows you to seamlessly mix and match models and providers across different layers of your research workflow:
+          </p>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.25rem;">
+            <div>
+              <strong style="color:var(--text-main); font-size:0.92rem;">🤖 Per-Agent Model Pinning</strong>
+              <p style="color:var(--text-secondary); font-size:0.87rem; margin-top:0.35rem; line-height:1.45;">
+                Run fast, free local models (via Ollama or vLLM) for conversational chat and multi-step retrieval loops, while delegating final literature synthesis to frontier cloud reasoning models.
+              </p>
+            </div>
+            <div>
+              <strong style="color:var(--text-main); font-size:0.92rem;">🧩 Component-Level Decoupling</strong>
+              <p style="color:var(--text-secondary); font-size:0.87rem; margin-top:0.35rem; line-height:1.45;">
+                Keep your library vector embeddings 100% offline with hardware-accelerated Jina v5, run citation verification through local Laya, and connect chat to OpenRouter—in any combination tailored to your hardware and privacy needs.
+              </p>
+            </div>
+            <div>
+              <strong style="color:var(--text-main); font-size:0.92rem;">🛡️ Privacy-Gated Crawling</strong>
+              <p style="color:var(--text-secondary); font-size:0.87rem; margin-top:0.35rem; line-height:1.45;">
+                Keep raw library navigation and intermediate tool queries strictly local on your workstation. Only the distilled, highly relevant evidence excerpts are forwarded to the synthesis model.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Cross-Device Portability Full-Width Card -->
+        <div class="arch-panel highlight-border" style="margin-bottom: 2.5rem; background: var(--bg-card);">
+          <div class="arch-panel-header">
+            <h3 style="font-size:1.35rem;">💾 100% Copy-Paste Cross-Device Portability</h3>
+            <span class="brand-badge">Zero Re-Indexing</span>
+          </div>
+          <p style="color:var(--text-secondary); font-size:0.93rem; margin-bottom:1.25rem;">
+            Your entire research brain travels with you. If you work across multiple workstations (such as a Linux desktop in the lab and a MacBook at home), you can simply copy your <code>zocrates-data</code> folder:
+          </p>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.25rem;">
+            <div>
+              <strong style="color:var(--text-main); font-size:0.92rem;">📁 Self-Contained Relative Paths</strong>
+              <p style="color:var(--text-secondary); font-size:0.87rem; margin-top:0.35rem; line-height:1.45;">
+                All databases, Markdown bundles, and image extractions use relative file paths—never hardcoded computer paths like <code>/home/user</code> or <code>C:\Users</code>. Links never break across machines or operating systems.
+              </p>
+            </div>
+            <div>
+              <strong style="color:var(--text-main); font-size:0.92rem;">⚡ Instant Launch with Zero Re-Conversion</strong>
+              <p style="color:var(--text-secondary); font-size:0.87rem; margin-top:0.35rem; line-height:1.45;">
+                When launching on a new computer, SHA-256 content verification immediately recognizes your synced PDFs. Vector embeddings, search indices, and literature graphs start up instantly with zero duplicate processing.
+              </p>
+            </div>
+            <div>
+              <strong style="color:var(--text-main); font-size:0.92rem;">💬 Complete Session &amp; History Continuity</strong>
+              <p style="color:var(--text-secondary); font-size:0.87rem; margin-top:0.35rem; line-height:1.45;">
+                All multi-turn chat sessions, active attachment context excerpts, and paper relation networks remain completely intact. Pick up your research conversations exactly where you left off.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Defense-in-Depth Desktop Security -->
+        <div class="security-shield-grid">
+          <div class="security-item">
+            <h4>🔒 Local-Only Communication</h4>
+            <p>The assistant connects strictly to your local Zotero app, blocking outside websites and unauthorized programs from accessing it.</p>
+          </div>
+          <div class="security-item">
+            <h4>🛡️ Browser Tab Isolation</h4>
+            <p>Standard browser isolation prevents regular web pages you visit from ever connecting to your Zocrates assistant or reading your data.</p>
+          </div>
+          <div class="security-item">
+            <h4>🧹 Safe Document Rendering</h4>
+            <p>Cleans notes and paper text before display so malicious scripts or harmful formatting can never run on your workstation.</p>
+          </div>
+          <div class="security-item">
+            <h4>📁 Confined File Access</h4>
+            <p>Confines all document reading strictly to your designated library folders, safeguarding the rest of your computer.</p>
+          </div>
+          <div class="security-item">
+            <h4>🔐 Encrypted Password Vault</h4>
+            <p>API keys are never stored in plain text—they are safely encrypted using Mozilla's built-in secure credential storage.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================================
+         SECTION 5: EFFORTLESS INSTALLATION (GITHUB RELEASES)
+         ==================================================================== -->
+    <section id="installation" class="section section-alt">
+      <div class="container">
+        <div class="section-header">
+          <span class="section-tag">Quick Installation</span>
+          <h2 class="section-title">Install in Minutes from GitHub</h2>
+          <p class="section-desc">
+            No manual Python environment setup or command-line scripts required. Zocrates installs as a standard Zotero 10+ extension and provisions its hermetic runtime automatically.
+          </p>
+        </div>
+
+        <div class="install-steps-grid">
+          <div class="install-step-card">
+            <div class="step-number-badge">1</div>
+            <h3>Download Zocrates from GitHub Releases</h3>
+            <p>
+              Download the latest <code>zocrates.xpi</code> release file from the official <strong>GitHub Releases</strong> page. In Zotero 10+, open <strong>Tools → Plugins</strong>, click the gear icon ⚙️, and select <strong>Install Plugin From File…</strong>
+            </p>
+          </div>
+
+          <div class="install-step-card">
+            <div class="step-number-badge">2</div>
+            <h3>Automatic Background Provisioning</h3>
+            <p>
+              On first launch, Zocrates automatically provisions an isolated, per-profile runtime under <code>&lt;zotero-data&gt;/zocrates-data/</code> with pinned dependencies—and shuts down cleanly whenever Zotero closes.
+            </p>
+          </div>
+
+          <div class="install-step-card">
+            <div class="step-number-badge">3</div>
+            <h3>Connect Your Preferred AI Provider</h3>
+            <p>
+              Open <strong>Zotero Settings → Zocrates</strong>. Enter your <strong>OpenRouter API key</strong> (recommended for instant frontier models) or point to a local <strong>Ollama / vLLM</strong> server. Tailor your persistent <em>User Research Profile</em> and start chatting!
+            </p>
+          </div>
+        </div>
+
+        <div class="install-callout-banner">
+          <div>
+            <h3 style="font-size:1.25rem; margin-bottom:0.25rem;">Ready to supercharge your Zotero 10+ workflow?</h3>
+            <p style="color:var(--text-secondary); font-size:0.92rem;">
+              Compatible with macOS, Linux, and Windows • Zotero 10+ • AGPL-3.0 License
+            </p>
+          </div>
+          <div style="display:flex; gap:0.85rem; flex-wrap:wrap;">
+            <a href="https://github.com/alexplaka/Zocrates/releases" target="_blank" rel="noopener noreferrer" class="btn btn-primary">
+              <span>Download Release from GitHub ↗</span>
+            </a>
+            <a href="https://github.com/alexplaka/Zocrates" target="_blank" rel="noopener noreferrer" class="btn btn-secondary">
+              <span>View Source on GitHub ↗</span>
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================================
+         SECTION 6: THE ZOCRATES VALUE MATRIX (15-DIMENSION COMPARISON)
+         ==================================================================== -->
+    <section id="value-matrix" class="section">
+      <div class="container">
+        <div class="section-header">
+          <span class="section-tag">Side-by-Side Comparison</span>
+          <h2 class="section-title">The Zocrates Value Matrix</h2>
+          <p class="section-desc">
+            Zocrates does not replace Zotero—it unlocks the full intellectual potential of the library you have already built.
+          </p>
+        </div>
+
+        <div class="matrix-controls">
+          <span style="font-size:0.88rem; color:var(--text-muted);">
+            Showing all <strong>15 scholarly workflow dimensions</strong>
+          </span>
+          <input
+            type="search"
+            id="matrix-search"
+            class="matrix-search-input"
+            placeholder="Filter dimensions (e.g. Citations, Privacy, MCP, PDF)..."
+            aria-label="Filter comparison dimensions"
+          />
+        </div>
+
+        <div class="matrix-table-wrap">
+          <table class="value-matrix-table">
+            <thead>
+              <tr>
+                <th style="width: 20%;">Dimension</th>
+                <th style="width: 34%;">Native Zotero Experience</th>
+                <th class="col-zocrates" style="width: 46%;">With Zocrates Enabled</th>
+              </tr>
+            </thead>
+            <tbody id="value-matrix-tbody">
+              <tr>
+                <td class="dim-cell">Ways to Work</td>
+                <td class="native-cell">Manual reading across tabs and static collection folders.</td>
+                <td class="zocrates-cell"><strong>Three flexible modes:</strong> Native Zotero companion sidebar, open Markdown conversion engine (OKF v0.2), and local MCP server for external coding agents.</td>
+              </tr>
+              <tr>
+                <td class="dim-cell">Data Privacy &amp; Security</td>
+                <td class="native-cell">Local reference database on your computer; plaintext preference storage.</td>
+                <td class="zocrates-cell"><strong>100% local-first data with defense-in-depth security:</strong> Search indices, Markdown bundles, relation graphs, and chat histories live on your machine—fortified by 256-bit loopback auth, strict CORS, allowlist DOM sanitization, path containment, and encrypted Login Manager key storage.</td>
+              </tr>
+              <tr>
+                <td class="dim-cell">PDF Reading &amp; Excerpts</td>
+                <td class="native-cell">Highlighting and annotating text stored as static marks in PDFs.</td>
+                <td class="zocrates-cell"><strong>Interactive context excerpts:</strong> Right-click highlighted text or draw area boxes around figures and equations in Zotero's PDF reader to analyze them with multimodal AI.</td>
+              </tr>
+              <tr>
+                <td class="dim-cell">Scholarly Presentation</td>
+                <td class="native-cell">Plain unformatted text in notes or basic chat extensions.</td>
+                <td class="zocrates-cell"><strong>Rich native rendering:</strong> KaTeX mathematical expressions, inline high-res figures from your papers, interactive Mermaid diagrams (with code toggle), and syntax-highlighted code blocks.</td>
+              </tr>
+              <tr>
+                <td class="dim-cell">Online Literature Discovery</td>
+                <td class="native-cell">Manual searching on external websites, downloading PDFs, and dragging into Zotero.</td>
+                <td class="zocrates-cell"><strong>Agentic online search &amp; one-click import:</strong> Queries OpenAlex, Crossref, and Unpaywall, deduplicates against your local Zotero DB, stages verified Open Access PDFs, and imports directly into collections.</td>
+              </tr>
+              <tr>
+                <td class="dim-cell">Evidence &amp; Attribution</td>
+                <td class="native-cell">Manually searching open PDFs to verify assertions.</td>
+                <td class="zocrates-cell"><strong>Verified citations &amp; Evidence Peek popovers:</strong> Per-occurrence AI decision verification, compound bracket pruning, exact section breadcrumbs, verbatim quotes, confidence badges, and 1-click reader jump.</td>
+              </tr>
+              <tr>
+                <td class="dim-cell">Attribution Completeness</td>
+                <td class="native-cell">External AI search tools silently drop retrieved sources they don't cite.</td>
+                <td class="zocrates-cell"><strong>Complete Source Transparency (Zero Silently Dropped Sources):</strong> Transparently reports all direct evidence in <strong>Cited Sources</strong> and every other paper consulted during retrieval in an expandable <strong>Other Consulted Sources</strong> list.</td>
+              </tr>
+              <tr>
+                <td class="dim-cell">Literature Retrieval</td>
+                <td class="native-cell">Basic keyword search in metadata or raw PDF text.</td>
+                <td class="zocrates-cell"><strong>Multi-step literature search:</strong> Combines semantic search, section-by-section outline navigation, and targeted passage reranking to find and synthesize the most relevant evidence across your library.</td>
+              </tr>
+              <tr>
+                <td class="dim-cell">Deep Research Investigation</td>
+                <td class="native-cell">Fixed limits that stop prematurely or run up unpredictable costs.</td>
+                <td class="zocrates-cell"><strong>Interactive research checkpoints:</strong> For complex investigations, Zocrates summarizes progress at major milestones, highlights open questions, and lets you choose whether to extend the search or synthesize findings immediately.</td>
+              </tr>
+              <tr>
+                <td class="dim-cell">Document Understanding</td>
+                <td class="native-cell">Unindexed diagrams and dense two-column formulas locked in PDFs.</td>
+                <td class="zocrates-cell"><strong>Multi-engine conversion &amp; visual descriptions:</strong> Layout-aware parsing, synthetic figure descriptions for search indexing, structured paper outlines, and first-class Zotero notes.</td>
+              </tr>
+              <tr>
+                <td class="dim-cell">Literature Relationships</td>
+                <td class="native-cell">Manually linking related items one by one in metadata.</td>
+                <td class="zocrates-cell"><strong>Strictly local deterministic relation graph:</strong> Generated 100% locally using deterministic algorithms (statistical keyphrases and hybrid retrieval with zero LLM calls). Corroborates semantic meaning with tags in an offline Canvas 2D visualizer.</td>
+              </tr>
+              <tr>
+                <td class="dim-cell">Cross-Tool Extensibility</td>
+                <td class="native-cell">Data accessible only inside the Zotero desktop window.</td>
+                <td class="zocrates-cell"><strong>Local Model Context Protocol (MCP):</strong> Lets Claude Desktop, Cursor, Pi &amp; other MCP-compatible assistants search and read your library with zero duplicate memory.</td>
+              </tr>
+              <tr>
+                <td class="dim-cell">Adaptive Context Compaction</td>
+                <td class="native-cell">Stateless reference manager or unmanaged context that exceeds token limits and slows down.</td>
+                <td class="zocrates-cell"><strong>Autonomous post-turn context compaction:</strong> Intelligent rolling summarization consolidates earlier conversational turns in the background while keeping recent turns verbatim, thus keeping marathon research sessions fast, responsive, and within model token budgets.</td>
+              </tr>
+              <tr>
+                <td class="dim-cell">User-Curated Long-Term Memory</td>
+                <td class="native-cell">Chat insights lost upon closing the window; notes disconnected from AI tools.</td>
+                <td class="zocrates-cell"><strong>Native Zotero Note Memory:</strong> Save individual answers or entire sessions as native Zotero notes. Notes are automatically converted and indexed into your local search engine, making previous research permanently searchable in future sessions.</td>
+              </tr>
+              <tr>
+                <td class="dim-cell">Cross-Device Portability</td>
+                <td class="native-cell">Syncs PDFs and metadata, but external AI tools require cloud re-uploads or hours of re-indexing on every new workstation.</td>
+                <td class="zocrates-cell"><strong>Instant Copy-Paste Portability:</strong> Simply copy the <code>zocrates-data</code> directory to another synced computer (Linux, macOS, Windows). Fully portable relative links and content verification guarantee zero re-indexing, zero re-conversion, and instant session continuity out of the box.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ====================================================================
+       FOOTER
+       ==================================================================== -->
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-col">
+          <a href="#" class="brand-link" style="margin-bottom:0.75rem;">
+            <img src="assets/Zocrates-logo.png" alt="Zocrates Logo" class="brand-logo" />
+            <span class="brand-title">Zocrates</span>
+          </a>
+          <p style="max-width: 360px; color: var(--text-muted);">
+            An Agentic Research Assistant for Zotero. Local-first, verifiable, and built for serious scholarly inquiry.
+          </p>
+        </div>
+
+        <div class="footer-col">
+          <h4>Product</h4>
+          <ul>
+            <li><a href="#commitments">Core Commitments</a></li>
+            <li><a href="#modes">Workflows</a></li>
+            <li><a href="#capabilities">Key Capabilities</a></li>
+            <li><a href="#value-matrix">Value Matrix</a></li>
+            <!-- <li><a href="#pricing-preview">Pricing (Coming Soon)</a></li> -->
+          </ul>
+        </div>
+
+        <div class="footer-col">
+          <h4>Architecture</h4>
+          <ul>
+            <li><a href="#privacy-security">Local-First Privacy</a></li>
+            <li><a href="#privacy-security">Defense-in-Depth Security</a></li>
+            <li><a href="#modes">OKF v0.2 Markdown Bundles</a></li>
+            <li><a href="#modes">Local MCP Server</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-col">
+          <h4>Resources</h4>
+          <ul>
+            <li><a href="#installation">Zotero Plugin Installation</a></li>
+            <li><a href="docs/" target="_blank" rel="noopener noreferrer">Online Documentation ↗</a></li>
+            <li><a href="https://github.com/alexplaka/Zocrates" target="_blank" rel="noopener noreferrer">GitHub Repository ↗</a></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="footer-bottom">
+        <span>© 2026 Zocrates Project • Licensed under AGPL-3.0</span>
+        <span>Designed for Zotero 10+</span>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Floating Theme Switcher Dock (Custom Polished Popover) -->
+  <aside class="floating-theme-dock" id="floating-theme-dock" aria-label="Theme Switcher">
+    <button type="button" id="theme-dock-trigger" class="theme-dock-btn" aria-haspopup="true" aria-expanded="false" title="Switch Theme">
+      <span class="theme-dock-icon" aria-hidden="true">🎨</span>
+      <span id="theme-dock-current" class="theme-dock-current">Slate</span>
+      <span class="theme-dock-arrow" aria-hidden="true">▾</span>
+    </button>
+    <div id="theme-menu-popover" class="theme-menu-popover" role="menu" aria-label="Select Zocrates Theme">
+      <div class="theme-menu-header">Theme Preview</div>
+      <button type="button" class="theme-menu-item active" data-theme="slate" role="menuitem">
+        <span class="theme-dot" style="background:#6366f1;"></span>
+        <span class="theme-name">Slate (Default)</span>
+        <span class="theme-check">✓</span>
+      </button>
+      <button type="button" class="theme-menu-item" data-theme="amoled" role="menuitem">
+        <span class="theme-dot" style="background:#000000; border:1px solid #475569;"></span>
+        <span class="theme-name">AMOLED</span>
+        <span class="theme-check">✓</span>
+      </button>
+      <button type="button" class="theme-menu-item" data-theme="zotero-dark" role="menuitem">
+        <span class="theme-dot" style="background:#22252a;"></span>
+        <span class="theme-name">Zotero Dark</span>
+        <span class="theme-check">✓</span>
+      </button>
+      <button type="button" class="theme-menu-item" data-theme="zotero-light" role="menuitem">
+        <span class="theme-dot" style="background:#ffffff; border:1px solid #cbd5e1;"></span>
+        <span class="theme-name">Zotero Light</span>
+        <span class="theme-check">✓</span>
+      </button>
+      <button type="button" class="theme-menu-item" data-theme="sepia" role="menuitem">
+        <span class="theme-dot" style="background:#704214;"></span>
+        <span class="theme-name">Sepia</span>
+        <span class="theme-check">✓</span>
+      </button>
+    </div>
+  </aside>
+
+  <script src="app.js"></script>
+</body>
+</html>

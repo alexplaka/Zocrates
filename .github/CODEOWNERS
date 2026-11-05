@@ -21,3 +21,7 @@
 /scripts/               @alexplaka
 local_deploy.sh         @alexplaka
 pyproject.toml          @alexplaka
+
+# Docs
+/docs                   @alexplaka
+/website                @alexplaka

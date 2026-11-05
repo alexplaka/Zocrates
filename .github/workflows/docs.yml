@@ -13,18 +13,13 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: "pages"
   cancel-in-progress: false
 
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -41,10 +36,12 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Build documentation
+      - name: Build documentation & stage website
         env:
           DISABLE_MKDOCS_2_WARNING: "true"
-        run: uv run --only-group docs mkdocs build --strict
+        run: |
+          uv run --only-group docs mkdocs build --strict -d site/docs
+          cp -r website/* site/
 
       - name: Setup Pages
         if: github.event_name != 'pull_request'
@@ -56,7 +53,17 @@ jobs:
         with:
           path: "site"
 
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - name: Deploy to GitHub Pages
-        if: github.event_name != 'pull_request'
         id: deployment
         uses: actions/deploy-pages@v4
