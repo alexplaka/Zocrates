@@ -98,6 +98,7 @@ Because events in Turn $N-1$ and Turn $N$ have timestamps $> end\_timestamp$, Go
 ## 4. State Extraction: Clean Serial Markdown Dialogue
 
 The decision model evaluates whether a topic transition, sub-question closure, or progressive shift has occurred between:
+
 * **`earlier_discussion`**: Turns $1 \dots N-1$ (the body of conversation leading up to the current turn).
 * **`latest_turn`**: Turn $N$ (the query and response that just completed).
 
@@ -158,6 +159,7 @@ The probe queries the OpenRouter Decisions API (`/api/alpha/decisions`):
 ### 5.1 Rubric Calibration and Thresholding
 
 The decision model evaluates four simultaneous criteria:
+
 1. `CLOSED-UNIT`: Earlier turns conclude a complete, coherent sub-analysis.
 2. `PROGRESS/PIVOT`: The conversation has pivoted to a new topic or progressed to an advanced phase.
 3. `NOT STUCK`: The dialogue is not trapped in an unresolved clarification, correction, or error loop.

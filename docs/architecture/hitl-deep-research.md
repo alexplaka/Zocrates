@@ -9,12 +9,14 @@ Autonomous agentic retrieval often balances between two competing operational ri
 ### 1.1 The Tension in Agentic Literature Retrieval
 
 In autonomous agentic retrieval-augmented generation (RAG), orchestrators face a fundamental tension:
+
 * **Risk of Runaway Loops & Budget Waste**: Unconstrained ReAct search loops can spiral into dozens of redundant queries, burning API tokens, triggering rate limits, and introducing irrelevant context noise into downstream prompts.
 * **Risk of Premature Cutoff on Complex Literature**: Strict hard limits (such as a 10-call cap or 7,500-word ceiling) protect against runaway costs, but terminate retrieval prematurely when researchers ask complex, multi-faceted questions—such as comparative literature reviews across multiple papers, multi-methodology surveys, or granular mathematical proofs.
 
 ### 1.2 Baseline Constraints
 
 In Zocrates Dialogue Mode, baseline retrieval operates under three conservative guardrails configured in `zocrates_config.json` (`search_harness`):
+
 - **Retrieval Tool Budget**: 10 calls maximum per pass (`max_retrieval_tools = 10`).
 - **Hard Word Ceiling**: 7,500 words maximum cumulative retrieved text (`hard_word_ceiling = 7500`, ~10,000 tokens).
 - **Cross-Encoder Reranker Cap**: Top 15 chunks forwarded to synthesis (`max_rerank_chunks = 15`).
@@ -24,6 +26,7 @@ In Zocrates Dialogue Mode, baseline retrieval operates under three conservative 
 Rather than silently truncating context or forcing researchers to manually rephrase and re-submit questions across multiple disjoint turns, Zocrates implements **Human-In-The-Loop Deep Research Extensions**.
 
 When an initial autonomous search pass identifies remaining knowledge gaps or exhausts its retrieval ceiling, the dynamic workflow suspends execution deterministically, packages its findings, and presents an interactive checkpoint card directly inside the ongoing chat turn:
+
 1. **"Grant Deep Research Extension"** (Primary Action): Proportionally expands all three resource ceilings simultaneously (+5 calls, +3,750 words, +5 rerank chunks) and invokes the search subagent for an additional targeted retrieval pass, optionally steering the agent via natural language guidance.
 2. **"Synthesize Response with Existing Evidence"** (Secondary Action): Bypasses further retrieval and proceeds immediately to cross-encoder reranking and academic synthesis using the evidence gathered so far, practicing epistemic honesty regarding unaddressed aspects.
 
@@ -148,6 +151,7 @@ If all literature questions are successfully resolved in the initial pass (`len(
 ### 2.4 Checkpoint Execution & Interruption
 
 When `should_trigger` is true, the pipeline executes the checkpoint:
+
 1. Serializes current turn state into `ctx.state[HITL_SNAPSHOT]`.
 2. Invokes `@node(rerun_on_resume=False) search_budget_checkpoint` with:
    - `run_id = f"checkpoint_{extension_count}"`
@@ -171,6 +175,7 @@ When `should_trigger` is true, the pipeline executes the checkpoint:
 ### 3.1 Orthogonality of Literature Retrieval Bottlenecks
 
 Literature retrieval in academic libraries encounters two distinct types of resource bottlenecks:
+
 * **Call-Bound Breadth**: Survey queries scanning table-of-contents and frontmatter across 8–10 papers quickly consume 10 tool calls while retrieving relatively few words (~2,500 words).
 * **Word-Bound Depth**: Granular methodological queries reading multi-page sections (`read_document`) across 2 papers consume only 3 tool calls but quickly exceed 7,000 words.
 
@@ -190,6 +195,7 @@ To resolve this, Zocrates scales all three retrieval dimensions simultaneously u
 ### 3.3 Dynamic State Ceilings
 
 Resource limits are maintained dynamically in session state:
+
 - `TEMP_RETRIEVAL_TOOL_BUDGET` (`temp:retrieval_tool_budget`)
 - `TEMP_WORD_CEILING` (`temp:word_ceiling`)
 - `TEMP_MAX_RERANK_CHUNKS` (`temp:max_rerank_chunks`)
@@ -285,6 +291,7 @@ This guarantees that stale snapshot state or extended resource ceilings never co
 When an interrupted session is resumed via `runner._run_node_async()`, ADK constructs a brand-new root context for the resumption runner where `ctx.isolation_scope = None`. ADK's `_run_node_async` does not accept an `override_isolation_scope` argument.
 
 If the search pipeline were to execute with `None`, two critical failures would occur:
+
 1. **Event Scope Mismatch**: Pipeline child events would be emitted under `isolation_scope = None`, polluting the outer coordinator conversation history.
 2. **Loss of Prior Subagent History**: Subagents configured with `include_contents="default"` would no longer match the `search_pipeline:fc_id` scope of prior turns, losing their memory of already retrieved chunks and queries.
 
@@ -322,6 +329,7 @@ def _recover_isolation_scope(ctx: Context) -> str | None:
 In multi-turn chat sessions where multiple research queries occur across turns, earlier turns also contain `search_initial` runs and checkpoint events.
 
 To prevent historical turns from corrupting the active turn, all session event scans in `search_pipeline_node`:
+
 - `has_initial_run` detection
 - `_recover_isolation_scope`
 - `_get_pipeline_interrupt_ids`
@@ -344,6 +352,7 @@ Subagents receive exclusively their structured `node_input` without conversation
 Furthermore, when an extension checkpoint pauses and resumes, ADK records `adk_request_input` FunctionCall and FunctionResponse events in the shared pipeline scope. While ADK natively filters internal framework events from LLM context, it omits `adk_request_input`. Without filtering, ADK's `_fencing` module wraps the checkpoint events in cross-agent fencing (`<<<BEGIN_QUOTED_AGENT_CONTENT>>>`) and injects them into `search_subagent`'s prompt. 
 
 Zocrates resolves this via `patch_adk_request_input_context_filter()` in `zocrates/agents/common/adk_compat.py`:
+
 - Idempotently wraps `google.adk.flows.llm_flows.contents._should_include_event_in_context`.
 - Filters out `adk_request_input` function calls and responses from LLM prompt construction while preserving them in SQLite session history and runner interrupt resolution.
 - Subagents receive exclusively their prior tool calls and their clean, structured continuation prompt.
@@ -444,6 +453,7 @@ Content-Type: application/json
 ### 7.2 Idempotency & 409 Conflict Protection
 
 To prevent race conditions, duplicate clicks, or session corruption:
+
 - `fast_api_app.py` inspects `_get_unresolved_session_interrupts(session)`.
 - If `request.interrupt_id not in pending_interrupts`, it rejects the request immediately with `409 Conflict` (`"Invalid or stale interrupt ID. The session is not waiting for this interrupt."`).
 - If a user attempts to send a new prompt via `POST /chat` while an unresolved checkpoint is pending, `POST /chat` returns `409 Conflict`, instructing the user to resolve or rewind the pending checkpoint.
@@ -469,6 +479,7 @@ function renderHitlCheckpointCard(container, data) {
 ### 7.4 Bubble Continuity & Multi-Pass Stream Resumption
 
 When `/chat/resume` streams SSE events, `sidebar.js` maintains complete visual continuity:
+
 - It **does not create a new chat bubble**.
 - It reconnects the SSE reader directly into the active `assistantBubble` and appends to the existing `liveSteps` array.
 - Intermediate tool calls from Extension 1 and Extension 2 append cleanly into the collapsed `.intermediate-steps-bubble`.
@@ -477,6 +488,7 @@ When `/chat/resume` streams SSE events, `sidebar.js` maintains complete visual c
 ### 7.5 Cross-Session Restart Rehydration (`pending_hitl`)
 
 If the user closes Zotero while an HITL checkpoint is paused and re-opens it later:
+
 1. `sidebar.js` calls `GET /sessions/{id}`.
 2. `format_session_for_ui(session)` inspects session events. If an `adk_request_input` function call is present without a corresponding `FunctionResponse`, it populates:
    ```json
@@ -492,6 +504,7 @@ If the user closes Zotero while an HITL checkpoint is paused and re-opens it lat
 ### 7.6 Session Rewind Support (`POST /sessions/{id}/rewind`)
 
 If a researcher wishes to cancel a pending checkpoint and discard the incomplete turn, they can trigger session rewind:
+
 - Endpoint: `POST /sessions/{session_id}/rewind` with `{"invocation_id": "..."}`.
 - Invokes ADK's `runner.rewind_async()`, removing all events associated with that invocation from SQLite and returning the session to its clean prior state.
 
@@ -541,6 +554,7 @@ This ensures reasoning chunks retain their thought flag in both `gen_ai.output.m
 When a dynamic workflow replays prior turns, hundreds of streamed token chunks are passed back into `gen_ai.input.messages`. Without consolidation, every streaming token is formatted as a separate `[assistant] ...` line, resulting in thousands of lines of clutter in Phoenix.
 
 `PhoenixEnrichmentSpanProcessor.on_end` consolidates input messages:
+
 - **Assistant turns**: Parsed through `_format_parts_with_labeled_thoughts`, consolidating streaming tokens into at most two clean parts (one Thought section and one Response section).
 - **User turns**: Text chunks joined cleanly with `"".join(...)`.
 - The span attributes `input.value` and `gen_ai.input.messages` are updated in place, rendering single, unified speech bubbles in Phoenix's Chat Viewer.

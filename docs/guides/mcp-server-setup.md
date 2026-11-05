@@ -395,6 +395,7 @@ The process begins reading JSON-RPC requests on `stdin` and writes diagnostic lo
 
 ### 3. Verify Preferences Configuration
 If an external agent reports that MCP access is disabled:
+
 1. In Zotero: **Preferences** → **Zocrates** → Check **Enable Local MCP Server**.
 2. Or inspect `zocrates_config.json`:
    ```bash

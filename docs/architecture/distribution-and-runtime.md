@@ -143,6 +143,7 @@ To ensure that distribution packaging does not compromise local development velo
 ### Zero-Touch Developer Attachment
 
 When developing locally:
+
 1. The developer runs the backend in a terminal (`uv run python -m zocrates.fast_api_app`) pointing to the local repository.
 2. The developer executes `./local_deploy.sh --restart` to rebuild the XPI and restart Zotero.
 3. During startup, `bootstrap.js` probes the candidate port (`GET /status`). Seeing an active backend that reports a matching `zotero_data_dir`, **the plugin attaches immediately and does not spawn a child process or overwrite the environment**.
@@ -276,6 +277,7 @@ Linux distributions package Zotero through various mechanisms: native tarballs, 
 ### Universal Absolute Path Rule
 
 The Zotero extension never relies on unqualified shell commands (`"uv"` or `"python3"`) or ambient `PATH` lookups. Instead:
+
 1. Every executable is invoked via its absolute canonical path (e.g. `<zotero-data-dir>/zocrates-data/.venv/bin/python`).
 2. Tools are placed within the user's readable and executable data directory (`<zotero-data-dir>/zocrates-data/bin/`).
 3. This makes execution completely agnostic to whether Zotero runs inside Flatpak, Snap, or native Linux distributions.

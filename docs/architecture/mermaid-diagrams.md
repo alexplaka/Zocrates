@@ -9,6 +9,7 @@ This document details the architectural design, security model, rendering pipeli
 Conversational AI workflows analyzing dense academic literature frequently involve complex conceptual taxonomies, algorithmic workflows, multi-agent pipelines, and system architectures. Generating structured diagrams natively within the chat stream provides immediate visual clarity.
 
 Zocrates implements an offline, toggle-first diagram rendering pipeline:
+
 1. **Native HTML5 Sidebar Interface**: The sidebar is served as an HTML5 web interface (`chrome://zocrates/content/sidebar.html`), enabling native SVG rendering, resilient DOM parsing, and seamless integration with client-side visualization libraries while maintaining full security isolation under Mozilla Gecko.
 2. **Offline, Toggle-First Rendering**: Local vendoring of `mermaid.min.js` v11.4.1 (zero external network dependencies), automatic diagram rendering by default with a non-destructive "Show code" / "Render diagram" toggle, single-source-of-truth configuration in `zocrates_config.json`, five-theme synchronization, and detached window dimension and session parity.
 
@@ -31,6 +32,7 @@ The sidebar interface operates inside Mozilla Gecko (Firefox ESR) with robust de
 
 ### 2.2 Mermaid SVG Sanitization (`sanitizeMermaidSvg`)
 Raw SVG output from `mermaid.render()` is sanitized prior to DOM insertion:
+
 - Strips any embedded `<script>` tags.
 - Eliminates SMIL animation triggers (`<animate>`, `<set>`).
 - Removes unsafe CSS `@import` or `url(javascript:...)` rules.
@@ -162,6 +164,7 @@ When researchers detach the sidebar into a standalone operating system window, f
 
 ### 6.1 Sizing Parity
 Rather than opening with a hardcoded geometry:
+
 1. Before hiding `#zocrates-sidebar`, the detach handler measures its bounding box:
    ```javascript
    const doc = window.parent?.document;

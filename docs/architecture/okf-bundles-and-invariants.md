@@ -321,6 +321,7 @@ graph TD
 When Paper A is deleted or moved to trash in Zotero, deleting A's directory removes A. However, any existing neighbor B whose `item_relations.md` linked to `[A - Title](../A/document.md)` now possesses a dead link.
 
 To prevent dangling links:
+
 1. Enumerate all neighbors before removing edges:
    ```python
    cur.execute("""
@@ -339,6 +340,7 @@ To prevent dangling links:
 ### 8.3. The Note Isolation & Staging Invariant
 
 When a user edits a note:
+
 1. `materialize_note_bundle()` stages the new note in a temporary directory (`<note_dir>.tmp.<pid>`).
 2. Inside the staging directory, it writes `document.md`, `toc.json`, `toc.md`, `index.md`, and `item_relations.md`.
 3. It atomically renames the staging directory over the existing directory using `os.replace` (on POSIX) or atomic directory swap.

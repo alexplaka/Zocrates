@@ -113,10 +113,12 @@ coordinator_agent = Agent(
 ```
 
 Critical architectural requirements:
+
 * **Root Agent Composition**: Serves as the top-level conversational agent directly bound to `App(name="zocrates", root_agent=coordinator_agent)` without intermediary router nodes.
 * **Explicit `mode="chat"`**: In ADK 2.8, agents wrapped in dynamic workflow nodes default to `mode="single_turn"` with `include_contents="none"`. To ensure the coordinator retains conversational memory across turns in multi-turn dialogues, `mode="chat"` is explicitly declared.
 * **Instruction Strategy**: Guides the coordinator to answer conversational banter directly, but delegate all factual, literature, and document-specific questions to `search_library` (and external literature discovery to `search_online_literature`).
 * **Active Selection Ingestion**: Ingests active context dynamically via `instruction=get_coordinator_instruction` using the `{active_context_items_str?}` template placeholder populated from `ctx.state[ACTIVE_CONTEXT_ITEMS_STR]`.
+* **User Research Profile Ingestion**: When configured by the scholar, `user_research_profile_str` is dynamically injected into the coordinator's prompt via `state_delta` (`format_user_research_profile_context`), ensuring conversational tone, assumed background, and methodology focus strictly align with the user's research persona with zero token overhead when empty.
 
 ### 2.2 `search_library` Tool & Pipeline Dispatch
 
@@ -141,6 +143,7 @@ async def search_library(
 ```
 
 Key features:
+
 * **Shared Runner Event Queue (`use_sub_branch=False`)**: Executes the pipeline on the main branch so SSE tokens and subagent events stream directly to the client in real time.
 * **Exact-Match Event Isolation Scope (`override_isolation_scope=f"search_library_pipeline:{fc_id}"`)**: Completely isolates pipeline tool invocations, subagent reasoning, and chunk data from the outer conversation.
 
@@ -227,6 +230,7 @@ Pipeline execution follows seven distinct phases:
 ### 2.6 Per-Agent Model & Thinking Overrides (`override_agent_models`)
 
 Zocrates supports granular per-agent model and reasoning parameter overrides in `zocrates_config.json`:
+
 * **Unified Model Inheritance Across All Roles**: All subagents (`coordinator`, `search`, `synthesizer`, `online_search`, `online_synthesizer`) default to `model: null`. When a user configures a local LLM (such as Ollama or vLLM), every subagent naturally inherits the local model, eliminating the risk of 401 Unauthorized crashes on cloud endpoints.
 * **Role-Tailored Defaults**:
   - `coordinator_agent`: `"medium"` thinking (natural multi-turn conversational responses).
@@ -244,6 +248,7 @@ Zocrates supports granular per-agent model and reasoning parameter overrides in 
 ### 2.7 Autonomous ReAct vs. Intermediate Evaluator Architecture
 
 The search architecture uses an autonomous ReAct subagent model rather than an intermediate evaluator loop. This design reflects four core operational realities:
+
 1. **Bounded Corpus**: Zotero libraries are finite, indexed collections rather than the boundless web.
 2. **Inherent Self-Evaluation**: ReAct searchers observe retrieval outputs directly to formulate subsequent steps; external evaluations introduce redundant overhead.
 3. **Latency & Token Efficiency**: Eliminating intermediate evaluators reduces end-to-end query latency by approximately 4x (from ~270s to ~65s).
@@ -274,6 +279,7 @@ By passing `override_isolation_scope=f"search_pipeline:{fc_id}"` during `tool_co
 ### 3.3 Intra-Pipeline History Retention
 
 Within the pipeline, the search subagent runs across turns 1 to 4:
+
 * **The Pitfall of `mode="chat"`**: In ADK 2.8, `Agent(mode="chat")` intentionally ignores `isolation_scope` to ensure it can read all conversation history, causing it to pull in outer user banter.
 * **The Solution**: `search_subagent` is configured with:
   ```python
@@ -317,6 +323,7 @@ When agents run in `mode="single_turn"`, Google ADK's `_ContentLlmRequestProcess
 This caused severe cognitive dissonance: reasoning models in `search_subagent` spent significant thinking tokens trying to answer the user's root question rather than executing their specialized retrieval tasks.
 
 To eliminate this:
+
 * `search_pipeline_node` clears `ctx._invocation_context.user_content = None` upon node entry.
 * ADK's `_build_task_input_user_content(..., user_content=None)` cleanly returns `None`.
 * Subagents receive **only** their dedicated `node_input` without Turn 0 leakage or `_SINGLE_TURN_NUDGE`.
@@ -328,6 +335,7 @@ In Google ADK 2.8, `Runner._find_active_task_scope` scans `session.events` backw
 Because `search_library` stamps pipeline events with `override_isolation_scope=f"search_library_pipeline:{fc_id}"`, returning from `search_library_pipeline_node` without an explicit closing marker leaves the scope active in ADK's task registry. On subsequent conversation turns (Turn 2+), ADK's `Runner._append_user_event` stamps the new user message with `isolation_scope="search_library_pipeline:{fc_id}"`. When `coordinator_agent` (running with `isolation_scope=None`) reconstructs conversation history via `_should_include_event_in_context`, it filters out the mismatched user message, leaving the coordinator stuck replaying Turn 1.
 
 To guarantee scope closure without leaking internal events:
+
 * `search_library_pipeline_node` wraps pipeline execution in a `try...finally` block.
 * In the `finally` block, `_enqueue_isolation_scope_closing_event` emits a terminal `Event`:
   ```python
@@ -367,6 +375,7 @@ A distinction exists between how ADK represents the search pipeline's response i
 ### 3.8 Post-Turn Decision-Model Adaptive Context Compaction
 
 To keep extended literature review sessions responsive and token-efficient without token exhaustion or "lost-in-the-middle" degradation, Zocrates implements **Post-Turn Decision-Model Adaptive Compaction**:
+
 * **Decoupled Post-Invocation Execution (0ms TTFT Impact)**: All pre-invocation token triggers in Google ADK are deactivated (`app.events_compaction_config = None`), ensuring users never experience pre-invocation stalls before the first streaming token. Compaction executes sequentially at the end of `Runner.run_async` via `patched_post_invocation_compaction` before SSE stream closure.
 * **Envelope Gate & Invariant Clamping**: Compaction is evaluated only when the session satisfies the Envelope Gate: `completed_turns >= min_turns` (default 4) and `coordinator_prompt_tokens >= token_floor` (default 30,000), with a hard ceiling brake at ≥ 100,000 tokens forcing compaction without probing. If misconfigured (min_turns ≤ K), the system automatically clamps `effective_min_turns = max(configured, K + 1)` with a warning.
 * **Subagent Pipeline Isolation Scope Filtering**: Prompt token accounting strictly inspects unscoped coordinator events (`isolation_scope is None`), filtering out subagent ReAct retrieval token counts and preventing premature triggering.
@@ -402,6 +411,7 @@ All retrieval operations are consolidated into core tools in `zocrates/agents/co
 ### 4.1 Universal Asset Normalization & Range-Aware Pre-Exclusion
 
 When an agent reads sections, figures, or tables via `read_document(item_key, asset_id)`:
+
 1. **Universal Asset Normalization (`normalize_asset_ids`)**:
    Cleans and unwraps outer brackets, quotes, and punctuation deterministically across syntax variations (`"[s3, s4]"`, `'["s1", "s2"]'`, `'"s1", "s2"'`), producing canonical asset ID lists (`["s3", "s4"]`).
 2. **Explicit Unresolved Asset ID Reporting**:
@@ -420,6 +430,7 @@ When an agent reads sections, figures, or tables via `read_document(item_key, as
 ### 4.2 Intra-Tool Canonical Deduplication
 
 To prevent agents from re-reading the same sections or full documents across multiple loop iterations:
+
 * `read_document` normalizes `asset_id` *before* the deduplication check and operates strictly on canonical keys (`{item_key}:{aid}` or `{item_key}:full`). It never stores raw un-normalized LLM strings.
 * If a multi-asset call contains both seen and unseen IDs (e.g. `[s3, s6]` when `s3` was already fetched), only the unseen IDs are retrieved.
 * If all requested assets were already seen, `read_document` immediately returns:
@@ -436,6 +447,7 @@ To prevent agents from re-reading the same sections or full documents across mul
 ### 4.3 Bounded Retrieval Budget (`MAX_RETRIEVAL_TOOLS_PER_RUN = 10`) & Termination Protocol
 
 To prevent runaway tool calling while providing ample runway for complex multi-paper queries:
+
 1. **Retrieval Tool Budget (`MAX_RETRIEVAL_TOOLS_PER_RUN = 10`)**:
    - The subagent is permitted up to 10 retrieval tool calls (`search_corpus`, `get_document_toc`, `read_document`) per run.
    - Any attempt to execute an 11th retrieval call is rejected with `{"status": "budget_exhausted"}`.
@@ -467,6 +479,7 @@ To prevent runaway tool calling while providing ample runway for complex multi-p
 ### 4.4 Shared Cross-Encoder Reranking (`zocrates/agents/common/reranker.py`)
 
 Retrieved chunks undergo cross-encoder reranking before synthesis:
+
 1. **Consolidated Shared Module**:
    Reranking logic resides in `zocrates/agents/common/reranker.py`, where it is shared across Dialogue, Discovery, and Synthesis modes.
 2. **Substantive Chunk Filtering (`filter_substantive_evidence`)**:
@@ -484,6 +497,7 @@ Retrieved chunks undergo cross-encoder reranking before synthesis:
 ### 4.5 User-Facing Cleanliness & Attribution Architecture
 
 To prevent internal Zotero database hashes (e.g. `HCZLU22L`), chunk IDs (`HCZLU22L:s4`), and system plumbing from leaking into user-facing answers:
+
 1. **Title Propagation across Retrieval**:
    `read_document_core` resolves the document title from `toc.json` or Zotero metadata and returns `"title": doc_title`. Synthetic evidence chunks in `temp:retrieved_evidence` inherit this resolved title.
 2. **Structured XML Context Representation (`format_retrieved_evidence_str`)**:
@@ -515,6 +529,7 @@ To prevent internal Zotero database hashes (e.g. `HCZLU22L`), chunk IDs (`HCZLU2
 ### 4.6 Orthogonal Library-Wide and Scoped Corpus Search (`search_corpus`)
 
 Retrieval scope is decoupled from ambient session state:
+
 1. **Unfiltered Library-Wide Default**:
    When `item_key` is omitted, `None`, `"all"`, `"*"`, or `"library"`, `search_corpus` and `search_corpus_core` execute an unconstrained search across the **entire library**.
 2. **Explicit Active Scope (`item_key="active"`)**:
@@ -527,6 +542,7 @@ Retrieval scope is decoupled from ambient session state:
 ### 4.7 Multi-Attachment & Child Note Resolution (`_resolve_bundle_dir`)
 
 To support papers with multiple attachments (main article, supplementary appendix, data tables) as well as child notes without tool bloat:
+
 1. **Direct Note Lookup with Staleness Tracking**:
    When an agent calls `get_document_toc` or `read_document` with a note key, `_resolve_bundle_dir` checks `syncer.db.get_note_by_key(item_key)` first. It computes the `SHA-256` hash of `note_html` and compares it against `conversion_meta.source_hash`. If unchanged, it returns the existing bundle via the fast path (<0.1ms). If edited in Zotero, it atomically re-materializes the bundle with updated Markdown and ToC. Notes < 100 words skip summaries; notes ≥ 100 words use extractive lead paragraphs.
 2. **Direct Attachment Check**:
@@ -537,6 +553,7 @@ To support papers with multiple attachments (main article, supplementary appendi
 ### 4.8 Multi-Turn Table of Contents (TOC) Caching & Continuity Architecture
 
 To eliminate redundant `get_document_toc` tool calls on follow-up questions across multi-turn sessions while preserving reranker purity, Zocrates implements a Three-Pillar continuity system:
+
 1. **Pillar 1: Structural Continuity (Lazy Dual-Key TOC Caching & Injection)**:
    - **Lazy Cache Population**: During retrieval, `get_document_toc` extracts a compact navigation outline (~150 words) from `bundle_dir / "toc.json"` and writes it to persistent session state (`state[CACHED_TOCS]`).
    - **Dual-Key Disambiguation**: Stored under both `input_key` (parent item key) and `resolved_key` (attachment document key). The injected outline header explicitly bridges both:
@@ -595,6 +612,7 @@ State is partitioned into two distinct tiers:
 In Google ADK 2.8, `ctx.state` is a delta-aware wrapper (`State(value=session.state, delta=self._event_actions.state_delta)`). Any assignment directly on `ctx.state` inside a node writes to that node's uncommitted `_delta`. When a child tool mutates state, it commits changes to the underlying shared `session.state`. If the parent node previously assigned a value to that same key (e.g. `state[TEMP_EXTENSION_REQUESTED] = False` or `state[TEMP_SEARCH_REPORT] = None`), subsequent reads on the parent `ctx.state.get(...)` read from `_delta` first, shadowing the child tool's updates.
 
 Zocrates resolves this cleanly without accessing private attributes (`_delta`):
+
 1. **Never Assign Tool-Mutated Keys in Parent Node**:
    `search_pipeline_node` never assigns default or empty reset values to keys that retrieval tools mutate (`TEMP_RETRIEVED_EVIDENCE`, `TEMP_SEARCH_REPORT`, `TEMP_RETRIEVAL_TOOL_COUNT`, `TEMP_EXTENSION_REQUESTED`).
 2. **Pass Stamping with `TEMP_EXTENSION_REQUEST_PASS`**:
@@ -607,6 +625,7 @@ Zocrates resolves this cleanly without accessing private attributes (`_delta`):
 ### Persistent Checkpoint Snapshot (`hitl_snapshot`)
 
 Because ADK's `BaseSessionService` explicitly strips all `temp:`-prefixed state keys before persisting to SQLite (`sessions.db`), an interrupted session that restarts or reloads from disk would otherwise lose accumulated evidence and ceilings.
+
 * Right before yielding `RequestInput`, `search_pipeline_node` serializes full turn state into `ctx.state[HITL_SNAPSHOT]`:
   ```json
   {
@@ -640,6 +659,7 @@ The pipeline maintains a chronological audit history of search turns:
   }
 }
 ```
+
 * **Capped History**: Bounded to `MAX_AUDIT_HISTORY_TURNS = 5` to prevent unbounded growth in `sessions.db`.
 * **In-Place Deduplication on Resume**: If a turn is interrupted, resumed, or re-run with the same query, the previous audit record is updated in place rather than duplicated.
 * **Context Continuity Tracking**: Storing `active_context_items` allows `_has_context_continuity` to determine whether subsequent turns maintain active item continuity for prior-summary synthesis injection.
@@ -683,6 +703,7 @@ Every ADK event is transformed into an SSE chunk:
 ### 6.3 Human-In-The-Loop Streaming & Resumption (`POST /chat/resume`)
 
 When a search extension limit is reached with unaddressed literature gaps, the pipeline interrupts:
+
 1. **SSE Interrupt Event**:
    `search_budget_checkpoint` yields `RequestInput`, emitted as a `request_input` SSE payload containing `interrupt_id`, `invocation_id`, `current_calls`, `current_words`, `covered_summary`, and `missing_aspects`. Raw `adk_request_input` tool calls and JSON function bodies are completely suppressed from the user-facing transcript.
 2. **Interactive Checkpoint Card in Zotero Sidebar**:
@@ -776,4 +797,8 @@ For complete specifications of claim extraction boundaries, decision model backe
 
 * **[Human-In-The-Loop Deep Research Architecture](hitl-deep-research.md)**: Deep dive into checkpoint state machines, proportional ceiling progression, replay sequence barriers, and scope recovery.
 * **[In-Text Citations, Verification & Two-Tier Sources Architecture](citations-and-verification.md)**: Deep dive into the regex parsing engine, AI decision models, local Laya runtime, and interactive evidence peeks.
+* **[Online Literature Discovery & One-Click Import](online-literature-discovery.md)**: Discovery pipeline across OpenAlex, Unpaywall, and Crossref with local deduplication and in-process Zotero write-back.
+* **[Predictive Next-Prompt Engine & Ghost Input UX](predictive-next-prompt.md)**: Post-turn decoupled suggestion architecture and Gecko ghost text overlay.
+* **[Adaptive Context Compaction Architecture](adaptive-context-compaction.md)**: Autonomous post-turn decision-model compaction with $K=2$ verbatim retention.
+* **[Long-Term Memory & User-Curated Knowledge](user-curated-memory.md)**: Native Zotero rich-text note memory, OKF note bundles, and user research profile integration.
 * **[System Overview](../index.md)**: High-level overview of the Zotero plugin and local multi-agent backend architecture.

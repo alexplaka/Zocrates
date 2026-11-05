@@ -7,6 +7,7 @@ This document details the security architecture, communication protocols, Server
 ## 1. High-Level Architecture Overview
 
 Zocrates employs a decoupled hybrid architecture:
+
 * **Frontend Extension**: Operates within Zotero's Mozilla Firefox Gecko browser environment (`bootstrap.js`, `sidebar.js`, `sidebar.html`, `readerContext.js`).
 * **Local Python Backend**: Operates as a local FastAPI service bound strictly to loopback (`http://127.0.0.1:8765` as the default base port, subject to deterministic port offset allocation), orchestrating the Google Agent Development Kit (ADK) multi-agent runtime, SQLite FTS5 hybrid search engine, and Chroma vector database.
 
@@ -273,6 +274,7 @@ sequenceDiagram
 
 ### 4.1 Lazy-Loading Architecture
 `LocalEmbedder` (`zocrates/rag/embeddings.py`) enforces strict deferred initialization:
+
 * `LocalEmbedder.__init__` only assigns string metadata (`_model_name`, `_dimension = 768`) and initializes `_model = None`.
 * PyTorch (`torch`) and Hugging Face `AutoModel.from_pretrained(...)` are not imported or executed during server boot or `GET /status`.
 * Heavy model loading is deferred until `LocalEmbedder.__call__(texts)` is executed for the first time by an ingestion or retrieval task.

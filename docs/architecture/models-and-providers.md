@@ -105,6 +105,7 @@ graph TD
 ### 2.3 Single Source of Truth ("No Secret Config Options")
 
 Zocrates enforces that `zocrates_config.json` is the transparent, canonical source of truth for all system configurations:
+
 * **No Hidden Parameters**: Every configurable parameter, role template, and override block is explicitly materialized in `zocrates_config.json` on disk with its defaults.
 * **Automatic Disk Backfill**: When `load_zocrates_config()` reads an existing `zocrates_config.json` that lacks new keys or subagent override blocks, it backfills them into the file under atomic `FileLock` and updates `_last_config_mtime`.
 * **First-Time Service Seeding**: On initial registration via `service_manager.py`, the config written to disk contains all default structures.
@@ -136,12 +137,14 @@ All five subagents in `override_agent_models` (`coordinator`, `search`, `synthes
 ### 3.2 Subagent Model Pinning
 
 If a researcher specifies a model slug for a specific subagent (e.g. `{"synthesizer": {"model": "openrouter/anthropic/claude-sonnet"}}`), that subagent remains locked to its pinned model while other agents follow the global setting. This enables advanced hybrid configurations:
+
 * **Offline Search + Cloud Synthesis**: Run the ReAct search agent locally via Ollama to query local vector and keyword indices privately without network traffic, while routing final synthesis through frontier cloud reasoning models.
 * **Cost-Optimized Retrieval**: Pin lightweight, low-cost models to high-frequency retrieval loops while reserving reasoning models for synthesis.
 
 ### 3.3 Role-Tailored Thinking Effort (`ROLE_DEFAULT_THINKING`)
 
 `set_agent_models()` automatically attaches `types.GenerateContentConfig` for each role based on `ROLE_DEFAULT_THINKING`:
+
 * `coordinator_agent`: `"medium"` (balanced conversational dialogue)
 * `search_subagent`: `"low"` (fast tool execution without wasting reasoning tokens on parent dialogue)
 * `synthesizer_agent`: `"high"` (deep literature synthesis and epistemic gap evaluation)
@@ -261,6 +264,7 @@ In LiteLLM, models prefixed with `ollama/` route to Ollama's legacy `/api/genera
 
 ### 7.1 `GET /config`
 Returns active LLM and embedding configuration details.
+
 * **Response**:
   ```json
   {
@@ -279,6 +283,7 @@ Returns active LLM and embedding configuration details.
 
 ### 7.2 `POST /config`
 Updates LLM and embedding parameters, persists secure keys in memory, and hot-swaps active agent models.
+
 * **Request Body**:
   ```json
   {
@@ -293,6 +298,7 @@ Updates LLM and embedding parameters, persists secure keys in memory, and hot-sw
 
 ### 7.3 `GET /llm/openrouter_models`
 Retrieves filtered OpenRouter models for dropdown population in Zotero Preferences.
+
 * **Query Parameters**:
   * `target_type`: `"llm"` (default) or `"embedding"`.
   * `force_refresh`: `true` or `false`.
@@ -317,6 +323,7 @@ Retrieves filtered OpenRouter models for dropdown population in Zotero Preferenc
 
 ### 7.4 `POST /llm/test`
 Performs a lightweight completion test against the configured LLM endpoint (OpenRouter or local Ollama/vLLM) to verify connectivity.
+
 * **Request Body (Optional)**:
   ```json
   {
@@ -336,6 +343,7 @@ Performs a lightweight completion test against the configured LLM endpoint (Open
 
 ### 7.5 `POST /llm/test_embedding`
 Performs a test embedding call against the specified embedding model and provider (Local Jina v5 or Cloud OpenRouter Embeddings) to verify connectivity and dimensionality.
+
 * **Request Body (Optional)**:
   ```json
   {

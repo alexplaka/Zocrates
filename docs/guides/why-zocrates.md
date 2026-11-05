@@ -48,6 +48,7 @@ graph TD
 ### Mode 1: The Native Companion in Zotero
 
 For researchers who want an integrated desktop experience without leaving Zotero:
+
 * **Embedded Workspace**: Operates directly inside Zotero's main window as a split-pane sidebar that automatically matches the active Zotero theme.
 * **Custom Academic Search Harness**: Features an autonomous retrieval pipeline engineered specifically for literature research. It autonomously navigates your library, searches hybrid indices, checks tables of contents, and reads targeted sections before synthesizing an answer.
 * **Human-In-The-Loop Deep Research**: When tackling complex surveys or multi-paper comparisons, the search engine pauses and displays an interactive checkpoint card directly in the chat. It summarizes what it has discovered, highlights remaining knowledge gaps, and allows you to extend the search with custom guidance or synthesize immediately.
@@ -58,6 +59,7 @@ For researchers who want an integrated desktop experience without leaving Zotero
 ### Mode 2: The Open Markdown Conversion Engine
 
 For researchers who prefer working with files directly or using coding agents:
+
 * **Clean, Human-Readable Markdown**: Automatically converts academic PDFs, HTML snapshots, and rich-text Zotero notes into organized Open Knowledge Format (OKF) document bundles.
 * **Structured Knowledge Bundles**: Each paper receives its own directory containing clean Markdown text, bibliographic metadata (authors, year, publication, DOI), extracted high-resolution figures, structured tables, and a hierarchical Table of Contents (`toc.md`).
 * **Direct Agent Exploration**: You can open your preferred coding agent (such as Cursor, Claude, or Pi) directly in the converted Markdown folder. The agent can search, read, and cross-reference files using standard filesystem tools.
@@ -65,6 +67,7 @@ For researchers who prefer working with files directly or using coding agents:
 ### Mode 3: Conversion Engine + Local MCP Server
 
 For researchers who want external coding agents and desktop assistants to access their entire library with high precision:
+
 * **Model Context Protocol (MCP) Integration**: Exposes your Zotero library over the open Model Context Protocol standard to tools like **Claude Desktop**, **Cursor**, **Zed**, **Pi**, and any other agentic application that supports MCP.
 * **Dual-Channel Retrieval Tools**: External agents are equipped with specialized academic tools that allow them to:
   1. *Perform Hybrid RAG Search*: Search across the entire library using combined semantic and keyword search.
@@ -200,6 +203,7 @@ Standard AI search tools often silently discard papers they retrieved if they di
 ### Automated Per-Occurrence Citation Verification
 
 To catch subtle misattributions and over-claiming:
+
 * Fast, calibrated decision models evaluate claims on a **per-occurrence** basis, ensuring that each individual sentence is backed by its cited passage.
 * If a compound citation like `[1, 2]` contains one claim that is supported and one that is not, the failing citation is pruned while the valid one is kept.
 * If verification cannot confirm an assertion, the document is moved to Considered Sources rather than falsely presented as confirmed evidence.

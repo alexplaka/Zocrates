@@ -88,12 +88,14 @@ chip.appendChild(titleSpan);
 ```
 
 When rendering markdown responses from the AI backend:
+
 1. Markdown is parsed via `marked.parse()`.
 2. Raw HTML is filtered through an allowlist sanitizer (`sanitizeHTML()`) that purges dangerous tags (`<script>`, `<iframe>`, `<object>`, `<embed>`, `<form>`), inline event handlers (`on*`), and dangerous URI schemes (`javascript:`, `data:` on anchor tags).
 3. The sanitized HTML is inserted into the chat bubble.
 
 ### 2.4 Chip Styling & Theming
 Chips adapt dynamically to Zotero's interface themes using CSS custom properties:
+
 * `--chip-bg`, `--chip-border`, and `--chip-hover-bg` control palette shifts across Dark, Slate, Amoled, Sepia, and Light themes.
 * Font stacks inherit `system-ui` declarations to match host operating system typography.
 * Individual chips feature an `✕` button that appends the target key to `removedKeys` and filters the DOM.
@@ -101,6 +103,7 @@ Chips adapt dynamically to Zotero's interface themes using CSS custom properties
 
 ### 2.5 Generation Cancellation (Stop Button)
 During streaming responses:
+
 * The send button (`#send-btn`) switches to a pulsing red stop icon via the `.stop-mode` class.
 * An `AbortController` signal is bound to the active `fetch()` request.
 * Clicking Stop aborts the network connection, finalizes the partial text, and appends a `[Generation stopped by user]` notice.
@@ -165,6 +168,7 @@ const ReaderContext = {
 
 ### 3.2 Text Selection Extraction
 When a researcher right-clicks highlighted text in the reader:
+
 1. `ReaderContext.handleViewContextMenu` inspects `reader._internalReader.getSelectedText()` or the event's selection payload.
 2. The bridge resolves the reader's underlying item (`reader.item`), its top-level bibliographic parent (`item.parentItem || item`), publication year, and primary author (e.g., `"Vaswani et al."`).
 3. Extracts the 1-indexed page number (`reader._internalReader._state.pageIndex + 1`).
@@ -185,6 +189,7 @@ Zotero.Zocrates.addSnippetToContext({
 
 ### 3.3 Visual Area Crop Extraction & Canvas Rendering
 When a researcher right-clicks a drawn area box annotation:
+
 1. `ReaderContext.handleAnnotationContextMenu` detects an area selection (`annotation.type === "image"` or `"box"`).
 2. The bridge extracts the bounding box coordinates (`rects` or `position`).
 3. It renders the bounding box region from the underlying PDF canvas using `reader._internalReader.renderAnnotationImage(annotation)` or offscreen canvas extraction.
@@ -192,6 +197,7 @@ When a researcher right-clicks a drawn area box annotation:
 
 ### 3.4 Live Area-Resize Auto-Update
 If a researcher resizes or repositions an area box annotation after adding it to the context panel:
+
 * `ReaderContext` observes annotation update events via `Zotero.Notifier.registerObserver(this, ["item"], "zocrates-area-resize-watcher")` on `"modify"` actions.
 * It queries the in-memory reader state (`reader._internalReader._state.annotations`).
 * A retry loop with dual ID/key matching captures the final rendered bounding rects once drag handles are released.
@@ -203,11 +209,13 @@ If a researcher resizes or repositions an area box annotation after adding it to
 
 ### 4.1 Automatic Scope Anchoring
 Adding a text or area excerpt initiates an automatic scope anchoring sequence:
+
 1. **Parent Paper Auto-Selection**: The parent bibliographic item is automatically resolved and added to `activeItemsList` if not already present.
 2. **Context Mode Override**: If the sidebar was configured in `"collection"` or `"library"` context mode, it **automatically switches to `"papers"` mode**. This guarantees that coordinator instructions and retrieval tools focus specifically on the document containing the excerpt.
 
 ### 4.2 Turn-Sticky Lifecycle & Stream Cancellation Safety
 Unlike macro library selections that change whenever the user clicks different items in Zotero's library pane, snippet pills follow a turn-sticky lifecycle:
+
 * **Tree Click Immunity**: Clicking around the library does not clear active snippet pills.
 * **Preservation on Stream Abort**: If a generation is cancelled by clicking Stop (`isAborted = true`), the snippet pills in `activeSnippetsList` remain in `#chips-container`. The user can adjust their prompt and re-submit without re-selecting the excerpt in the reader.
 * **Auto-Clear on Completion**: When a turn completes successfully (`finalizeChatStream` with `!isAborted`), snippet pills are cleared from `#chips-container` and `activeSnippetsList` is reset.
@@ -304,6 +312,7 @@ formatted_context, inline_image_parts, notices = await _process_request_snippets
 
 ### 6.1 Vision-Capable Models
 When the coordinator model supports vision (e.g., Gemini, GPT-6, Claude Sonnet, Qwen-VL):
+
 1. The base64 JPEG data URL is decoded into raw binary bytes.
 2. Google ADK `types.Part.from_bytes(data=raw_bytes, mime_type=mime_type)` objects are appended directly to the outgoing message parts.
 3. A semantic XML tag is added to the text prompt:
@@ -315,6 +324,7 @@ When the coordinator model supports vision (e.g., Gemini, GPT-6, Claude Sonnet, 
 
 ### 6.2 Text-Only Models (Zero-Latency Notice Tag)
 Calling secondary Vision-Language Models (VLMs) during an interactive chat turn introduces latency (10–15s timeouts), temporary disk files, and failure points. When the active model does not support vision:
+
 1. The backend immediately generates an informative untranscribed tag preserving all paper, author, and page metadata:
    ```xml
    <image_snippet paper="Prot2Chat" authors="Wang et al." page="4">
@@ -339,6 +349,7 @@ To accurately determine whether a model supports vision without relying on stati
 
 ### 7.1 The Rewind Bug Mechanism in Upstream ADK
 When a conversational turn containing an in-flight subagent pipeline (`isolation_scope = "search_library_pipeline:..."`) is rewound before the subagent completes:
+
 1. Google ADK immutably records the subagent events in SQLite and writes a rewind marker (`rewind_before_invocation_id`).
 2. On the subsequent user turn, ADK's `Runner._append_user_event` calls `_find_active_task_scope(session)`.
 3. In Google ADK 2.8.0, `_find_active_task_scope` iterates `session.events` directly **without applying rewind filtering** (`_apply_rewinds`).

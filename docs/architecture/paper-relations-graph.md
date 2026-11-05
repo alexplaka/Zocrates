@@ -46,11 +46,13 @@ graph TD
 
 ### 2.1 The Semantic Dilution & Homograph Trap
 Pure bi-encoder document embeddings compress entire papers into a single vector, causing acute semantic dilution:
+
 * **The Homograph Problem**: Broad academic terms (*"agent"*, *"model"*, *"network"*) dilute vector space, causing cross-domain collisions (e.g., linking economic game theory to coding assistants solely because both mention *"agents"*).
 * **The Solution (Dual-Channel Consensus)**: Zocrates uses **hybrid retrieval** (ChromaDB dense vectors + SQLite FTS5 BM25 with Reciprocal Rank Fusion). When a candidate satisfies the Evidence Gate via `method="hybrid"`, both dense semantic similarity and exact lexical token collocations independently confirm the match. This dual-channel consensus eliminates the need for expensive cross-encoders during discovery.
 
 ### 2.2 5-Feature Statistical Keyword Extraction (`zocrates/rag/keyword_extractor.py`)
 Rather than calling an LLM, keywords are extracted in $< 0.2\text{ ms}$ on CPU from the paper's **Structural Digest** (Title + Abstract + Section Headings):
+
 * Scores candidate n-grams (unigrams and bigrams) across 5 statistical features:
   1. **Term Frequency ($TF$)** within digest.
   2. **Inverse Document Frequency ($IDF$) proxy** via general academic stopword filtering.
@@ -65,6 +67,7 @@ For each item, a hybrid query is constructed from its deduplicated Title, statis
 $$\text{Query} = \text{DeduplicatedTokens}(\text{Title} + \text{Keywords} + \text{Tags})$$
 
 Retrieved candidate chunks from `store.search(query, limit=10)` are evaluated against the Evidence Gate:
+
 1. **Chunk 0 Frontmatter Exclusion**: Chunks with `chunk_type == "frontmatter"` are strictly ignored to prevent circular metadata matching.
 2. **Corroboration Criteria**: A candidate paper qualifies as a related edge if and only if:
    * **Rule 1 (`hybrid`)**: At least one chunk matched via `retrieval_method == "hybrid"` (both BM25 token match and dense cosine similarity ≥ 0.50), OR
@@ -80,6 +83,7 @@ Where $\text{min\_score} = 0.015$ and $\tau = 0.10$, clamped strictly to $[0.50,
 
 ### 2.5 Ground Truth Ingestion & Precedence Coalescing
 The engine extracts explicit relationships directly from Zotero's local SQLite database:
+
 1. `human_curated`: Explicit related items defined in Zotero's `itemRelations` table (`dc:relation`, `dc:replaces`). Weight: $1.0$.
 2. `shared_tags`: Distinctive user tags shared across items in `itemTags` (filtering out generic tags like `read`, `todo`, `pdf`). Weight: normalized Jaccard similarity in $[0.50, 0.85]$.
 
@@ -115,6 +119,7 @@ CREATE INDEX IF NOT EXISTS idx_relations_target ON item_relations (target_key);
 
 ### 3.2 Bundle Serialization (`item_relations.md`)
 Every document bundle in `<zotero-data-dir>/zocrates-data/corpus/<item_key>/` contains an `item_relations.md` file:
+
 * **Connected Papers**: Materialized as a structured Markdown document linking directly to peer bundles:
   ```markdown
   # Related Literature: Attention Is All You Need
@@ -190,6 +195,7 @@ The visualizer is embedded natively inside Zotero via `chrome://zocrates/content
 
 ### 5.1 Fast Client-Side Weighted LPA Clustering
 To provide instant semantic grouping without server round-trips:
+
 * Computes communities entirely on the client in vanilla JavaScript using the **Weighted Label Propagation Algorithm (LPA)** in $O(V + E)$ time.
 * Edge weights are derived from relationship categories:
   * `human_curated_and_hybrid_search`: weight $1.2$
@@ -235,6 +241,7 @@ Zocrates resolves this with a **Sector-Anchored Hierarchical Physics Model**:
 
 ### 5.5 Five-Theme Synchronization
 Theme styles synchronize in real time with Zotero's user interface:
+
 * **Slate**: Deep slate-blue dark background with cyan accents.
 * **Amoled**: Pure `#000000` pitch black with high-contrast pastel accents.
 * **Light**: Clean academic white with soft gray borders and crisp typography.
@@ -243,6 +250,7 @@ Theme styles synchronize in real time with Zotero's user interface:
 
 ### 5.6 Sidebar Header Integration
 To keep the primary chat workspace minimal and uncluttered:
+
 * The sidebar header bar contains three persistent controls: **Detach Window** (`#window-toggle-btn`), **Notifications** (`#notification-toggle-btn`), and **More Actions** (`#more-actions-btn`).
 * **Network Graph** and **Settings** are located inside the 3-dots dropdown menu (`#more-actions-dropdown`). Clicking "Network Graph" opens or focuses the native in-Zotero graph tab.
 

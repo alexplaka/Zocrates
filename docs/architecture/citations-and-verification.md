@@ -85,6 +85,7 @@ Chunks are indexed $1, 2, \dots, N$ in exact order of descending relevance. Chun
 ### 2.2 Synthesizer Attribution Rules
 
 In `zocrates/agents/library_search/prompts.py`, `SYNTHESIZER_INSTRUCTION` mandates bracketed index citations alongside natural prose:
+
 * **Bracketed Tokens**: Append chunk indices (`[1]`, `[2]`, or multi-citations like `[1, 2]`) directly following claims.
 * **Prose Attribution**: Mention natural authors or section titles (e.g. *"Jonsson & Stefansson (2021) demonstrated that... [1]"*).
 * **Negative Prohibitions**: Never emit database hashes or invent fake hyperlink URLs.
@@ -183,9 +184,11 @@ The verification system supports both cloud-based execution and local, privacy-f
 ### 4.2 Per-Occurrence Claim Evaluation vs Pre-Aggregation
 
 Standard citation systems frequently evaluate evidence at the chunk level by aggregating claim probabilities using $\max(p_1, p_2, \dots)$. In academic writing, this introduces a dangerous vulnerability:
+
 - If Chunk [1] is cited in Sentence A with an accurate claim ($p = 0.98$) and also cited in Sentence B with a hallucinated numerical claim ($p = 0.12$), a chunk-level $\max()$ evaluates Chunk [1] at $0.98$, keeping **both** citation tokens intact.
 
 Zocrates enforces **Per-Occurrence Claim Evaluation**:
+
 - `extract_claim_occurrences()` parses each citation token occurrence in document order, returning discrete evaluation targets:  
   `{"chunk_index": int, "occurrence": int, "claim": str}`.
 - `verify_citations_support()` returns a per-occurrence dictionary:  
@@ -308,6 +311,7 @@ To monitor verification behavior, latency, and attribution accuracy, Zocrates in
 ### 5.1 Native In-Pipeline Resolution (`search_pipeline.py`)
 
 To prevent `google.adk.errors._stale_session_error.StaleSessionError`, citation resolution is executed natively within `search_pipeline_node`:
+
 1. The dynamic workflow completes `synthesizer_agent` and captures the synthesis text.
 2. `search_pipeline_node` executes the asynchronous pre-pass `verify_citations_support()`, collecting calibrated support probabilities.
 3. `resolve_citations_and_references()` processes the text against `ranked_chunks` and `support_probabilities`.
@@ -321,6 +325,7 @@ The backend validates `audit_inv_id == target_inv_id` before attaching citation 
 ### 5.3 Coordinator Memory Decoupling & Query Sanitization
 
 To prevent numeric bracket tokens from cluttering the coordinator agent's multi-turn conversational history or polluting subsequent search queries:
+
 1. **Clean Return Value (`build_coordinator_view`)**: `search_pipeline_node` invokes `build_coordinator_view()` to transform the synthesis output before returning it as the `search_library` function response. It:
    - Strips existing UI-targeted HTML sections (`<span class="zotero-source-link">`, `<details class="considered-sources">`) and internal item keys.
    - Protects fenced and inline code blocks (`arr[1]`, `val[1, 2]`) using sentinel masks.
@@ -340,6 +345,7 @@ In `formatMessageContent()`, citation tokens are converted into interactive DOM 
 ```html
 <span class="citation-pill" data-citation-idx="1" data-citation-occ="1" title="Title: Somatic mutation rates...&#10;Section: Methods&#10;Support probability: 0.98">Jonsson & Stefansson (2021)</span>
 ```
+
 - Hovering displays a border highlight (`--primary`) and displays the multiline tooltip with title, section, and occurrence-specific support probability.
 - For compound brackets (e.g. `[1, 2]`), surviving citations are wrapped within `.citation-pill-group`.
 - Clicking opens the Evidence Peek Popover directly anchored to the pill.
@@ -347,6 +353,7 @@ In `formatMessageContent()`, citation tokens are converted into interactive DOM 
 ### 6.2 Evidence Peek Popover Architecture
 
 The popover is constructed using native DOM APIs (`document.createElementNS("http://www.w3.org/1999/xhtml", ...)`), avoiding XML serialization corruption in Gecko:
+
 - **Header**: Document Title in bold, followed by `Authors (Year) • Publication Venue`.
 - **Badges Row (`.evidence-popover-badges-row`)**:
   - Section Badge: `§ Section Title` breadcrumb indicating the exact section containing the passage.
@@ -362,11 +369,13 @@ The popover is constructed using native DOM APIs (`document.createElementNS("htt
 ### 6.3 Clickable Source Entries
 
 In the `# Cited Sources` and `## Other Considered Sources` sections:
+
 - **Title & Authors Link (`.zotero-source-link`)**: Formatted with `color: var(--primary); font-weight: 500; cursor: pointer;` and underlined on hover. Clicking anywhere on the title/author line triggers `selectItemInZotero(itemKey)` directly.
 
 ### 6.4 Citation Visibility Toggle & Clean Text Copy
 
 To allow researchers to seamlessly toggle between deep scholarly verification and distraction-free prose reading or clean text export:
+
 - **Toggle Button Placement (`.message-actions-left`)**: Positioned in the lower-left corner of the assistant response message bubble within `.message-actions`, cleanly partitioned from right-aligned utility actions in `.message-actions-right`.
 - **Presence Gating (`hasMessageCitations`)**: Only displayed on assistant messages that actively contain citations or references (checking `metadata.citations`, `metadata.references`, the `# Cited Sources` header, or bracketed citation tokens, with code blocks masked).
 - **Interactive Toggle States**:

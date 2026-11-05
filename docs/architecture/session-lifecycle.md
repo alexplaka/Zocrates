@@ -51,6 +51,7 @@ graph TD
 ### 2.3 Session State Keys (`session.state`)
 
 The session state dictionary persists contextual metadata across turns:
+
 * **`active_mode`**: Context mode key; operational context is driven by the coordinator's selection chips (papers, collection, or entire library) and autonomous tool dispatches (such as `search_library` and `search_online_literature`).
 * **`active_context_items`**: List of dictionaries representing the active document scope (`[{"item_key": str, "title": str}]`) or `None` for the entire library.
 * **`active_context_items_str`**: Formatted markdown header injected into the coordinator's prompt (`# Active Zotero Selection Context...`).
@@ -74,6 +75,7 @@ To prevent intermediate tool executions and raw retrieval chunks from polluting 
 In Google ADK 2.8.0, when a turn is rewound before an in-flight subagent pipeline completes (i.e. before `finish_task` is called), native `_find_active_task_scope` iterates `session.events` directly without calling `_apply_rewinds`. Finding an unclosed isolation scope from the rewound turn, ADK falsely treats the subagent as an active paused task waiting for user input, stamping subsequent top-level user messages with the dead subagent's `isolation_scope`. When the root coordinator runs (`isolation_scope=None`), ADK's content filter drops the user message from context.
 
 Zocrates resolves this via `patch_adk_active_task_scope_rewind()` in `zocrates/agents/common/adk_compat.py`:
+
 * Intercepts `adk_runners._find_active_task_scope` via a lightweight `_RewoundSessionProxy` exposing `_apply_rewinds(session.events)`.
 * If an unfinished subagent pipeline was rewound, it is filtered out and returns `None`.
 * Live, un-rewound active scopes (such as HITL checkpoints) continue to be recognized normally.
@@ -119,11 +121,13 @@ graph TD
 
 ### 5.1 Persistent Checkpoints (`pending_hitl`)
 When literature retrieval hits a ceiling with unaddressed research aspects, the dynamic workflow yields `RequestInput(interrupt_id="interrupt_ext_N")`:
+
 * **Unresolved Interrupt Tracking**: When `format_session_for_ui(session)` formats the session for the frontend, it scans `session.events` for `adk_request_input` function calls without corresponding `FunctionResponse` completions. If found, it attaches a `pending_hitl` metadata object to the session payload.
 * **Frontend Restoration**: Upon reopening Zotero or switching to a paused session, `sidebar.js` detects `pending_hitl` and immediately re-renders the interactive `.hitl-checkpoint-card`.
 
 ### 5.2 Turn Rewind and Selection State Restoration
 If the user cancels an interrupted turn or chooses to edit a previous prompt:
+
 * `POST /sessions/{id}/rewind` invokes ADK's `runner.rewind_async(invocation_id=...)`, pruning uncommitted turn events from `sessions.db`.
 * On rewind or inline edit, `sidebar.js` restores the target turn's original `active_context_items`, `snippets`, and `contextMode`, ensuring exact conversational replay without state drift.
 
