@@ -308,7 +308,7 @@ For deep learning document converters (`DoclingLocalConverter`):
 1. **CUDA Memory Fragmentation Protection**:
    `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` is set at server startup (`zocrates.rag.setup_torch` and `zocrates.fast_api_app`) before PyTorch initializes the CUDA driver context, protecting all PyTorch operations across the application.
 2. **Hardware Tier Assessment (`zocrates.rag.hardware`)**:
-   - **Tier 1 (High-Performance GPU — $\ge$6.0 GB VRAM or Apple Silicon $\ge$16 GB Unified RAM)**: Supports full Docling with Formula LaTeX VLM (`do_formula_enrichment=True`, `CodeFormulaV2`) at ~0.5–1.5s per equation.
+   - **Tier 1 (High-Performance GPU — ≥ 6.0 GB VRAM or Apple Silicon ≥ 16 GB Unified RAM)**: Supports full Docling with Formula LaTeX VLM (`do_formula_enrichment=True`, `CodeFormulaV2`) at ~0.5–1.5s per equation.
    - **Tier 2 (CPU or Low-VRAM GPU <6.0 GB)**: Automatically routes Docling to **Fast Mode** (`do_formula_enrichment=False`). Fast Mode performs full document layout analysis, reading order reconstruction, picture extraction, and table structure parsing in **5–15 seconds total** on CPU, avoiding the 60s/formula autoregressive VLM bottleneck.
 3. **Configurable Docling Presets (`docling_mode`)**:
    - Supported values: `"auto"` (hardware-adaptive default), `"fast"` (layout & tables only), `"full"` (force formula LaTeX VLM).
@@ -450,18 +450,18 @@ To ensure clean vector search retrieval and eliminate narrative fragmentation in
    - Outer container tags (`<figure ...>` and `</figure>`) are **stripped from `ChunkResult.text`**, saving LLM token context and vector embedding budget while preserving on-disk `document.md` intact for UI rendering.
    - Large tables and multi-panel figures are kept intact as single standalone chunks (up to `CHUNK_HARD_MAX = 8000` chars).
 3. **Narrative Prose Stitching**:
-   - Extracted figure/table positions in the text are replaced with empty strings, and consecutive newlines are normalized (`\n{3,}` $\rightarrow$ `\n\n`).
-   - Paragraphs and sentences flanking figures merge seamlessly into continuous, unbroken narrative reading chunks ($\le 4,000$ chars).
+   - Extracted figure/table positions in the text are replaced with empty strings, and consecutive newlines are normalized (`\n{3,}` → `\n\n`).
+   - Paragraphs and sentences flanking figures merge seamlessly into continuous, unbroken narrative reading chunks (≤ 4,000 chars).
 4. **Anchor-Based Document Order Interleaving**:
    - Figure/table chunks are interleaved with prose chunks based on their character anchor offsets in the section, preserving natural document order without cutting prose across broken sentences.
 5. **Strict 6-Part Classification Hierarchy (`determine_chunk_type`)**:
-   - YAML frontmatter block: `---\n...\n---` $\rightarrow$ `"frontmatter"`.
-   - Explicit wrapper metadata: `<figure data-type="table">` $\rightarrow$ `"table"`, `<figure data-type="image">` $\rightarrow$ `"figure"`.
-   - Whole-block code fences: ```` ```...``` ```` $\rightarrow$ `"code"`.
-   - Markdown tables: `|---|` $\rightarrow$ `"table"`.
-   - Standalone images: `![alt](url)` $\rightarrow$ `"figure"`.
-   - Display LaTeX: `$$...$$`, `\begin{equation}` $\rightarrow$ `"equation"`.
-   - Default prose narrative $\rightarrow$ `"text"`.
+   - YAML frontmatter block: `---\n...\n---` → `"frontmatter"`.
+   - Explicit wrapper metadata: `<figure data-type="table">` → `"table"`, `<figure data-type="image">` → `"figure"`.
+   - Whole-block code fences: ```` ```...``` ```` → `"code"`.
+   - Markdown tables: `|---|` → `"table"`.
+   - Standalone images: `![alt](url)` → `"figure"`.
+   - Display LaTeX: `$$...$$`, `\begin{equation}` → `"equation"`.
+   - Default prose narrative → `"text"`.
 
 ---
 
@@ -502,7 +502,7 @@ When new documents are added to Zotero during a live user session (via browser c
 3. **Resilient Multi-Tier File Ready Detection**:
    - Web connectors and drag-and-drop operations create the database record before the binary file finishes writing to `storage/<key>/`.
    - `waitForAttachmentFile()` inspects `attItem.getFilePathAsync()`, `attItem.getFilePath()`, and `attItem.getFile()`, verifying disk presence via `IOUtils.exists/stat` and `OS.File.exists`.
-   - Polling uses a progressive retry loop over **10 seconds** ($10 \times 1\text{s}$) to allow large PDFs or web snapshots to finish downloading over the network.
+   - Polling uses a progressive retry loop over **10 seconds** (10 × 1s) to allow large PDFs or web snapshots to finish downloading over the network.
 4. **3-Tier State Machine Deduplication**:
    - Maintains three disjoint tracking sets: `_inQueue`, `_activeConversions`, and `_convertedCache`.
    - An attachment key is immediately rejected by `enqueueItem()` if it is already queued, actively converting, or converted in this session.
@@ -528,7 +528,7 @@ For bulk document conversions triggered via the right-click context menu (`Zocra
 
 1. **Multi-Phase SSE Progress Stream (`POST /batch-convert`)**:
    - Streams real-time Server-Sent Events per item: `batch_start`, `item_start`, `item_success`, `item_error`, and `batch_complete`.
-   - Sidebar renders an active Batch Progress Card with live item title, engine badge, progress bar ($N / M$), and a **Stop** button.
+   - Sidebar renders an active Batch Progress Card with live item title, engine badge, progress bar (N / M), and a **Stop** button.
 2. **Effective Converter ID & Pre-Flight Cost Estimation (`GET /cost-estimate`)**:
    - Computes `effective_converter_id` per document in the selection:
      - PDF attachments route to `datalab` (counting pages for USD cost estimation).
@@ -539,7 +539,7 @@ For bulk document conversions triggered via the right-click context menu (`Zocra
      - `indexed_count`: Documents with Markdown bundles already embedded in the active Chroma collection.
      - `pending_index_count`: Documents converted to Markdown bundles on disk but not yet embedded in the active vector collection (e.g. after switching embedding models).
      - `unconverted_count`: Raw library documents with no Markdown bundles.
-   - Modal provides a direct `[ Index Y Pending Document(s) ]` action powered by `POST /batch-index` SSE stream, embedding cached documents in mini-batches ($batch\_size = 8$) without re-running OCR conversions.
+   - Modal provides a direct `[ Index Y Pending Document(s) ]` action powered by `POST /batch-index` SSE stream, embedding cached documents in mini-batches (batch_size = 8) without re-running OCR conversions.
 4. **Library Conversion Status Modal**:
    - Accessible via the sidebar menu (`More Actions -> Library Conversion Status`).
    - Displays total converted vs. unconverted documents, an expandable list of unconverted files with search filtering, an engine selector, and direct conversion/indexing actions.
@@ -560,10 +560,10 @@ For extracted figures, diagrams, and plots in Markdown documents that lack descr
      - Backup Model: `openrouter/qwen/qwen-flash` (Fast, high-quality fallback on rate limit or 5xx error).
    - **Ollama (Local)**: Open user-configured vision model (e.g. `llava:latest`, `minicpm-v:latest`).
 3. **Filtering, SVG In-Memory Rasterization & Pre-Validation**:
-   - Verifies file existence and minimum file size $\ge 4\text{ KB}$.
+   - Verifies file existence and minimum file size ≥ 4 KB.
    - **Vector SVG Support**: Rasterizes SVG files into PNG bitmaps in-memory using `resvg-py` (zero external C dependencies) to inspect dimensions and pass bitmap pixels to the VLM.
-   - Inspects headers with `PIL.Image.open` wrapped in exception guards, safely skipping unreadable files, tiny icons ($< 120\text{px}$), and extreme aspect ratios ($< 0.05$ or $> 20$).
-   - Downscales large images proportionally to $\le 1024\text{px}$ using Lanczos filtering in-memory prior to base64 encoding.
+   - Inspects headers with `PIL.Image.open` wrapped in exception guards, safely skipping unreadable files, tiny icons (< 120px), and extreme aspect ratios (< 0.05 or > 20).
+   - Downscales large images proportionally to ≤ 1024px using Lanczos filtering in-memory prior to base64 encoding.
    - Caps processing at the top `vlm_max_images_per_doc` (default 100) by area.
 4. **Sidecar Caching (`image_captions.json`)**:
    - Caches generated captions in `corpus/<item_key>/image_captions.json` keyed by image SHA-256.

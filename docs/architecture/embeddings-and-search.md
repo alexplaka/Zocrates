@@ -84,7 +84,7 @@ Zocrates features multi-vendor GPU accelerator detection and automatic wheel rep
 
 | Accelerator Vendor | Supported Hardware | Execution Device | Setup & PyTorch Wheel Selection |
 | :--- | :--- | :--- | :--- |
-| **NVIDIA CUDA** *(Modern)* | RTX 20xx / 30xx / 40xx, A100, H100 (Compute Capability $\ge$ 7.5) | `cuda` | Installs PyTorch from `cu121`/`cu126` wheel index |
+| **NVIDIA CUDA** *(Modern)* | RTX 20xx / 30xx / 40xx, A100, H100 (Compute Capability ≥ 7.5) | `cuda` | Installs PyTorch from `cu121`/`cu126` wheel index |
 | **NVIDIA CUDA** *(Legacy)* | GeForce MX250, GTX 10xx/9xx (Compute Capability < 7.5) | `cuda` | Automatically installs `cu118` wheel index (retains `sm_61`/`sm_60`/`sm_50` kernels) |
 | **Apple Silicon** | Mac M1 / M2 / M3 / M4 | `mps` *(Metal)* | Uses PyTorch built-in Metal Performance Shaders (`torch.backends.mps`) |
 | **AMD Radeon** | Radeon RX 6000/7000 series, Instinct (Linux) | `cuda` *(ROCm)* | Detects `rocm-smi` and installs ROCm wheel index (`rocm6.2`) |
@@ -133,7 +133,7 @@ graph TD
 ### 5.1. Chunker (`zocrates.rag.chunker`)
 
 - **Standalone Figure/Table Chunking & Tag Stripping**: `<figure data-type="image|table">` blocks are extracted as dedicated standalone chunks, and outer `<figure>` / `</figure>` wrapper tags are stripped from `ChunkResult.text` to conserve embedding tokens.
-- **Narrative Prose Stitching**: Figure positions are replaced with empty strings, and excessive blank lines are normalized (`\n{3,}` $\rightarrow$ `\n\n`), stitching interrupted sentences and paragraphs into continuous narrative prose ($\le 4,000$ chars).
+- **Narrative Prose Stitching**: Figure positions are replaced with empty strings, and excessive blank lines are normalized (`\n{3,}` → `\n\n`), stitching interrupted sentences and paragraphs into continuous narrative prose (≤ 4,000 chars).
 - **Anchor-Based Document Order Interleaving**: Figures and stitched prose chunks are interleaved by character offset to preserve natural reading order.
 - **6-Part Semantic `chunk_type` Classification**:
   Each chunk is automatically classified into one of 6 semantic types:

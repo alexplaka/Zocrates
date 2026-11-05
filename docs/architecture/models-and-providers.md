@@ -223,9 +223,9 @@ graph TD
 In LiteLLM, models prefixed with `ollama/` route to Ollama's legacy `/api/generate` endpoint, which lacks native tool calling and emits raw JSON token strings for thoughts. Zocrates normalizes bare slugs and `ollama/<slug>` inputs to `ollama_chat/<slug>`, forcing LiteLLM to use Ollama's `/api/chat` endpoint with full tool-calling and native thought streaming support.
 
 ### 6.2 Base URL Normalization
-* Normalizes schemes to prevent missing protocol crashes (e.g. `localhost:11434` $\rightarrow$ `http://localhost:11434`).
-* Strips trailing `/v1` from Ollama URLs (`http://localhost:11434/v1` $\rightarrow$ `http://localhost:11434`) because LiteLLM's Ollama provider attaches its own path.
-* Appends `/v1` to vLLM URLs (`http://localhost:8000` $\rightarrow$ `http://localhost:8000/v1`) because vLLM implements OpenAI-compatible routing.
+* Normalizes schemes to prevent missing protocol crashes (e.g. `localhost:11434` → `http://localhost:11434`).
+* Strips trailing `/v1` from Ollama URLs (`http://localhost:11434/v1` → `http://localhost:11434`) because LiteLLM's Ollama provider attaches its own path.
+* Appends `/v1` to vLLM URLs (`http://localhost:8000` → `http://localhost:8000/v1`) because vLLM implements OpenAI-compatible routing.
 
 ### 6.3 Context Window Protection & Top-Level `num_ctx`
 * Google ADK clobbers the `extra_body` dictionary during turn execution. To ensure context sizes are respected without VRAM thrashing, Zocrates passes `num_ctx = cfg.get("ollama_num_ctx", 16384)` as a top-level kwarg to `LiteLlm`.

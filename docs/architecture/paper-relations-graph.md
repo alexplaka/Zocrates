@@ -36,7 +36,7 @@ graph TD
 1. **Zero Heavy Graph Databases**: No Neo4j, Memgraph, or Kùzu daemons. All vertices, edges, weights, and metadata reside natively in SQLite (`conversion_meta.db` in WAL mode) and local Markdown bundles.
 2. **Evidence-Gated & 100% Deterministic (Zero LLMs / Zero Cloud Calls)**: Edges are formed strictly when corroborated using deterministic algorithms—statistical keyphrase extraction (<0.2 ms on CPU) and reciprocal rank fusion hybrid scoring. Building the graph consumes zero LLM tokens, incurs zero API costs, and runs entirely locally and air-gapped. In a personal research library, specialized papers frequently have no close siblings. Forcing every paper to pick $K$ nearest neighbors hallucinates spurious connections. Under Zocrates' evidence gating, isolated papers remain unconnected (`item_relations.md` is an intentional 0-byte file).
 3. **Format over Service ("Just Markdown & Just Files")**: Complete local neighborhoods are serialized as relative Markdown links (`[KEY - Title](../KEY/document.md)`), allowing LLM coding agents and humans to traverse the literature network directly in the filesystem.
-4. **100% Invariant `document.md`**: Frontmatter is written once at conversion with structural keywords baked in and never modified when relationships change. This guarantees zero line shifts ($\Delta L = 0$), prevents vector chunk invalidation, and stops circular self-corroboration loops.
+4. **100% Invariant `document.md`**: Frontmatter is written once at conversion with structural keywords baked in and never modified when relationships change. This guarantees zero line shifts (ΔL = 0), prevents vector chunk invalidation, and stops circular self-corroboration loops.
 5. **Offline & Air-Gapped Visualizer**: The visualizer is pure HTML5 Canvas 2D and vanilla JavaScript ($0$ CDN dependencies, $0$ external web fonts) embedded natively as a Zotero tab (`chrome://zocrates/content/graph.xhtml`).
 6. **Community Persistence & Macro Anchoring**: Graph layout relies on client-side Weighted Label Propagation (LPA) coupled with sector-anchored force physics, preventing the common failure mode where central gravity collapses topical clusters into an unreadable hairball.
 
@@ -67,9 +67,9 @@ $$\text{Query} = \text{DeduplicatedTokens}(\text{Title} + \text{Keywords} + \tex
 Retrieved candidate chunks from `store.search(query, limit=10)` are evaluated against the Evidence Gate:
 1. **Chunk 0 Frontmatter Exclusion**: Chunks with `chunk_type == "frontmatter"` are strictly ignored to prevent circular metadata matching.
 2. **Corroboration Criteria**: A candidate paper qualifies as a related edge if and only if:
-   * **Rule 1 (`hybrid`)**: At least one chunk matched via `retrieval_method == "hybrid"` (both BM25 token match and dense cosine similarity $\ge 0.50$), OR
-   * **Rule 2 (`single_chunk_high`)**: At least one chunk has dense semantic similarity $\ge 0.65$, OR
-   * **Rule 3 (`multi_chunk_cohesion`)**: At least $\ge 2$ independent chunks match with dense semantic similarity $\ge 0.58$.
+   * **Rule 1 (`hybrid`)**: At least one chunk matched via `retrieval_method == "hybrid"` (both BM25 token match and dense cosine similarity ≥ 0.50), OR
+   * **Rule 2 (`single_chunk_high`)**: At least one chunk has dense semantic similarity ≥ 0.65, OR
+   * **Rule 3 (`multi_chunk_cohesion`)**: At least ≥ 2 independent chunks match with dense semantic similarity ≥ 0.58.
 
 ### 2.4 Exponential Diminishing-Returns Rescaling
 Raw RRF scores are rescaled to an intuitive confidence interval $[0.50, 0.99]$ using an exponential decay function:
@@ -127,10 +127,10 @@ Every document bundle in `<zotero-data-dir>/zocrates-data/corpus/<item_key>/` co
 * **Atomic Replacement Guarantee**: Written using a temporary sidecar file (`.tmp_item_relations.md.<pid>`) followed by `os.replace` to prevent race conditions during concurrent agent reading.
 
 ### 3.3 Immutability & Safety Guardrails
-* **100% Invariant `document.md`**: Frontmatter is written once at conversion and never rewritten on relation synchronizations. Zero line shifts ($\Delta L = 0$).
-* **Dangling Link Invalidation Invariant**: When Paper $A$ is deleted from Zotero:
-  1. The engine queries all neighbors connected to $A$ from `item_relations`.
-  2. Deletes $A$'s rows from SQLite.
+* **100% Invariant `document.md`**: Frontmatter is written once at conversion and never rewritten on relation synchronizations. Zero line shifts (ΔL = 0).
+* **Dangling Link Invalidation Invariant**: When Paper A is deleted from Zotero:
+  1. The engine queries all neighbors connected to A from `item_relations`.
+  2. Deletes A's rows from SQLite.
   3. Immediately batch-regenerates `item_relations.md` for all affected neighbors, eliminating dangling Markdown links.
 
 ---
@@ -219,9 +219,9 @@ Zocrates resolves this with a **Sector-Anchored Hierarchical Physics Model**:
 ### 5.3 Semantic Zoom & Visual Hierarchy
 * **Academic 2-Line Labels**: Nodes display `Author et al. (Year)` in bold on line 1 and truncated paper title on line 2.
 * **Degree-Based Semantic Zoom Culling**:
-  * Zoom $< 0.8\times$: Labels hidden or restricted to high-degree hub papers ($\text{degree} \ge 4$).
-  * Zoom $0.8\times - 1.5\times$: Moderate-degree nodes displayed ($\text{degree} \ge 2$).
-  * Zoom $> 1.5\times$: All node labels rendered with full detail.
+  * Zoom < 0.8×: Labels hidden or restricted to high-degree hub papers (degree ≥ 4).
+  * Zoom 0.8× - 1.5×: Moderate-degree nodes displayed (degree ≥ 2).
+  * Zoom > 1.5×: All node labels rendered with full detail.
 * **Node Sizing**: Scaled smoothly by connectivity: $r = 6 + 2\sqrt{\text{degree}}$.
 * **Edge Styling**: Color, opacity, and line dash reflect relationship strength and type (solid bright for curated, semi-transparent for hybrid, dashed for shared tags).
 

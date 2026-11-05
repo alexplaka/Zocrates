@@ -36,13 +36,13 @@ graph TD
 
 1. **Flat Single-ID Scheme (`[1]`, `[2]`, `[1, 2]`)**: Candidate chunks are presented in descending cross-encoder relevance order. Synthesizers only track one number per chunk, matching frontier LLM pretraining priors with zero dual-ID cognitive arithmetic.
 2. **Two-Tier Sources (100% Evidence Recall)**: All retrieved candidate chunks across the turn are deterministically partitioned into Tier 1 (`# Cited Sources`) and Tier 2 (`## Other Considered Sources`). No analyzed evidence is ever dropped ($U = C \cup R$).
-3. **APA Author Formatting Uniformity**: Standardized author representation across citations, references, evidence XML, popovers, and graph visualizer labels (1 author $\rightarrow$ `Author`, 2 authors $\rightarrow$ `Author1 & Author2`, 3+ authors $\rightarrow$ `Author et al.`).
+3. **APA Author Formatting Uniformity**: Standardized author representation across citations, references, evidence XML, popovers, and graph visualizer labels (1 author → `Author`, 2 authors → `Author1 & Author2`, 3+ authors → `Author et al.`).
 4. **Zero Internal Key Exposure**: 8-character Zotero database item keys (e.g. `HCZLU22L`) are strictly barred from prompt outputs and rendered as human-readable author-year labels or academic badges in the UI.
 5. **No Out-of-Band SQL Mutations**: Citation resolution executes synchronously inside `search_pipeline.py` within the native ADK runner context, preventing desynchronization of `session._storage_update_marker` and eliminating `StaleSessionError`.
 6. **Strict Turn Scoping**: Citations are coupled to the current turn's retrieval `invocation_id`. Purely conversational follow-ups without search execution never inherit stale prior-turn reference lists.
 7. **Quote Extractive Bounding**: Supporting quote snippets are capped at 1,000 characters (`MAX_EXTRACTIVE_QUOTE_CHARS = 1000`) with ellipsis, rendered as formatted Markdown without artificial quote marks.
 8. **Per-Occurrence Claim Evaluation**: Each citation token occurrence in synthesized prose is evaluated individually against its cited chunk ($p_{\text{occ}}$). Citation tokens are never evaluated via aggregated $\max()$ across disparate sentences.
-9. **Two-Tier Source Partitioning Under Verification**: A document moves to Tier 1 (`# Cited Sources`) if $\ge 1$ cited occurrence survives verification threshold $\tau$. If 0 occurrences survive anywhere in the text, the document moves to Tier 2 (`## Other Considered Sources`), preserving $U = C \cup R$.
+9. **Two-Tier Source Partitioning Under Verification**: A document moves to Tier 1 (`# Cited Sources`) if ≥ 1 cited occurrence survives verification threshold $\tau$. If 0 occurrences survive anywhere in the text, the document moves to Tier 2 (`## Other Considered Sources`), preserving $U = C \cup R$.
 10. **Empty Tier 1 Safeguard (No False Promotion on Verification Failure)**: When the synthesizer emits citations but all citations fail verification thresholds, zero-citation fallback is explicitly disabled. Tier 1 remains empty and all candidate documents are placed in Tier 2 (`## Other Considered Sources`), preventing unverified literature from being falsely promoted as cited sources.
 11. **Dual Call-Site Parity & Synchronous Purity**: `search_pipeline.py` runs the asynchronous verification pre-pass (`verify_citations_support`) and stores probabilities in session audit state. `resolve_citations_and_references` remains a pure, synchronous function. Fallback in-process resolution at the API boundary reuses stored audit probabilities without invoking duplicate network calls.
 12. **Fail-Open Resilience**: Network timeouts, missing API keys, or offline verification backends log warnings and fail open ($p = \text{None}$, treated as surviving), guaranteeing synthesis text is never corrupted or stalled by verification subsystem failures.
@@ -103,7 +103,7 @@ The resolution engine runs synchronously at the pipeline boundary:
 2. **Regex Parsing**:
    Matches standard brackets (`\[(?:E\s?|Chunk\s?)?(\d{1,2}(?:\s*[,;]\s*\d{1,2})*)\]`) and fullwidth alternatives (`【(\d{1,2}(?:\s*[,;]\s*\d{1,2})*)】`). Splits multi-citations (`[1, 2]`) and normalizes whitespace.
 3. **Bounds Checking & Hallucination Suppression**:
-   Validates indices against $1 \le \text{idx} \le \text{len}(ranked\_chunks)$. Any hallucinated out-of-bounds index (e.g. `[99]`) is safely stripped from the text rather than left dangling.
+   Validates indices against 1 ≤ idx ≤ len(ranked_chunks). Any hallucinated out-of-bounds index (e.g. `[99]`) is safely stripped from the text rather than left dangling.
 4. **Metadata Extraction & Attachment Parent Resolution**:
    Extracts `chunk_id`, `item_key`, `attachment_key`, `title`, `authors`, `year`, `section`, `publication`, and an extractive quote capped at `MAX_EXTRACTIVE_QUOTE_CHARS = 1000`. If an item is an attachment (e.g. HTML Snapshot, PDF) where direct `creators` or `year` are empty in Zotero's schema, it automatically traverses to the parent bibliographic item and falls back to `document.md` YAML frontmatter.
 5. **Two-Tier Source Partitioning**:
@@ -177,7 +177,7 @@ The verification system supports both cloud-based execution and local, privacy-f
    - **Backend Port Collision Guard**: `start_laya_daemon` queries `get_backend_port()` and rejects launch if the daemon port collides with the active Zocrates backend server.
    - **Strict Signature Health Probes (`check_laya_running`)**: Verifies `GET /health` returns HTTP 200 with JSON confirming `"status": "ok"` and genuine Laya runtime descriptors (`"device"`, `"loaded"`, `"checkpoint_devices"`, or `"cpu_fallbacks"`), with fallback verification on `GET /openapi.json`.
    - **Non-Invasive Daemon Management (`stop_laya_daemon`)**: Tracks spawned processes via `_managed_process` and `<zotero-data-dir>/zocrates-data/laya.pid`. Eliminates blind port kills, verifying target processes via `psutil` using strict token matching (`_is_laya_process`) and listening socket state (`_process_is_on_port`) to protect unrelated developer processes.
-   - **Automated Hardware & Device Resolution (`resolve_laya_device`)**: Executes an isolated Python subprocess probe with a concrete tensor operation (`(torch.zeros(1).cuda() + 1).item()`). This actively catches CUDA capability mismatches or driver memory exhaustion before spawning the server, gracefully selecting `cuda` $\rightarrow$ `mps` (Apple Silicon) $\rightarrow$ `xpu` (Intel GPU) $\rightarrow$ `cpu`.
+   - **Automated Hardware & Device Resolution (`resolve_laya_device`)**: Executes an isolated Python subprocess probe with a concrete tensor operation (`(torch.zeros(1).cuda() + 1).item()`). This actively catches CUDA capability mismatches or driver memory exhaustion before spawning the server, gracefully selecting `cuda` → `mps` (Apple Silicon) → `xpu` (Intel GPU) → `cpu`.
    - **Native Tensor Batching (`_check_support_local_laya_batch`)**: Queries Laya's native `/v1/systemone/batch` endpoint, evaluating all claims across all cited chunks simultaneously in a single HTTP round-trip instead of serial requests.
 
 ### 4.2 Per-Occurrence Claim Evaluation vs Pre-Aggregation
@@ -214,7 +214,7 @@ Accurate verification requires extracting the exact semantic assertion correspon
 4. **Clean Markdown & Symbol Normalization (`_clean_and_join_spans`)**:
    - Strips Markdown formatting syntax (`**`, `__`, backticks `` ` ``).
    - Normalizes mathematical and punctuation symbols into plain text:  
-     `≈` $\rightarrow$ `"about"`, `≥` $\rightarrow$ `"at least"`, `≤` $\rightarrow$ `"at most"`, `→` $\rightarrow$ `"to"`, `—` (em-dash) $\rightarrow$ `" - "`.
+     `≈` → `"about"`, `≥` → `"at least"`, `≤` → `"at most"`, `→` → `"to"`, `—` (em-dash) → `" - "`.
    - Collapses irregular whitespace, strips remaining citation tokens, and ensures proper terminal punctuation (`.`, `!`, `?`).
 5. **Masking Shields (`mask_text_for_extraction`)**:
    Masks fenced code blocks (```` ```...``` ````), inline code spans (`` `...` ``), Markdown images (`![alt](url)`), and Markdown link reference definitions (`[1]: http...`) using sentinel tokens (`@@ZOCRATES_VERIFY_MASK_N@@`) before boundary detection.
@@ -224,9 +224,9 @@ Accurate verification requires extracting the exact semantic assertion correspon
 1. **Partial Compound Bracket Pruning**:
    - When a synthesizer produces compound citation brackets such as `[1, 2]`, each index is evaluated independently against threshold $\tau$ (default $0.60$).
    - If Chunk 1 satisfies $p_1 \ge \tau$ and Chunk 2 fails $p_2 < \tau$, the bracket is rewritten in-place to `[1]`.
-   - If all indices in a bracket fail, the bracket token is removed completely, and surrounding punctuation whitespace is collapsed (`[ \t]+([.,;!?])` $\rightarrow$ `\1`).
+   - If all indices in a bracket fail, the bracket token is removed completely, and surrounding punctuation whitespace is collapsed (`[ \t]+([.,;!?])` → `\1`).
 2. **Two-Tier Source Invariant Under Verification**:
-   - A document moves to Tier 1 (`# Cited Sources`) if $\ge 1$ cited occurrence survives verification anywhere in the response text.
+   - A document moves to Tier 1 (`# Cited Sources`) if ≥ 1 cited occurrence survives verification anywhere in the response text.
    - A document moves to Tier 2 (`## Other Considered Sources`) if 0 of its cited occurrences survive.
    - All retrieved evidence remains accessible, guaranteeing $U = C \cup R$.
 3. **Empty Tier 1 Safeguard (No False Promotion on Verification Failure)**:
@@ -247,11 +247,11 @@ Surviving citations carry calibrated probabilities into the Zotero desktop UI:
 
 1. **Evidence Peek Popover Badges (`.evidence-support-badge`)**:
    Embedded directly in the popover header alongside section breadcrumbs (`§ Section`):
-   - **High Support ($\ge 0.80$)**: Rendered with soft green styling (`var(--success, #10b981)`):  
+   - **High Support (≥ 0.80)**: Rendered with soft green styling (`var(--success, #10b981)`):  
      `✓ Support Probability: 0.98`
-   - **Moderate Support ($0.50 \le p < 0.80$)**: Rendered with warm amber styling (`var(--warning, #f59e0b)`):  
+   - **Moderate Support (0.50 ≤ p < 0.80)**: Rendered with warm amber styling (`var(--warning, #f59e0b)`):  
      `ⓘ Support Probability: 0.65`
-   - **Low Support ($< 0.50$)**: Rendered with soft red styling (`var(--danger, #ef4444)`):  
+   - **Low Support (< 0.50)**: Rendered with soft red styling (`var(--danger, #ef4444)`):  
      `Support Probability: 0.42`
 2. **Occurrence-Specific Pill Tooltips**:
    In-text citation pills (`.citation-pill`) display a multiline hover tooltip indicating document title, exact section, and the occurrence's specific probability:
@@ -398,7 +398,7 @@ The citation, sources, and verification architecture is validated by dedicated a
   - Markdown syntax stripping and mathematical symbol normalization (`≈`, `≥`, `≤`, `→`, `—`).
   - Sentinel masking for code blocks, images, and reference definitions.
   - Per-occurrence extraction and verification without pre-aggregation.
-  - Partial compound bracket pruning (e.g. `[1, 2]` $\rightarrow$ `[1]`).
+  - Partial compound bracket pruning (e.g. `[1, 2]` → `[1]`).
   - Empty Tier 1 safeguard when all citations fail verification.
   - Dual call-site parity between pipeline pre-pass and API fallback.
   - Fail-open resilience on network errors, timeouts, and offline Laya server.

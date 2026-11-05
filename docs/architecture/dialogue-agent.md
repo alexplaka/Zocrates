@@ -207,9 +207,9 @@ Pipeline execution follows seven distinct phases:
    - **Stream Resumption (`POST /chat/resume`)**:
      - Resumed with `action="synthesize"`: Breaks out of the loop and synthesizes immediately with existing evidence.
      - Resumed with `action="extend_budget"`: Proportionally expands all three resource ceilings simultaneously:
-       - Retrieval Tool Budget: $+5$ calls (10 $\rightarrow$ 15 $\rightarrow$ 20 max).
-       - Word Ceiling: $+3,750$ words (+50%: 7,500 $\rightarrow$ 11,250 $\rightarrow$ 15,000 max).
-       - Max Rerank Chunks: $+5$ chunks (15 $\rightarrow$ 20 $\rightarrow$ 25 max).
+       - Retrieval Tool Budget: +5 calls (10 → 15 → 20 max).
+       - Word Ceiling: +3,750 words (+50%: 7,500 → 11,250 → 15,000 max).
+       - Max Rerank Chunks: +5 chunks (15 → 20 → 25 max).
      - Formulates targeted `continuation_prompt` with remaining gaps and optional user steering guidance.
      - Invokes `search_subagent` with `run_id=f"search_extension_{new_extension_count}"`.
      - **Hard Cap**: After 2 extensions (`extension_count >= max_extensions`), the loop breaks deterministically to terminal synthesis.
@@ -368,7 +368,7 @@ A distinction exists between how ADK represents the search pipeline's response i
 
 To keep extended literature review sessions responsive and token-efficient without token exhaustion or "lost-in-the-middle" degradation, Zocrates implements **Post-Turn Decision-Model Adaptive Compaction**:
 * **Decoupled Post-Invocation Execution (0ms TTFT Impact)**: All pre-invocation token triggers in Google ADK are deactivated (`app.events_compaction_config = None`), ensuring users never experience pre-invocation stalls before the first streaming token. Compaction executes sequentially at the end of `Runner.run_async` via `patched_post_invocation_compaction` before SSE stream closure.
-* **Envelope Gate & Invariant Clamping**: Compaction is evaluated only when the session satisfies the Envelope Gate: `completed_turns >= min_turns` (default 4) and `coordinator_prompt_tokens >= token_floor` (default 30,000), with a hard ceiling brake at $\ge 100,000$ tokens forcing compaction without probing. If misconfigured ($min\_turns \le K$), the system automatically clamps `effective_min_turns = max(configured, K + 1)` with a warning.
+* **Envelope Gate & Invariant Clamping**: Compaction is evaluated only when the session satisfies the Envelope Gate: `completed_turns >= min_turns` (default 4) and `coordinator_prompt_tokens >= token_floor` (default 30,000), with a hard ceiling brake at ≥ 100,000 tokens forcing compaction without probing. If misconfigured (min_turns ≤ K), the system automatically clamps `effective_min_turns = max(configured, K + 1)` with a warning.
 * **Subagent Pipeline Isolation Scope Filtering**: Prompt token accounting strictly inspects unscoped coordinator events (`isolation_scope is None`), filtering out subagent ReAct retrieval token counts and preventing premature triggering.
 * **Calibrated Decision Model Probe (`compaction_decision_probe`)**: A fast remote decision model probe (`inception/mercury-decide` at threshold $\tau = 0.75$) evaluates topic closure, progression, and anti-stuck criteria (<400ms latency, 10.0s timeout, HTTP 429 backoff retry). Recorded under an OpenTelemetry span with `openinference.span.kind = "EVALUATOR"`.
 * **Recent Context Retention ($K=2$ Verbatim)**: Retains the latest $K=2$ completed turns (Turns $N-1$ and $N$) 100% verbatim by setting `end_timestamp` to the final event timestamp of Turn $N-K$.
@@ -508,9 +508,9 @@ To prevent internal Zotero database hashes (e.g. `HCZLU22L`), chunk IDs (`HCZLU2
        - [Note Key: 1A2B3C4D] "Quick Remark" (18 words) [text/note]:
          > Key takeaway: learning rate warmup is essential for stability.
      ```
-   - **Smart Note Inlining**: Notes under 50 plain-text words are inlined as multiline blockquotes (`  > `) capped at 300 characters. Notes $\ge 50$ words are referenced by key and word count.
+   - **Smart Note Inlining**: Notes under 50 plain-text words are inlined as multiline blockquotes (`  > `) capped at 300 characters. Notes ≥ 50 words are referenced by key and word count.
 4. **Attribution Contracts & Deterministic Output Sanitization**:
-   `SYNTHESIZER_INSTRUCTION` and `COORDINATOR_INSTRUCTION` explicitly prohibit mentioning internal Zotero item keys, raw chunk IDs, or database mechanics in headings or prose. `search_pipeline_node` post-processes final output via `_clean_user_facing_synthesis`, deterministically stripping any leaked key prefixes (e.g. `(HCZLU22L: "Title")` $\rightarrow$ `("Title")`), chunk references (`Chunk HCZLU22L:s4`), and bracketed key tags (including `[Key: ...]`, `[Attachment Key: ...]`, and `[Note Key: ...]`).
+   `SYNTHESIZER_INSTRUCTION` and `COORDINATOR_INSTRUCTION` explicitly prohibit mentioning internal Zotero item keys, raw chunk IDs, or database mechanics in headings or prose. `search_pipeline_node` post-processes final output via `_clean_user_facing_synthesis`, deterministically stripping any leaked key prefixes (e.g. `(HCZLU22L: "Title")` → `("Title")`), chunk references (`Chunk HCZLU22L:s4`), and bracketed key tags (including `[Key: ...]`, `[Attachment Key: ...]`, and `[Note Key: ...]`).
 
 ### 4.6 Orthogonal Library-Wide and Scoped Corpus Search (`search_corpus`)
 
@@ -528,7 +528,7 @@ Retrieval scope is decoupled from ambient session state:
 
 To support papers with multiple attachments (main article, supplementary appendix, data tables) as well as child notes without tool bloat:
 1. **Direct Note Lookup with Staleness Tracking**:
-   When an agent calls `get_document_toc` or `read_document` with a note key, `_resolve_bundle_dir` checks `syncer.db.get_note_by_key(item_key)` first. It computes the `SHA-256` hash of `note_html` and compares it against `conversion_meta.source_hash`. If unchanged, it returns the existing bundle via the fast path (<0.1ms). If edited in Zotero, it atomically re-materializes the bundle with updated Markdown and ToC. Notes < 100 words skip summaries; notes $\ge 100$ words use extractive lead paragraphs.
+   When an agent calls `get_document_toc` or `read_document` with a note key, `_resolve_bundle_dir` checks `syncer.db.get_note_by_key(item_key)` first. It computes the `SHA-256` hash of `note_html` and compares it against `conversion_meta.source_hash`. If unchanged, it returns the existing bundle via the fast path (<0.1ms). If edited in Zotero, it atomically re-materializes the bundle with updated Markdown and ToC. Notes < 100 words skip summaries; notes ≥ 100 words use extractive lead paragraphs.
 2. **Direct Attachment Check**:
    Matches `cache_dir / item_key` if `document.md` or `toc.md` exists.
 3. **Parent Key Fallback with Deterministic Priority**:
@@ -542,11 +542,11 @@ To eliminate redundant `get_document_toc` tool calls on follow-up questions acro
    - **Dual-Key Disambiguation**: Stored under both `input_key` (parent item key) and `resolved_key` (attachment document key). The injected outline header explicitly bridges both:
      `### [Key: WNBK68IW, Parent Key: 7JFT2Z5P] "Paper Title"`
      This eliminates cognitive dissonance when an active selection shows the parent key and the bundle uses the attachment key.
-   - **Smart Section Level-Folding**: Documents with $\le 15$ sections retain the full outline. Dense documents ($>15$ sections) fold to `level <= 2` (major headings/subheadings), omitting sub-subsections. Because `read_document(asset_id="sX")` reads the full section line span, coverage remains 100% complete and actionable without bloating prompt tokens.
-   - **Line-Separated Figures & Tables**: When assets are present, figures ($\le 8$) and tables ($\le 6$) are rendered as line-separated list items with 2-space indentation under `- Figures:` and `- Tables:` headers (e.g. `  - [f1] Architecture`). For dense documents ($>8$ figures / $>6$ tables), emits a single complete ID range summary (e.g., `- Figures: 14 figures present ([f1] to [f14]). Can be directly read via read_document(asset_id='fX') or discovered via search_corpus.`), giving the agent full authority without triggering re-lookups.
+   - **Smart Section Level-Folding**: Documents with ≤ 15 sections retain the full outline. Dense documents ($>15$ sections) fold to `level <= 2` (major headings/subheadings), omitting sub-subsections. Because `read_document(asset_id="sX")` reads the full section line span, coverage remains 100% complete and actionable without bloating prompt tokens.
+   - **Line-Separated Figures & Tables**: When assets are present, figures (≤ 8) and tables (≤ 6) are rendered as line-separated list items with 2-space indentation under `- Figures:` and `- Tables:` headers (e.g. `  - [f1] Architecture`). For dense documents ($>8$ figures / $>6$ tables), emits a single complete ID range summary (e.g., `- Figures: 14 figures present ([f1] to [f14]). Can be directly read via read_document(asset_id='fX') or discovered via search_corpus.`), giving the agent full authority without triggering re-lookups.
    - **Universal Abstract / Summary Access**: 
      In documents without an explicit `# Abstract` Markdown heading (~87% of corpus), the abstract resides in `toc.json` metadata rather than `document.md` line ranges. `extract_compact_toc_outline` injects `- [abstract] Abstract / Summary (~{words} words)` before sections when metadata abstract exists and no section matches. `read_document_core` natively resolves `asset_id="abstract"` (and `"summary"`): it delegates to an explicit section if present, or falls back to `toc_json["abstract"]` returning an asset with `asset_id="abstract"`, `asset_type="abstract"`, `heading="Abstract"`, and `intersecting_chunk_ids=[]`.
-   - **Complete Active Coverage Gate**: `_get_applicable_cached_tocs` injects outlines into `search_node_input` only if **100%** of active context papers are cached (and $\le 3$ items are selected). If even one item is uncached, or during whole-library search, injection returns `[]` to prevent asymmetric attention bias.
+   - **Complete Active Coverage Gate**: `_get_applicable_cached_tocs` injects outlines into `search_node_input` only if **100%** of active context papers are cached (and ≤ 3 items are selected). If even one item is uncached, or during whole-library search, injection returns `[]` to prevent asymmetric attention bias.
    - **LRU Cache Bounding**: Bounded to `MAX_UNIQUE_CACHED_TOCS = 10` unique document bundles by `updated_at` (<4 KB in SQLite session state).
 2. **Pillar 2: Upstream Scope Guidance**:
    - `COORDINATOR_INSTRUCTION` directs the coordinator to explicitly note previously established aspects when reformulating follow-up queries.
@@ -764,8 +764,8 @@ uv run python scripts/dialogue_agent_proto_evals/run_agent_workflow.py "Hello Zo
 To ensure epistemic rigor and prevent hallucinated citations, Zocrates integrates a flat single-ID citation scheme and asynchronous verification pre-pass directly into the dynamic search pipeline:
 
 1. **Flat Single-ID Scheme (`[1]`, `[2]`, `[1, 2]`)**: Candidate chunks are presented to `synthesizer_agent` in descending cross-encoder relevance order inside `<retrieved_evidence>`. Synthesizers cite chunk index numbers in plain brackets.
-2. **AI Decision-Model Verification Pre-Pass (`citation_verifier.py`)**: Before citation resolution, `search_pipeline_node` executes an asynchronous pre-pass (`verify_citations_support`) using fast probabilistic decision models (remote `inception/mercury-decide` or local Laya). Each citation occurrence is evaluated individually against its cited chunk. Failed tokens are pruned in-place (e.g. `[1, 2]` $\rightarrow$ `[1]`), while fail-open guards protect against network timeouts.
-3. **Two-Tier Sources (100% Evidence Recall)**: Partitioned into Tier 1 (`# Cited Sources`) and Tier 2 (`## Other Considered Sources`). A document moves to Tier 1 if $\ge 1$ occurrence survives verification; it moves to Tier 2 if 0 occurrences survive. All retrieved chunks are accounted for ($U = C \cup R$). If all emitted citations fail verification, zero-citation fallback is suppressed, keeping Tier 1 empty and moving all candidates to Tier 2 without falsely promoting unverified sources.
+2. **AI Decision-Model Verification Pre-Pass (`citation_verifier.py`)**: Before citation resolution, `search_pipeline_node` executes an asynchronous pre-pass (`verify_citations_support`) using fast probabilistic decision models (remote `inception/mercury-decide` or local Laya). Each citation occurrence is evaluated individually against its cited chunk. Failed tokens are pruned in-place (e.g. `[1, 2]` → `[1]`), while fail-open guards protect against network timeouts.
+3. **Two-Tier Sources (100% Evidence Recall)**: Partitioned into Tier 1 (`# Cited Sources`) and Tier 2 (`## Other Considered Sources`). A document moves to Tier 1 if ≥ 1 occurrence survives verification; it moves to Tier 2 if 0 occurrences survive. All retrieved chunks are accounted for ($U = C \cup R$). If all emitted citations fail verification, zero-citation fallback is suppressed, keeping Tier 1 empty and moving all candidates to Tier 2 without falsely promoting unverified sources.
 4. **Native In-Pipeline Resolution**: Citations are resolved inside `search_pipeline.py` within the native ADK runner context, recording metadata and `support_probabilities` in `state[RETRIEVED_EVIDENCE]`.
 
 For complete specifications of claim extraction boundaries, decision model backends, popover telemetry, and verification invariants, see the [In-Text Citations, Verification & Two-Tier Sources Architecture](citations-and-verification.md) documentation.

@@ -64,7 +64,7 @@ Before connecting any external MCP client:
    * The local backend service starts automatically with Zotero.
    * Zotero acts as the **Active Library Authority**: it authoritatively registers the user's currently active profile, custom storage path, or group library (`POST /register`). This eliminates profile ambiguity, background daemon sprawl, and multi-window spawn races.
 2. **"Enable Local MCP Server" Must Be Checked**:
-   * Open **Zotero Preferences** (Edit $\rightarrow$ Preferences or Zotero $\rightarrow$ Preferences on macOS).
+   * Open **Zotero Preferences** (Edit → Preferences or Zotero → Preferences on macOS).
    * Select the **Zocrates** tab.
    * Ensure the checkbox **"Enable Local MCP Server"** is enabled (enabled by default).
    * *Note*: If this setting is disabled, backend endpoints reject requests with `HTTP 403 Forbidden` and return actionable error guidance to the agent.
@@ -75,7 +75,7 @@ Before connecting any external MCP client:
 >
 > While `http://127.0.0.1:8765` is the default port, Zocrates assigns ports dynamically using **deterministic port offset allocation** (`8765 + (hash mod 100)`) based on your Zotero data directory path to avoid port collisions across profiles.
 >
-> The actual active port is written to `<zotero-data-dir>/zocrates-data/backend.port` and is displayed in **Zotero Preferences $\rightarrow$ Zocrates** (Status section).
+> The actual active port is written to `<zotero-data-dir>/zocrates-data/backend.port` and is displayed in **Zotero Preferences → Zocrates** (Status section).
 >
 > If an offset is assigned (e.g. `8792`), ensure `ZOCRATES_BACKEND_URL` in your client configuration is set to match that active port (e.g. `"ZOCRATES_BACKEND_URL": "http://127.0.0.1:8792"`).
 
@@ -134,7 +134,7 @@ Cursor supports MCP servers either through the Graphical User Interface or via w
 
 #### Option A: Cursor GUI Settings
 1. Open **Cursor Settings** (`Ctrl + Shift + J` or `Cmd + Shift + J`).
-2. Navigate to **Features** $\rightarrow$ **MCP Servers**.
+2. Navigate to **Features** → **MCP Servers**.
 3. Click **+ Add New MCP Server**.
 4. Configure the server:
    * **Name**: `zocrates`
@@ -369,11 +369,11 @@ When a request cannot be fulfilled, Zocrates returns clear, actionable error obj
 
 | Condition | Response Code / Status | Returned Message / Guidance |
 | :--- | :--- | :--- |
-| **Zotero is Closed** | `ConnectError` $\rightarrow$ `status: "error"` | `"Zocrates backend service is offline. Please open Zotero with Zocrates enabled to access your active library."` |
-| **MCP Disabled** | `HTTP 403 Forbidden` $\rightarrow$ `status: "error"` | `"MCP server access is disabled in Zocrates preferences. Please enable it in Zotero Preferences -> Zocrates to allow external AI tools to query your library."` |
-| **Sync Pending** | `HTTP 503 Service Unavailable` $\rightarrow$ `status: "error"` | `"Zotero library is not yet registered or synced. Please open Zotero with Zocrates enabled."` |
-| **Paper Not Found** | `HTTP 404 Not Found` $\rightarrow$ `status: "error"` | `"Document bundle for {item_key} not found or not yet converted."` |
-| **Backend Busy** | `TimeoutException` $\rightarrow$ `status: "error"` | `"Zocrates backend timed out while processing retrieval. The server may be busy with a batch-indexing or conversion task. Please retry shortly."` |
+| **Zotero is Closed** | `ConnectError` → `status: "error"` | `"Zocrates backend service is offline. Please open Zotero with Zocrates enabled to access your active library."` |
+| **MCP Disabled** | `HTTP 403 Forbidden` → `status: "error"` | `"MCP server access is disabled in Zocrates preferences. Please enable it in Zotero Preferences -> Zocrates to allow external AI tools to query your library."` |
+| **Sync Pending** | `HTTP 503 Service Unavailable` → `status: "error"` | `"Zotero library is not yet registered or synced. Please open Zotero with Zocrates enabled."` |
+| **Paper Not Found** | `HTTP 404 Not Found` → `status: "error"` | `"Document bundle for {item_key} not found or not yet converted."` |
+| **Backend Busy** | `TimeoutException` → `status: "error"` | `"Zocrates backend timed out while processing retrieval. The server may be busy with a batch-indexing or conversion task. Please retry shortly."` |
 
 ---
 
@@ -395,7 +395,7 @@ The process begins reading JSON-RPC requests on `stdin` and writes diagnostic lo
 
 ### 3. Verify Preferences Configuration
 If an external agent reports that MCP access is disabled:
-1. In Zotero: **Preferences** $\rightarrow$ **Zocrates** $\rightarrow$ Check **Enable Local MCP Server**.
+1. In Zotero: **Preferences** → **Zocrates** → Check **Enable Local MCP Server**.
 2. Or inspect `zocrates_config.json`:
    ```bash
    grep "enable_mcp_server" <zotero-data-dir>/zocrates-data/zocrates_config.json

@@ -185,7 +185,7 @@ To resolve this, Zocrates scales all three retrieval dimensions simultaneously u
 | **Pass 1 (Baseline)** | 10 calls | 7,500 words (~10k tok) | 15 chunks | Baseline autonomous ReAct retrieval |
 | **Extension 1 (Grant #1)** | 15 calls (+5) | 11,250 words (+3,750w) | 20 chunks (+5) | First deep research extension pass |
 | **Extension 2 (Grant #2)** | 20 calls (+5) | 15,000 words (+3,750w) | 25 chunks (+5) | Second deep research extension pass |
-| **Terminal Cap** | — | Trimmed to $\le$ 15,000w | Top 25 chunks | **Hard Stop**: Loop terminates to synthesis |
+| **Terminal Cap** | — | Trimmed to ≤ 15,000w | Top 25 chunks | **Hard Stop**: Loop terminates to synthesis |
 
 ### 3.3 Dynamic State Ceilings
 
