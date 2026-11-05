@@ -1,0 +1,6 @@
+# robots.txt for Zocrates
+User-agent: *
+Allow: /
+
+Sitemap: https://alexplaka.github.io/Zocrates/sitemap.xml
+Sitemap: https://alexplaka.github.io/Zocrates/docs/sitemap.xml

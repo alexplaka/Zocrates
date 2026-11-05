@@ -1,6 +1,6 @@
 site_name: Zocrates
 site_description: An LLM-powered assistant copilot for Zotero.
-site_url: https://alexplaka.github.io/Zocrates/
+site_url: https://alexplaka.github.io/Zocrates/docs/
 repo_url: https://github.com/alexplaka/Zocrates
 exclude_docs: "gen_ref_pages.py"
 
@@ -56,7 +56,37 @@ plugins:
 
 nav:
   - Home: index.md
+  - Architecture:
+      - Agent Orchestration & Discovery:
+          - Dialogue Agent & Coordination: architecture/dialogue-agent.md
+          - Human-In-The-Loop Deep Research: architecture/hitl-deep-research.md
+          - Citations & Decision-Model Verification: architecture/citations-and-verification.md
+          - Adaptive Context Compaction: architecture/adaptive-context-compaction.md
+          - Online Literature Discovery & Import: architecture/online-literature-discovery.md
+          - Predictive Next-Prompt Engine: architecture/predictive-next-prompt.md
+      - Document Ingestion & Knowledge Bundles:
+          - Document Conversion & Layouts: architecture/document-conversion.md
+          - OKF Document Bundles & Invariants: architecture/okf-bundles-and-invariants.md
+          - Embeddings & Hybrid Search: architecture/embeddings-and-search.md
+          - Long-Term Memory & User Directives: architecture/user-curated-memory.md
+      - Desktop Bridge & Visualizations:
+          - Reader Excerpts & Context Pills: architecture/reader-and-context-pills.md
+          - Paper Relations Graph & Visualizer: architecture/paper-relations-graph.md
+          - Mermaid Diagrams & Sidebar: architecture/mermaid-diagrams.md
+      - Runtime, Security & Governance:
+          - Models & Provider Hybridization: architecture/models-and-providers.md
+          - Security, IPC & Privilege Isolation: architecture/security-and-ipc.md
+          - Backend Distribution & Supervision: architecture/distribution-and-runtime.md
+          - Session Lifecycle & Space Reclamation: architecture/session-lifecycle.md
+          - Opt-In Error & Diagnostic Reporting: architecture/diagnostic-reporting.md
+  - User Guides:
+      - "Why Zocrates: A Guide for Scholars": guides/why-zocrates.md
+      - Local MCP Server Client Setup: guides/mcp-server-setup.md
   - API Reference: reference/
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
 
 markdown_extensions:
   - admonition
@@ -65,6 +95,8 @@ markdown_extensions:
   - tables
   - toc:
       permalink: true
+  - pymdownx.arithmatex:
+      generic: true
   - pymdownx.details
   - pymdownx.highlight:
       anchor_linenums: true
