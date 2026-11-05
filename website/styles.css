@@ -650,10 +650,11 @@ a {
   color: var(--text-main);
 }
 
-.workbench-hint-badge {
-  font-size: 0.75rem;
+.workbench-tab.flash-tab {
+  border-color: var(--accent);
+  background: var(--accent-soft);
   color: var(--accent);
-  font-weight: 600;
+  box-shadow: 0 0 8px rgba(59, 130, 246, 0.35);
 }
 
 .workbench-split {
@@ -670,6 +671,11 @@ a {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  transition: box-shadow 0.3s ease;
+}
+
+.zotero-reader-pane.flash-pane {
+  box-shadow: inset 0 0 0 2px rgba(16, 185, 129, 0.4);
 }
 
 .reader-toolbar {
@@ -730,9 +736,11 @@ a {
 }
 
 .pdf-highlight-passage.flash-active {
-  background: rgba(16, 185, 129, 0.24);
+  background: rgba(16, 185, 129, 0.32);
   border-left-color: var(--success);
-  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.35);
+  border-left-width: 4px;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.4);
+  transform: translateX(4px);
 }
 
 .pdf-area-crop-box {
@@ -835,8 +843,10 @@ a {
 }
 
 .chips-strip {
-  padding: 0.6rem 1.1rem;
+  padding: 0.45rem 1.15rem;
+  border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
+  background: var(--bg-card);
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -1022,8 +1032,23 @@ a {
 
 .popover-actions {
   display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 0.5rem;
-  margin-top: 0.15rem;
+  margin-top: 0.25rem;
+}
+
+.popover-action-status {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--success);
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.popover-action-status.show {
+  opacity: 1;
 }
 
 .popover-btn {

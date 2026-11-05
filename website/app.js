@@ -124,7 +124,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const popoverQuote = document.getElementById('popover-quote');
   const openInReaderBtn = document.getElementById('btn-open-in-reader');
   const selectInLibBtn = document.getElementById('btn-select-in-library');
+  const popoverStatus = document.getElementById('popover-action-status');
   const readerStatusLabel = document.getElementById('reader-status-label');
+  const libraryTab = document.getElementById('tab-my-library');
+  const readerPane = document.getElementById('zotero-reader-pane');
 
   let currentCitationKey = '1';
 
@@ -151,34 +154,76 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (openInReaderBtn) {
     openInReaderBtn.addEventListener('click', () => {
+      const origText = openInReaderBtn.innerHTML;
       const targetId = CITATION_DATA[currentCitationKey]?.readerHighlightId || 'pdf-passage-1';
       const targetEl = document.getElementById(targetId);
+
+      // 1. In-place button feedback on the right
+      openInReaderBtn.innerHTML = '✓ Opened in Reader ◀';
+      openInReaderBtn.style.color = 'var(--success)';
+      openInReaderBtn.style.borderColor = 'var(--success)';
+
+      if (popoverStatus) {
+        popoverStatus.textContent = '◀ Opened paper in Zotero Reader';
+        popoverStatus.classList.add('show');
+      }
+
+      // 2. High-visibility pulse in the left pane
       if (targetEl) {
         targetEl.classList.remove('flash-active');
         void targetEl.offsetWidth; // force reflow
         targetEl.classList.add('flash-active');
-        if (readerStatusLabel) {
-          readerStatusLabel.textContent = '✓ Jumped to verified PDF passage';
-          readerStatusLabel.style.color = 'var(--success)';
-          setTimeout(() => {
-            readerStatusLabel.textContent = 'Zotero 10 Built-in PDF Reader • Page 4 of 15';
-            readerStatusLabel.style.color = '';
-          }, 2600);
-        }
       }
+      if (readerPane) {
+        readerPane.classList.remove('flash-pane');
+        void readerPane.offsetWidth;
+        readerPane.classList.add('flash-pane');
+      }
+
+      // 3. Update reader status bar
+      if (readerStatusLabel) {
+        readerStatusLabel.textContent = '✓ Attention Is All You Need.pdf • Opened in Reader';
+        readerStatusLabel.style.color = 'var(--success)';
+      }
+
+      setTimeout(() => {
+        openInReaderBtn.innerHTML = origText;
+        openInReaderBtn.style.color = '';
+        openInReaderBtn.style.borderColor = '';
+        if (popoverStatus) popoverStatus.classList.remove('show');
+        if (readerStatusLabel) {
+          readerStatusLabel.textContent = 'Zotero 10+ Built-in PDF Reader • Page 4 of 15';
+          readerStatusLabel.style.color = '';
+        }
+      }, 2600);
     });
   }
 
   if (selectInLibBtn) {
     selectInLibBtn.addEventListener('click', () => {
-      if (readerStatusLabel) {
-        readerStatusLabel.textContent = '✓ Item highlighted in Zotero Collection Tree';
-        readerStatusLabel.style.color = 'var(--accent)';
-        setTimeout(() => {
-          readerStatusLabel.textContent = 'Zotero 10 Built-in PDF Reader • Page 4 of 15';
-          readerStatusLabel.style.color = '';
-        }, 2600);
+      const origText = selectInLibBtn.innerHTML;
+      selectInLibBtn.innerHTML = '✓ Selected in Tree';
+      selectInLibBtn.style.color = 'var(--accent)';
+      selectInLibBtn.style.borderColor = 'var(--accent)';
+
+      if (popoverStatus) {
+        popoverStatus.textContent = 'Item focused in library';
+        popoverStatus.classList.add('show');
       }
+
+      if (libraryTab) {
+        libraryTab.classList.remove('flash-tab');
+        void libraryTab.offsetWidth;
+        libraryTab.classList.add('flash-tab');
+      }
+
+      setTimeout(() => {
+        selectInLibBtn.innerHTML = origText;
+        selectInLibBtn.style.color = '';
+        selectInLibBtn.style.borderColor = '';
+        if (popoverStatus) popoverStatus.classList.remove('show');
+        if (libraryTab) libraryTab.classList.remove('flash-tab');
+      }, 2600);
     });
   }
 
@@ -188,14 +233,6 @@ document.addEventListener('DOMContentLoaded', () => {
       const origText = saveAsNoteBtn.textContent;
       saveAsNoteBtn.textContent = '✓ Saved as Zotero Note!';
       saveAsNoteBtn.style.color = 'var(--success)';
-      if (readerStatusLabel) {
-        readerStatusLabel.textContent = '✓ Saved response as native Zotero child note (re-indexed for future sessions)';
-        readerStatusLabel.style.color = 'var(--success)';
-        setTimeout(() => {
-          readerStatusLabel.textContent = 'Zotero 10 Built-in PDF Reader • Page 4 of 15';
-          readerStatusLabel.style.color = '';
-        }, 3200);
-      }
       setTimeout(() => {
         saveAsNoteBtn.textContent = origText;
         saveAsNoteBtn.style.color = '';

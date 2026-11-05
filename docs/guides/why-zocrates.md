@@ -244,7 +244,7 @@ sequenceDiagram
     UI->>UI: Render Citation Pills & Two-Tier Sources
     Note over UI: Researcher clicks citation pill [1]
     UI->>UI: Open Evidence Peek Popover (Quote + Section + Confidence Badge)
-    UI->>Reader: Click "Open in Reader" -> Jumps straight to PDF passage
+    UI->>Reader: Click "Open in Reader" -> Opens paper in Zotero PDF Reader
 ```
 
 ### In-Text Citations & Interactive Evidence Peeks
@@ -255,7 +255,7 @@ sequenceDiagram
   * Exact section breadcrumbs (`§ Section Name`).
   * An extractive quote from the source paper.
   * A visual confidence badge indicating empirical support strength (`High`, `Moderate`, `Low`).
-* **One-Click Reader Navigation**: Jump instantly from a citation popover directly to the corresponding passage in Zotero's built-in PDF Reader, or locate the paper in your library tree.
+* **One-Click Reader Navigation**: Open the source paper instantly in Zotero's built-in PDF Reader directly from the citation popover, or locate the item in your library tree.
 
 ### 100% Evidence Recall: Two-Tier Sources
 

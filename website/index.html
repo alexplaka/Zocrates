@@ -175,16 +175,15 @@
               <span></span><span></span><span></span>
             </div>
             <div class="workbench-tabs">
-              <span class="workbench-tab">My Library (1,420 items)</span>
+              <span id="tab-my-library" class="workbench-tab">My Library (1,420 items)</span>
               <span class="workbench-tab active">📄 Vaswani et al. (2017) — Attention Is All You Need.pdf</span>
               <span class="workbench-tab">🕸️ Paper Relations Network</span>
             </div>
-            <span class="workbench-hint-badge">✨ Interactive Preview: Click (Vaswani et al., 2017) or the Ghost Prompt below</span>
           </div>
 
           <div class="workbench-split">
             <!-- Left Pane: Simulated Zotero 10+ PDF Reader -->
-            <div class="zotero-reader-pane">
+            <div id="zotero-reader-pane" class="zotero-reader-pane">
               <div class="reader-toolbar">
                 <span id="reader-status-label">Zotero 10+ Built-in PDF Reader • Page 4 of 15</span>
                 <span class="mono" style="color:var(--text-muted);">Scope: Papers Mode (Auto-Anchored)</span>
@@ -253,14 +252,6 @@
                 <span class="mono" style="font-size:0.72rem; color:var(--success);">● Local Backend :8765</span>
               </div>
 
-              <!-- Context Chips & Reader Excerpt Pills -->
-              <div class="chips-strip">
-                <span style="color:var(--text-muted); font-weight:600;">Active Context:</span>
-                <span class="context-chip">📄 Vaswani et al. (2017)</span>
-                <span class="context-chip">📄 Dao et al. (2022)</span>
-                <span class="context-chip excerpt-pill">🖼️ Crop: Fig. 2 Head Ablation (p. 4) ✕</span>
-              </div>
-
               <!-- Chat Stream -->
               <div class="chat-stream-area">
                 <div class="chat-bubble-user">
@@ -294,6 +285,7 @@
                     <div class="popover-actions">
                       <button type="button" id="btn-open-in-reader" class="popover-btn">📖 Open in Reader</button>
                       <button type="button" id="btn-select-in-library" class="popover-btn">🗂️ Select in Library</button>
+                      <span id="popover-action-status" class="popover-action-status" aria-live="polite"></span>
                     </div>
                   </div>
 
@@ -332,6 +324,14 @@
                     </div>
                   </div>
                 </div>
+              </div>
+
+              <!-- Active Context Chips Row (Positioned right above the message input bar, faithful to Zocrates) -->
+              <div class="chips-strip">
+                <span style="color:var(--text-muted); font-weight:600;">Active Context:</span>
+                <span class="context-chip">📄 Vaswani et al. (2017)</span>
+                <span class="context-chip">📄 Dao et al. (2022)</span>
+                <span class="context-chip excerpt-pill">🖼️ Crop: Fig. 2 Head Ablation (p. 4) ✕</span>
               </div>
 
               <!-- Predictive Ghost Text Input Bar -->
