@@ -276,8 +276,8 @@ def test_get_synthesizer_instruction():
     assert "numeric citation token" not in inst_disabled
 
 
-def test_extractive_quote_capped_at_1000_chars():
-    """Verify that long chunk text is capped at 1000 characters with ellipsis."""
+def test_extractive_quote_preserves_full_supporting_text():
+    """Verify that chunk text is preserved in full without artificial 1000-char truncation."""
     long_text = "A" * 1500
     chunk = {
         "chunk_id": "TEST::1",
@@ -291,9 +291,31 @@ def test_extractive_quote_capped_at_1000_chars():
     res = resolve_citations_and_references("Claim [1]", [chunk])
     assert len(res["citations"]) == 1
     quote = res["citations"][0]["quote"]
-    assert len(quote) == 1003  # 1000 + "..."
+    assert quote == long_text
+    assert len(quote) == 1500
+
+
+def test_extractive_quote_honors_explicit_max_chars(monkeypatch):
+    """Verify that if MAX_EXTRACTIVE_QUOTE_CHARS is explicitly configured, it truncates."""
+    from zocrates.agents.library_search import citation_resolver
+
+    monkeypatch.setattr(citation_resolver, "MAX_EXTRACTIVE_QUOTE_CHARS", 500)
+    long_text = "B" * 800
+    chunk = {
+        "chunk_id": "TEST::2",
+        "item_key": "KEY2",
+        "title": "Capped Paper",
+        "authors": ["Author"],
+        "year": "2024",
+        "heading": "Capped Section",
+        "text": long_text,
+    }
+    res = resolve_citations_and_references("Claim [1]", [chunk])
+    assert len(res["citations"]) == 1
+    quote = res["citations"][0]["quote"]
+    assert len(quote) == 503  # 500 + "..."
     assert quote.endswith("...")
-    assert quote.startswith("A" * 1000)
+    assert quote.startswith("B" * 500)
 
 
 def test_build_coordinator_view_single_citation():
