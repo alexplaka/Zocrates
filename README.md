@@ -1,6 +1,6 @@
 # Zocrates
 
-> **An LLM-Powered Research Assistant Copilot for Zotero**
+> **An Agentic Research Assistant for Zotero**
 
 <p align="center">
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.12%2B%20%283.13%20default%29-3776AB.svg?style=flat&logo=python&logoColor=white" alt="Python 3.12+ (3.13 default)" /></a>
