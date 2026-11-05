@@ -60,6 +60,7 @@ nav:
       - Dialogue Agent & Coordination: architecture/dialogue-agent.md
       - Human-In-The-Loop Deep Research: architecture/hitl-deep-research.md
       - Citations & Decision-Model Verification: architecture/citations-and-verification.md
+      - Adaptive Context Compaction: architecture/adaptive-context-compaction.md
       - Document Conversion & Layouts: architecture/document-conversion.md
       - OKF Document Bundles & Invariants: architecture/okf-bundles-and-invariants.md
       - Embeddings & Hybrid Search: architecture/embeddings-and-search.md

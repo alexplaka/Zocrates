@@ -111,6 +111,8 @@ graph TD
 7. **Tool Content Truncation Expansion**: Sets `_MAX_TOOL_CONTENT_CHARS = 30000` (overriding ADK's default 2,000-character ceiling) to ensure complete syntheses and `# Cited Sources` bibliographies reach the summarizer prompt without being clipped.
 8. **UI & Rewind Integrity**: Compaction events are unconditionally filtered out in `format_session_for_ui`, preventing empty user bubbles (`user: ""`) in `sidebar.js`. Because ADK's SQLite event store is append-only, rewinding before a compaction boundary naturally resurrects raw events through `_apply_rewinds`.
 
+*For an exhaustive architectural breakdown of rubric evaluation, decision-model calibration, OpenInference telemetry, and sequential concurrency guarantees, see the dedicated [Adaptive Context Compaction Architecture](adaptive-context-compaction.md) guide.*
+
 ---
 
 ## 5. Checkpoint Rehydration and Rewind Mechanics
