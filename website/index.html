@@ -3,9 +3,86 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Zocrates — An LLM-Powered Research Assistant Copilot for Zotero</title>
-  <meta name="description" content="Transform your personal Zotero library into an active, verifiable, and local-first research partner. Native Zotero 10 companion, Open Markdown Knowledge Bundles, and Local MCP Server." />
+  <title>Zocrates — Local-First AI Research Assistant for Zotero</title>
+  <meta name="description" content="Transform your personal Zotero library into an active, verifiable, and local-first research partner with multi-agent search, vectorless section reading, and local MCP server." />
+  <meta name="keywords" content="Zotero, Zotero agentic assistant, AI research assistant, Zotero AI plugin, academic assistant, RAG, vectorless reading, literature discovery, Open Knowledge Format, MCP server, local LLM, academic research tool" />
+  <meta name="author" content="Alex Plaka" />
+  <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
+  <meta name="theme-color" content="#0f172a" />
+
+  <!-- Canonical URL -->
+  <link rel="canonical" href="https://alexplaka.github.io/Zocrates/" />
+
+  <!-- Open Graph Meta Tags (Facebook, LinkedIn, Discord, Slack) -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Zocrates" />
+  <meta property="og:url" content="https://alexplaka.github.io/Zocrates/" />
+  <meta property="og:title" content="Zocrates — Local-First AI Research Assistant for Zotero" />
+  <meta property="og:description" content="Transform your personal Zotero library into an active, verifiable, and local-first research partner with multi-agent search, vectorless section reading, and local MCP server." />
+  <meta property="og:image" content="https://alexplaka.github.io/Zocrates/assets/Zocrates-logo.png" />
+  <meta property="og:image:alt" content="Zocrates - Local-First AI Research Assistant for Zotero" />
+  <meta property="og:locale" content="en_US" />
+
+  <!-- X (formerly Twitter) Card Meta Tags — Crawlers (Twitterbot, Discord, Slack) officially parse the twitter: namespace -->
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:url" content="https://alexplaka.github.io/Zocrates/" />
+  <meta name="twitter:title" content="Zocrates — Local-First AI Research Assistant for Zotero" />
+  <meta name="twitter:description" content="Transform your personal Zotero library into an active, verifiable, and local-first research partner with multi-agent search and vectorless reading." />
+  <meta name="twitter:image" content="https://alexplaka.github.io/Zocrates/assets/Zocrates-logo.png" />
+  <meta name="twitter:image:alt" content="Zocrates - Local-First AI Research Assistant for Zotero" />
+
+  <!-- Structured Data (JSON-LD) for Rich Google Search Results -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        "@id": "https://alexplaka.github.io/Zocrates/#software",
+        "name": "Zocrates",
+        "url": "https://alexplaka.github.io/Zocrates/",
+        "description": "A local-first, privacy-respecting AI research assistant and companion extension for Zotero 10+.",
+        "applicationCategory": "EducationalApplication",
+        "operatingSystem": "Linux, macOS, Windows",
+        "softwareVersion": "0.90.0",
+        "license": "https://www.gnu.org/licenses/agpl-3.0.html",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "author": {
+          "@type": "Person",
+          "name": "Alex Plaka",
+          "url": "https://github.com/alexplaka"
+        },
+        "image": "https://alexplaka.github.io/Zocrates/assets/Zocrates-logo.png",
+        "featureList": [
+          "Native Zotero 10 Split-Pane Sidebar",
+          "Combined Semantic Search and Vectorless Table of Contents Reading",
+          "Evidence-Gated Strictly Local Paper Relations Graph",
+          "Per-Occurrence Citation Verification",
+          "Open Knowledge Format (OKF v0.2) Markdown Bundles",
+          "Local Model Context Protocol (MCP) Server Bridge",
+          "Adaptive Context Compaction for 50+ Turn Sessions",
+          "One-Click Online Literature Discovery and Zotero Import",
+          "Zotero 10 PDF Reader Text Excerpt and Area Snippet Bridge"
+        ]
+      },
+      {
+        "@type": "WebSite",
+        "@id": "https://alexplaka.github.io/Zocrates/#website",
+        "url": "https://alexplaka.github.io/Zocrates/",
+        "name": "Zocrates",
+        "description": "An LLM-Powered Research Assistant for Zotero",
+        "inLanguage": "en-US"
+      }
+    ]
+  }
+  </script>
+
   <link rel="icon" type="image/png" href="assets/Zocrates-logo.png" />
+  <link rel="apple-touch-icon" href="assets/Zocrates-logo.png" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body data-theme="slate">
@@ -82,12 +159,12 @@
           </div>
 
           <div class="hero-trust-pills">
-            <span class="trust-pill">🎯 Combined Semantic &amp; Vectorless Reading</span>
-            <span class="trust-pill">🔒 100% Local Indices, Bundles &amp; Deterministic Graphs</span>
-            <span class="trust-pill">⚖️ Per-Occurrence Citation Verification</span>
-            <span class="trust-pill">📝 User-Curated Memory via Zotero Notes</span>
-            <span class="trust-pill">🔌 Native MCP Server for Claude, Cursor, Pi &amp; Others</span>
-            <span class="trust-pill">💾 100% Copy-Paste Portable</span>
+            <span class="trust-pill">🎯 Combined Semantic &amp; Whole-Section Reading</span>
+            <span class="trust-pill">⚖️ Verifiable Citations &amp; Live Evidence Peeks</span>
+            <span class="trust-pill">📑 Native Zotero PDF Reader Excerpts &amp; Area Crops</span>
+            <span class="trust-pill">🌐 Agentic Online Discovery &amp; 1-Click Import</span>
+            <span class="trust-pill">📝 Searchable Memory via Native Zotero Notes</span>
+            <span class="trust-pill">🔒 100% Local-First (Your Library Stays on Your Machine)</span>
           </div>
         </div>
 
@@ -169,7 +246,7 @@
             <div class="zocrates-sidebar-pane">
               <div class="sidebar-top-bar">
                 <div class="sidebar-brand">
-                  <img src="assets/Zocrates-logo.png" alt="" />
+                  <img src="assets/Zocrates-logo.png" alt="Zocrates Logo" />
                   <span>Zocrates</span>
                   <span class="brand-badge">Coordinator + ReAct Pipeline</span>
                 </div>
@@ -628,11 +705,11 @@
             </div>
           </article>
 
-          <!-- Bento 3: Beyond Naive RAG (Combined Semantic & Vectorless Reading) (Span 6) -->
+          <!-- Bento 3: Beyond Naive RAG (Combined Semantic Search & Vectorless Reading) (Span 6) -->
           <article class="bento-card span-6">
             <div>
               <span class="bento-tag">Beyond Naive RAG • Dual-Channel Architecture</span>
-              <h3>Combined Semantic &amp; Vectorless Reading</h3>
+              <h3>Combined Semantic Search &amp; Vectorless Reading</h3>
               <p style="margin-top:0.5rem;">
                 Standard AI search tools chop papers into arbitrary fragments, scattering sentences, breaking equations, and severing tables. Zocrates combines <strong>broad semantic search</strong> across your entire library with <strong>targeted, vectorless reading</strong>: the search agent inspects the author's Table of Contents and reads entire cohesive sections (<code>read_document(asset_id='sX')</code>), preserving complete arguments and narrative context with maximum token efficiency.
               </p>

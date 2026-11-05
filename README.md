@@ -230,7 +230,7 @@ Zocrates operates as an extension inside Zotero and inherits the platform baseli
   * **RAM**: Minimum 2 GB RAM (4 GB recommended for standalone Zotero).
   * **Disk**: ~500 MB for the base Zotero desktop application.
 
-#### 2. Additional Requirements for Zocrates AI Copilot
+#### 2. Additional Requirements for Zocrates AI Assistant
 * **Python Runtime**: Python `3.12+` compatible (the extension automatically provisions an isolated, hermetic Python `3.13` runtime and `.venv` via [Astral `uv`](https://github.com/astral-sh/uv) under `<zotero-data>/zocrates-data/` without modifying your system Python).
 * **Windows Runtime**: [Microsoft Visual C++ 2015–2022 Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe) is required on Windows for local document conversion engines (MarkItDown, Docling) and ONNX runtime dependencies. Zocrates setup automatically verifies this runtime at startup and prompts for installation if absent.
 * **Hardware & Memory**:
