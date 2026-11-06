@@ -4243,11 +4243,30 @@ function selectItemInZotero(itemKey) {
 // Module-level in-flight tracker to coalesce duplicate clicks and avoid race conditions
 const _activeReaderNavigations = new Map();
 
+function isSyntheticOrTitle(heading, documentTitle = "") {
+  if (!heading || typeof heading !== "string") return true;
+  const clean = heading.trim().replace(/^§\s*/, "").replace(/[*`_]/g, "").replace(/\$([^$]*)\$/g, "$1").trim();
+  if (!clean) return true;
+  const lower = clean.toLowerCase();
+  if (
+    lower === "frontmatter" ||
+    lower === "full document" ||
+    lower === "abstract" ||
+    /^(?:figure|table)\s+\d/i.test(clean)
+  ) {
+    return true;
+  }
+  if (documentTitle && normalizeForComparison(clean) === normalizeForComparison(documentTitle)) {
+    return true;
+  }
+  return false;
+}
+
 function extractLeafHeading(rawSection, documentTitle = "") {
   if (!rawSection || typeof rawSection !== "string") return { leaf: "", parents: [] };
   let clean = rawSection.trim();
   // Strip leading section symbols and Markdown formatting
-  clean = clean.replace(/^§\s*/, "").replace(/[*`_]/g, "").replace(/\$[^$]*\$/g, "");
+  clean = clean.replace(/^§\s*/, "").replace(/[*`_]/g, "").replace(/\$([^$]*)\$/g, "$1");
 
   // Take the last component of a hierarchy breadcrumb
   let parents = [];
@@ -4258,20 +4277,8 @@ function extractLeafHeading(rawSection, documentTitle = "") {
   }
   clean = clean.replace(/^§\s*/, "").trim();
 
-  // Ignore synthetic or document-level labels
-  const lower = clean.toLowerCase();
-  if (
-    !clean ||
-    lower === "frontmatter" ||
-    lower === "full document" ||
-    lower === "abstract" ||
-    /^(?:figure|table)\s+\d/i.test(clean)
-  ) {
-    return { leaf: "", parents: [] };
-  }
-
-  // If the leaf heading simply equals the document title, skip it
-  if (documentTitle && normalizeForComparison(clean) === normalizeForComparison(documentTitle)) {
+  // Ignore synthetic labels or headings equal to document title
+  if (isSyntheticOrTitle(clean, documentTitle)) {
     return { leaf: "", parents: [] };
   }
 
@@ -4283,6 +4290,7 @@ function normalizeForComparison(str) {
   return str
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "") // strip combining diacritics
+    .replace(/[\^\{\}\[\]\+_\\]/g, "") // strip LaTeX punctuation and formatting characters
     .replace(/[^\p{L}\p{N}\s]/gu, " ") // Unicode-aware letter/number filtering
     .toLowerCase()
     .replace(/\s+/g, " ")
@@ -4337,9 +4345,9 @@ function findOutlineDestination(outlineNodes, targetHeading, parentHeadings = []
     for (const node of nodes) {
       if (!node) continue;
       const rawTitle = node.title || "";
-      const dest = node.dest || node.location?.dest || null;
+      const targetLocation = node.location || (node.dest ? { dest: node.dest } : (node.pageIndex !== undefined ? { pageIndex: node.pageIndex } : null));
 
-      if (rawTitle && dest) {
+      if (rawTitle && targetLocation) {
         const nodeParts = parseHeadingParts(rawTitle);
         let score = 0;
 
@@ -4386,7 +4394,7 @@ function findOutlineDestination(outlineNodes, targetHeading, parentHeadings = []
         }
 
         if (score >= 40) {
-          candidates.push({ node, dest, score, title: rawTitle });
+          candidates.push({ node, targetLocation, score, title: rawTitle });
         }
       }
 
@@ -4405,12 +4413,12 @@ function findOutlineDestination(outlineNodes, targetHeading, parentHeadings = []
 
   // If the top score is tied between two distinct destinations, reject to prevent jumping to wrong section
   if (candidates.length > 1 && candidates[0].score === candidates[1].score) {
-    if (JSON.stringify(candidates[0].dest) !== JSON.stringify(candidates[1].dest)) {
+    if (JSON.stringify(candidates[0].targetLocation) !== JSON.stringify(candidates[1].targetLocation)) {
       return null;
     }
   }
 
-  return candidates[0].dest;
+  return candidates[0].targetLocation;
 }
 
 function findHtmlSnapshotHeading(doc, targetHeading) {
@@ -4588,19 +4596,30 @@ function openItemInReader(attachmentKey, rawSection) {
             break;
           }
 
-          // Attempt 2: PDFViewerApplication.pdfDocument.getOutline()
+          // Attempt 2: PDFViewerApplication.pdfDocument.getOutline2() then getOutline()
           const iframeWin = internalReader?._primaryView?._iframeWindow;
           const pdfViewerApp = iframeWin?.wrappedJSObject?.PDFViewerApplication || iframeWin?.PDFViewerApplication;
           const pdfDoc = pdfViewerApp?.pdfDocument;
 
-          if (pdfDoc && typeof pdfDoc.getOutline === "function") {
-            try {
-              const docOutline = await pdfDoc.getOutline();
-              if (Array.isArray(docOutline) && docOutline.length > 0) {
-                outline = docOutline;
-                break;
-              }
-            } catch (_) {}
+          if (pdfDoc) {
+            if (typeof pdfDoc.getOutline2 === "function") {
+              try {
+                const docOutline2 = await pdfDoc.getOutline2();
+                if (Array.isArray(docOutline2) && docOutline2.length > 0) {
+                  outline = docOutline2;
+                  break;
+                }
+              } catch (_) {}
+            }
+            if (typeof pdfDoc.getOutline === "function") {
+              try {
+                const docOutline = await pdfDoc.getOutline();
+                if (Array.isArray(docOutline) && docOutline.length > 0) {
+                  outline = docOutline;
+                  break;
+                }
+              } catch (_) {}
+            }
           }
 
           await new Promise(resolve => setTimeout(resolve, 120));
@@ -4608,21 +4627,48 @@ function openItemInReader(attachmentKey, rawSection) {
 
         if (!outline || !Array.isArray(outline) || outline.length === 0) return;
 
-        const dest = findOutlineDestination(outline, leaf, parents);
-        if (!dest) return;
+        let targetLocation = findOutlineDestination(outline, leaf, parents);
+        if (!targetLocation && parents && parents.length > 0) {
+          for (let i = parents.length - 1; i >= 0; i--) {
+            const parentHeading = parents[i];
+            if (isSyntheticOrTitle(parentHeading, docTitle)) continue;
+            const ancestorParents = parents.slice(0, i);
+            targetLocation = findOutlineDestination(outline, parentHeading, ancestorParents);
+            if (targetLocation) break;
+          }
+        }
+        if (!targetLocation) return;
 
         const internalReader = readerInstance._internalReader || readerInstance;
-        // Execute destination jump (Zero highlighting)
-        if (typeof internalReader.navigate === "function") {
-          internalReader.navigate({ dest });
-        } else {
-          const iframeWin = internalReader?._primaryView?._iframeWindow;
-          const pdfViewerApp = iframeWin?.wrappedJSObject?.PDFViewerApplication || iframeWin?.PDFViewerApplication;
-          const linkService = pdfViewerApp?.pdfLinkService;
+        // Execute destination jump with a bounded timeout race to prevent stuck promises
+        let navTimer = null;
+        const navRemainingMs = Math.max(1000, deadlineMs - (Date.now() - startTime));
+        const navTimeoutPromise = new Promise(resolve => {
+          navTimer = setTimeout(resolve, navRemainingMs);
+        });
 
-          if (linkService && typeof linkService.goToDestination === "function") {
-            await linkService.goToDestination(dest);
+        const jumpPromise = (async () => {
+          if (typeof internalReader.navigate === "function") {
+            return await internalReader.navigate(targetLocation);
+          } else if (typeof readerInstance.navigate === "function") {
+            return await readerInstance.navigate(targetLocation);
+          } else {
+            const iframeWin = internalReader?._primaryView?._iframeWindow;
+            const pdfViewerApp = iframeWin?.wrappedJSObject?.PDFViewerApplication || iframeWin?.PDFViewerApplication;
+            const linkService = pdfViewerApp?.pdfLinkService;
+
+            if (linkService && typeof linkService.goToDestination === "function" && targetLocation?.dest) {
+              return await linkService.goToDestination(targetLocation.dest);
+            }
           }
+        })();
+        // Guard against late rejection if timeout wins
+        jumpPromise.catch(() => {});
+
+        try {
+          await Promise.race([jumpPromise, navTimeoutPromise]);
+        } finally {
+          if (navTimer) clearTimeout(navTimer);
         }
       }
 
@@ -14131,6 +14177,7 @@ if (typeof module !== "undefined" && module.exports) {
     showEvidencePopover,
     closeEvidencePopover,
     extractLeafHeading,
+    isSyntheticOrTitle,
     normalizeForComparison,
     parseHeadingParts,
     findOutlineDestination,

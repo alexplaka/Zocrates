@@ -277,7 +277,10 @@ async function runTests() {
 
     // Markdown symbols and math formatting
     const formatted = sidebar.extractLeafHeading("§ *4.2* `$W_i^Q$` `Projections`");
-    assert.strictEqual(formatted.leaf, "4.2  Projections");
+    assert.strictEqual(formatted.leaf, "4.2 Wi^Q Projections");
+
+    const mathHeading = sidebar.extractLeafHeading("A leaky integrator of $[Ca^{2+}]$ signals");
+    assert.strictEqual(mathHeading.leaf, "A leaky integrator of [Ca^{2+}] signals");
 
     // Real sections starting with Table / Figure should NOT be rejected
     assert.strictEqual(sidebar.extractLeafHeading("Table Detection Methods").leaf, "Table Detection Methods");
@@ -296,9 +299,37 @@ async function runTests() {
     const docTitleMatch = sidebar.extractLeafHeading("Deep Residual Learning for Image Recognition", "Deep Residual Learning for Image Recognition");
     assert.deepStrictEqual(docTitleMatch, { leaf: "", parents: [] });
 
+    // isSyntheticOrTitle
+    assert.strictEqual(sidebar.isSyntheticOrTitle("Frontmatter"), true);
+    assert.strictEqual(sidebar.isSyntheticOrTitle("Full Document"), true);
+    assert.strictEqual(sidebar.isSyntheticOrTitle("Abstract"), true);
+    assert.strictEqual(sidebar.isSyntheticOrTitle("Figure 1: Attention diagram"), true);
+    assert.strictEqual(sidebar.isSyntheticOrTitle("Table 2: BLEU score comparison"), true);
+    assert.strictEqual(sidebar.isSyntheticOrTitle("Attention Is All You Need", "Attention Is All You Need"), true);
+    assert.strictEqual(sidebar.isSyntheticOrTitle("attention is all you need", "Attention Is All You Need"), true);
+    assert.strictEqual(sidebar.isSyntheticOrTitle("§ 3.2.2 Multi-Head Attention", "Attention Is All You Need"), false);
+    assert.strictEqual(sidebar.isSyntheticOrTitle("Table Detection Methods"), false);
+    assert.strictEqual(sidebar.isSyntheticOrTitle("Figure Generation Algorithms"), false);
+    assert.strictEqual(sidebar.isSyntheticOrTitle(""), true);
+    assert.strictEqual(sidebar.isSyntheticOrTitle(null), true);
+
     // normalizeForComparison
     assert.strictEqual(sidebar.normalizeForComparison("Café naïve résumé"), "cafe naive resume");
     assert.strictEqual(sidebar.normalizeForComparison("Multi-Head  Attention: [2023]"), "multi head attention 2023");
+    assert.strictEqual(sidebar.normalizeForComparison("Multi-Head Attention"), "multi head attention");
+    assert.strictEqual(sidebar.normalizeForComparison("Multi Head Attention"), "multi head attention");
+    assert.strictEqual(sidebar.normalizeForComparison("Self-Attention"), "self attention");
+    assert.strictEqual(sidebar.normalizeForComparison("Self Attention"), "self attention");
+    assert.strictEqual(
+      sidebar.normalizeForComparison("Self-Attention"),
+      sidebar.normalizeForComparison("Self Attention")
+    );
+    assert.strictEqual(sidebar.normalizeForComparison("A leaky integrator of [Ca^{2+}] signals"), "a leaky integrator of ca2 signals");
+    assert.strictEqual(sidebar.normalizeForComparison("A leaky integrator of Ca2+ signals"), "a leaky integrator of ca2 signals");
+    assert.strictEqual(
+      sidebar.normalizeForComparison("A leaky integrator of [Ca^{2+}] signals"),
+      sidebar.normalizeForComparison("A leaky integrator of Ca2+ signals")
+    );
     assert.strictEqual(sidebar.normalizeForComparison(""), "");
     assert.strictEqual(sidebar.normalizeForComparison(null), "");
   });
@@ -398,38 +429,106 @@ async function runTests() {
     ];
 
     // Flat and nested outline exact match
-    assert.strictEqual(sidebar.findOutlineDestination(mockOutline, "1. Introduction"), "dest-intro");
-    assert.strictEqual(sidebar.findOutlineDestination(mockOutline, "3.2 Multi-Head Attention"), "dest-mha");
-    assert.strictEqual(sidebar.findOutlineDestination(mockOutline, "3.1.1 Problem Formulation"), "dest-formulation");
+    assert.deepStrictEqual(sidebar.findOutlineDestination(mockOutline, "1. Introduction"), { dest: "dest-intro" });
+    assert.deepStrictEqual(sidebar.findOutlineDestination(mockOutline, "3.2 Multi-Head Attention"), { dest: "dest-mha" });
+    assert.deepStrictEqual(sidebar.findOutlineDestination(mockOutline, "3.1.1 Problem Formulation"), { dest: "dest-formulation" });
 
     // Numbered prefix match
-    assert.strictEqual(sidebar.findOutlineDestination(mockOutline, "3.2"), "dest-mha");
-    assert.strictEqual(sidebar.findOutlineDestination(mockOutline, "2.1"), "dest-traditional");
+    assert.deepStrictEqual(sidebar.findOutlineDestination(mockOutline, "3.2"), { dest: "dest-mha" });
+    assert.deepStrictEqual(sidebar.findOutlineDestination(mockOutline, "2.1"), { dest: "dest-traditional" });
 
     // Numbering conflict rejection (3.2 Results vs 4.2 Results rejected)
     assert.strictEqual(sidebar.findOutlineDestination(mockOutline, "3.2 Results"), null);
 
     // Parent chain disambiguation: duplicate "Data Processing" disambiguated by parent
     const methodDp = sidebar.findOutlineDestination(mockOutline, "Data Processing", ["3. Methodology"]);
-    assert.strictEqual(methodDp, "dest-method-dp");
+    assert.deepStrictEqual(methodDp, { dest: "dest-method-dp" });
 
     const expDp = sidebar.findOutlineDestination(mockOutline, "Data Processing", ["4. Experiments"]);
-    assert.strictEqual(expDp, "dest-exp-dp");
+    assert.deepStrictEqual(expDp, { dest: "dest-exp-dp" });
 
     // Tied scores across distinct destinations returns null (safe fail-open)
     const tiedDp = sidebar.findOutlineDestination(mockOutline, "Data Processing", []);
     assert.strictEqual(tiedDp, null);
 
     // Named destination string preserved intact
-    assert.strictEqual(sidebar.findOutlineDestination(mockOutline, "Appendix A. Proofs"), "named.dest.appendix");
+    assert.deepStrictEqual(sidebar.findOutlineDestination(mockOutline, "Appendix A. Proofs"), { dest: "named.dest.appendix" });
 
     // Token-boundary core containment (min 8 chars)
-    assert.strictEqual(sidebar.findOutlineDestination(mockOutline, "Discussion and Future"), "dest-discussion");
+    assert.deepStrictEqual(sidebar.findOutlineDestination(mockOutline, "Discussion and Future"), { dest: "dest-discussion" });
 
     // Unmatched returns null
     assert.strictEqual(sidebar.findOutlineDestination(mockOutline, "Nonexistent Section"), null);
     assert.strictEqual(sidebar.findOutlineDestination([], "1. Introduction"), null);
     assert.strictEqual(sidebar.findOutlineDestination(null, "1. Introduction"), null);
+  });
+
+  // 9b. findOutlineDestination: synthesized outline schema
+  test("findOutlineDestination: accepts Zotero synthesized outline schema with location and no dest", () => {
+    const synthOutline = [
+      {
+        title: "1 Introduction",
+        location: { position: { pageIndex: 0, rects: [[10, 20, 30, 40]] } },
+      },
+      {
+        title: "2 Methodology",
+        location: { position: { pageIndex: 2, rects: [[15, 25, 35, 45]] } },
+        items: [
+          {
+            title: "2.1 Signal Integration",
+            location: { position: { pageIndex: 3, rects: [[5, 10, 50, 60]] } },
+          },
+        ],
+      },
+      {
+        title: "3 Direct Page Index",
+        pageIndex: 7,
+      },
+    ];
+
+    assert.deepStrictEqual(
+      sidebar.findOutlineDestination(synthOutline, "1 Introduction"),
+      { position: { pageIndex: 0, rects: [[10, 20, 30, 40]] } }
+    );
+    assert.deepStrictEqual(
+      sidebar.findOutlineDestination(synthOutline, "2.1 Signal Integration"),
+      { position: { pageIndex: 3, rects: [[5, 10, 50, 60]] } }
+    );
+    assert.deepStrictEqual(
+      sidebar.findOutlineDestination(synthOutline, "3 Direct Page Index"),
+      { pageIndex: 7 }
+    );
+  });
+
+  // 9d. findOutlineDestination: location with dest schema
+  test("findOutlineDestination: correctly handles location with dest object schema", () => {
+    const outlineWithLocationDest = [
+      {
+        title: "4. Experimental Setup",
+        location: { dest: "named.dest.exp" },
+      },
+    ];
+
+    assert.deepStrictEqual(
+      sidebar.findOutlineDestination(outlineWithLocationDest, "4. Experimental Setup"),
+      { dest: "named.dest.exp" }
+    );
+  });
+
+  // 9c. findOutlineDestination: math heading unwrap and normalization
+  test("findOutlineDestination: matches unwrapped LaTeX math heading against outline node", () => {
+    const outlineWithCa2 = [
+      {
+        title: "A leaky integrator of Ca2+ signals",
+        location: { position: { pageIndex: 4, rects: [[20, 40, 60, 80]] } },
+      },
+    ];
+
+    const { leaf } = sidebar.extractLeafHeading("A leaky integrator of $[Ca^{2+}]$ signals");
+    assert.strictEqual(leaf, "A leaky integrator of [Ca^{2+}] signals");
+
+    const match = sidebar.findOutlineDestination(outlineWithCa2, leaf);
+    assert.deepStrictEqual(match, { position: { pageIndex: 4, rects: [[20, 40, 60, 80]] } });
   });
 
   // 10. findHtmlSnapshotHeading
@@ -544,6 +643,340 @@ async function runTests() {
       goToDestinationCalledWith = null;
       await sidebar.openItemInReader("ATT_TEST", "§ 3.2 Multi-Head Attention");
       assert.strictEqual(goToDestinationCalledWith, "dest-mha", "Subsequent navigation must succeed after early-return key");
+    } finally {
+      if (origReader !== undefined) {
+        env.window.Zotero.Reader = origReader;
+      } else {
+        delete env.window.Zotero.Reader;
+      }
+      if (origGetByLib !== undefined) {
+        env.window.Zotero.Items.getByLibraryAndKey = origGetByLib;
+      } else if (env.window.Zotero?.Items) {
+        delete env.window.Zotero.Items.getByLibraryAndKey;
+      }
+    }
+  });
+
+  // 12. openItemInReader: hierarchical parent breadcrumb fallback
+  await testAsync("openItemInReader: falls back to parent breadcrumb hierarchy when leaf heading is absent in shallow outline", async () => {
+    const origReader = env.window.Zotero?.Reader;
+    const origGetByLib = env.window.Zotero?.Items?.getByLibraryAndKey;
+    let navigatedWith = null;
+
+    try {
+      const shallowOutline = [
+        {
+          title: "Introduction",
+          location: { position: { pageIndex: 0, rects: [[0, 0, 100, 100]] } },
+        },
+        {
+          title: "Results",
+          location: { position: { pageIndex: 5, rects: [[100, 200, 300, 400]] } },
+        },
+      ];
+
+      const mockInternalReader = {
+        _state: { outline: shallowOutline },
+        navigate: async (targetLoc) => {
+          navigatedWith = targetLoc;
+        },
+      };
+
+      const mockItem = {
+        id: 995,
+        isAttachment: () => true,
+        attachmentReaderType: "pdf",
+        attachmentContentType: "application/pdf",
+      };
+
+      if (!env.window.Zotero) env.window.Zotero = {};
+      env.window.Zotero.Reader = { open: async () => mockInternalReader };
+      if (!env.window.Zotero.Items) env.window.Zotero.Items = {};
+      env.window.Zotero.Items.getByLibraryAndKey = () => mockItem;
+
+      // Query "Results > Leaky Integrator" against outline containing only "Results"
+      await sidebar.openItemInReader("ATT_SHALLOW", "Results > Leaky Integrator");
+
+      assert.deepStrictEqual(
+        navigatedWith,
+        { position: { pageIndex: 5, rects: [[100, 200, 300, 400]] } },
+        "Should navigate to parent 'Results' location when child 'Leaky Integrator' is missing in outline"
+      );
+    } finally {
+      if (origReader !== undefined) {
+        env.window.Zotero.Reader = origReader;
+      } else {
+        delete env.window.Zotero.Reader;
+      }
+      if (origGetByLib !== undefined) {
+        env.window.Zotero.Items.getByLibraryAndKey = origGetByLib;
+      } else if (env.window.Zotero?.Items) {
+        delete env.window.Zotero.Items.getByLibraryAndKey;
+      }
+    }
+  });
+
+  // 13. openItemInReader: outline polling checks pdfDoc.getOutline2() before getOutline()
+  await testAsync("openItemInReader: queries pdfDoc.getOutline2() before getOutline() when internal state is empty", async () => {
+    const origReader = env.window.Zotero?.Reader;
+    const origGetByLib = env.window.Zotero?.Items?.getByLibraryAndKey;
+    let navigatedWith = null;
+    let getOutline2Called = false;
+    let getOutlineCalled = false;
+
+    try {
+      const synthOutline = [
+        {
+          title: "Synthesized Section",
+          location: { position: { pageIndex: 2, rects: [[1, 2, 3, 4]] } },
+        },
+      ];
+
+      const mockInternalReader = {
+        _state: { outline: null },
+        _primaryView: {
+          _iframeWindow: {
+            PDFViewerApplication: {
+              pdfDocument: {
+                getOutline2: async () => {
+                  getOutline2Called = true;
+                  return synthOutline;
+                },
+                getOutline: async () => {
+                  getOutlineCalled = true;
+                  return [{ title: "Legacy Section", dest: "legacy-dest" }];
+                },
+              },
+            },
+          },
+        },
+        navigate: async (loc) => {
+          navigatedWith = loc;
+        },
+      };
+
+      const mockItem = {
+        id: 996,
+        isAttachment: () => true,
+        attachmentReaderType: "pdf",
+        attachmentContentType: "application/pdf",
+      };
+
+      if (!env.window.Zotero) env.window.Zotero = {};
+      env.window.Zotero.Reader = { open: async () => mockInternalReader };
+      if (!env.window.Zotero.Items) env.window.Zotero.Items = {};
+      env.window.Zotero.Items.getByLibraryAndKey = () => mockItem;
+
+      await sidebar.openItemInReader("ATT_SYNTH", "Synthesized Section");
+
+      assert.strictEqual(getOutline2Called, true, "pdfDoc.getOutline2() must be checked first");
+      assert.strictEqual(getOutlineCalled, false, "pdfDoc.getOutline() must not be called when getOutline2() succeeds");
+      assert.deepStrictEqual(navigatedWith, { position: { pageIndex: 2, rects: [[1, 2, 3, 4]] } });
+    } finally {
+      if (origReader !== undefined) {
+        env.window.Zotero.Reader = origReader;
+      } else {
+        delete env.window.Zotero.Reader;
+      }
+      if (origGetByLib !== undefined) {
+        env.window.Zotero.Items.getByLibraryAndKey = origGetByLib;
+      } else if (env.window.Zotero?.Items) {
+        delete env.window.Zotero.Items.getByLibraryAndKey;
+      }
+    }
+  });
+
+  // 12b. openItemInReader: parent fallback skips synthetic labels and documentTitle
+  await testAsync("openItemInReader: parent fallback skips synthetic labels and headings equal to documentTitle", async () => {
+    const origReader = env.window.Zotero?.Reader;
+    const origGetByLib = env.window.Zotero?.Items?.getByLibraryAndKey;
+    let navigatedWith = null;
+
+    try {
+      const mockOutline = [
+        {
+          title: "Attention Is All You Need",
+          location: { position: { pageIndex: 0, rects: [[0, 0, 100, 100]] } },
+        },
+        {
+          title: "Frontmatter",
+          location: { position: { pageIndex: 0, rects: [[0, 0, 100, 100]] } },
+        },
+        {
+          title: "Abstract",
+          location: { position: { pageIndex: 1, rects: [[0, 0, 100, 100]] } },
+        },
+        {
+          title: "Figure 1: Architecture",
+          location: { position: { pageIndex: 2, rects: [[0, 0, 100, 100]] } },
+        },
+        {
+          title: "3 Model Architecture",
+          location: { position: { pageIndex: 3, rects: [[10, 20, 30, 40]] } },
+        },
+      ];
+
+      const mockInternalReader = {
+        _state: { outline: mockOutline },
+        navigate: async (targetLoc) => {
+          navigatedWith = targetLoc;
+        },
+      };
+
+      const mockItem = {
+        id: 998,
+        isAttachment: () => true,
+        attachmentReaderType: "pdf",
+        attachmentContentType: "application/pdf",
+        getField: (field) => (field === "title" ? "Attention Is All You Need" : ""),
+      };
+
+      if (!env.window.Zotero) env.window.Zotero = {};
+      env.window.Zotero.Reader = { open: async () => mockInternalReader };
+      if (!env.window.Zotero.Items) env.window.Zotero.Items = {};
+      env.window.Zotero.Items.getByLibraryAndKey = () => mockItem;
+
+      // Case 1: Breadcrumb contains Title > Frontmatter > Abstract > Missing Section
+      // All parents are synthetic or equal to docTitle, so none should be matched.
+      await sidebar.openItemInReader("ATT_SYNTH_PARENTS", "Attention Is All You Need > Frontmatter > Abstract > Missing Subheading");
+      assert.strictEqual(navigatedWith, null, "Parent fallback must skip Frontmatter, Abstract, and document title");
+
+      // Case 2: Breadcrumb contains Title > 3 Model Architecture > Missing Subheading
+      // Parent "3 Model Architecture" is valid and should be matched, skipping Title.
+      navigatedWith = null;
+      await sidebar.openItemInReader("ATT_SYNTH_PARENTS", "Attention Is All You Need > 3 Model Architecture > Missing Subheading");
+      assert.deepStrictEqual(
+        navigatedWith,
+        { position: { pageIndex: 3, rects: [[10, 20, 30, 40]] } },
+        "Parent fallback should navigate to '3 Model Architecture' while skipping document title"
+      );
+    } finally {
+      if (origReader !== undefined) {
+        env.window.Zotero.Reader = origReader;
+      } else {
+        delete env.window.Zotero.Reader;
+      }
+      if (origGetByLib !== undefined) {
+        env.window.Zotero.Items.getByLibraryAndKey = origGetByLib;
+      } else if (env.window.Zotero?.Items) {
+        delete env.window.Zotero.Items.getByLibraryAndKey;
+      }
+    }
+  });
+
+  // 13b. openItemInReader: getOutline2 returning empty or null gracefully falls back to getOutline()
+  await testAsync("openItemInReader: getOutline2 returning empty or null gracefully falls back to getOutline()", async () => {
+    const origReader = env.window.Zotero?.Reader;
+    const origGetByLib = env.window.Zotero?.Items?.getByLibraryAndKey;
+    let navigatedWith = null;
+    let getOutline2CallCount = 0;
+    let getOutlineCallCount = 0;
+
+    try {
+      const legacyOutline = [
+        {
+          title: "Legacy Section",
+          location: { position: { pageIndex: 1, rects: [[5, 6, 7, 8]] } },
+        },
+      ];
+
+      const mockInternalReader = {
+        _state: { outline: null },
+        _primaryView: {
+          _iframeWindow: {
+            PDFViewerApplication: {
+              pdfDocument: {
+                getOutline2: async () => {
+                  getOutline2CallCount++;
+                  return null; // Empty or null returned by getOutline2
+                },
+                getOutline: async () => {
+                  getOutlineCallCount++;
+                  return legacyOutline;
+                },
+              },
+            },
+          },
+        },
+        navigate: async (loc) => {
+          navigatedWith = loc;
+        },
+      };
+
+      const mockItem = {
+        id: 997,
+        isAttachment: () => true,
+        attachmentReaderType: "pdf",
+        attachmentContentType: "application/pdf",
+      };
+
+      if (!env.window.Zotero) env.window.Zotero = {};
+      env.window.Zotero.Reader = { open: async () => mockInternalReader };
+      if (!env.window.Zotero.Items) env.window.Zotero.Items = {};
+      env.window.Zotero.Items.getByLibraryAndKey = () => mockItem;
+
+      await sidebar.openItemInReader("ATT_FALLBACK_OUTLINE", "Legacy Section");
+
+      assert.strictEqual(getOutline2CallCount, 1, "getOutline2() should be attempted first");
+      assert.strictEqual(getOutlineCallCount, 1, "getOutline() should be called when getOutline2() returns null/empty");
+      assert.deepStrictEqual(navigatedWith, { position: { pageIndex: 1, rects: [[5, 6, 7, 8]] } });
+    } finally {
+      if (origReader !== undefined) {
+        env.window.Zotero.Reader = origReader;
+      } else {
+        delete env.window.Zotero.Reader;
+      }
+      if (origGetByLib !== undefined) {
+        env.window.Zotero.Items.getByLibraryAndKey = origGetByLib;
+      } else if (env.window.Zotero?.Items) {
+        delete env.window.Zotero.Items.getByLibraryAndKey;
+      }
+    }
+  });
+
+  // 14. openItemInReader: bounded timeout race prevents hanging host navigate from permanently blocking
+  await testAsync("openItemInReader: bounded timeout race prevents hanging host navigate from permanently blocking", async () => {
+    const origReader = env.window.Zotero?.Reader;
+    const origGetByLib = env.window.Zotero?.Items?.getByLibraryAndKey;
+
+    try {
+      const mockOutline = [
+        { title: "Hanging Section", dest: "dest-hang" },
+      ];
+
+      let navigateCalled = false;
+      const mockInternalReader = {
+        _state: { outline: mockOutline },
+        navigate: () => {
+          navigateCalled = true;
+          return new Promise(() => {}); // never resolves
+        },
+      };
+
+      const mockItem = {
+        id: 999,
+        isAttachment: () => true,
+        attachmentReaderType: "pdf",
+        attachmentContentType: "application/pdf",
+      };
+
+      if (!env.window.Zotero) env.window.Zotero = {};
+      env.window.Zotero.Reader = { open: async () => mockInternalReader };
+      if (!env.window.Zotero.Items) env.window.Zotero.Items = {};
+      env.window.Zotero.Items.getByLibraryAndKey = () => mockItem;
+
+      // First call: navigate hangs, but openItemInReader resolves due to timeout race
+      await sidebar.openItemInReader("ATT_HANG", "Hanging Section");
+      assert.strictEqual(navigateCalled, true);
+
+      // Now verify that after timeout, coalescing map has cleared and subsequent call is not stuck
+      let secondNavigateCalled = false;
+      mockInternalReader.navigate = async () => {
+        secondNavigateCalled = true;
+      };
+
+      await sidebar.openItemInReader("ATT_HANG", "Hanging Section");
+      assert.strictEqual(secondNavigateCalled, true, "Subsequent call must proceed after timeout cleared hanging navigation");
     } finally {
       if (origReader !== undefined) {
         env.window.Zotero.Reader = origReader;
