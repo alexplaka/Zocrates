@@ -5774,7 +5774,8 @@ function showEvidencePopover(pill, citation) {
     if (sec) {
       const secDiv = document.createElementNS(XHTMLNS, "div");
       secDiv.className = "evidence-popover-section-badge";
-      secDiv.textContent = `§ ${sec}`;
+      const formattedSec = formatMarkdown(`§ ${sec}`).trim().replace(/^<p>([\s\S]*?)<\/p>$/i, "$1").trim();
+      secDiv.innerHTML = formattedSec;
       badgesRow.appendChild(secDiv);
     }
     if (supportBadge) {

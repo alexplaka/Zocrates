@@ -3185,10 +3185,11 @@ figure th {
 
 .evidence-popover-badges-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 6px;
   flex-wrap: wrap;
   flex-shrink: 0;
+  max-width: 100%;
 }
 
 .evidence-popover-section-badge {
@@ -3200,7 +3201,27 @@ figure th {
   background: var(--chip-bg);
   color: var(--primary);
   border: 1px solid var(--chip-border);
-  flex-shrink: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+
+.evidence-popover-section-badge p {
+  margin: 0;
+  display: inline;
+}
+
+.evidence-popover-section-badge .katex {
+  font-size: 1.05em;
+  color: inherit;
+}
+
+.evidence-popover-section-badge .katex-display {
+  display: inline-block;
+  margin: 0;
 }
 
 .evidence-support-badge {

@@ -176,6 +176,47 @@ async function runTests() {
     assert.ok(popoverLow.querySelector(".evidence-support-badge.low"));
     assert.strictEqual(popoverLow.querySelector(".evidence-support-badge.low").textContent, "Support Probability: 0.35");
     sidebar.closeEvidencePopover();
+
+    // Case D: Markdown and LaTeX math in section badge renders formatted HTML in innerHTML
+    const prevKatex = env.window.katex;
+    env.window.katex = {
+      renderToString: (math) => `<span class="katex">${math}</span>`,
+    };
+    try {
+      const citationMath = {
+        title: "Complexity Analysis",
+        section: "Analysis of **$O(N)$** Bounds",
+        support_probability: 0.85,
+      };
+      sidebar.showEvidencePopover(pill, citationMath);
+      const popoverMath = env.document.body.querySelector(".evidence-popover");
+      const secBadge = popoverMath.querySelector(".evidence-popover-section-badge");
+      assert.ok(secBadge, "Section badge should exist");
+      assert.strictEqual(
+        secBadge.innerHTML,
+        "§ Analysis of <strong><span class=\"katex\">O(N)</span></strong> Bounds",
+        "Section badge should render formatted markdown and math in secDiv.innerHTML"
+      );
+      assert.strictEqual(secBadge.textContent, "§ Analysis of O(N) Bounds");
+      sidebar.closeEvidencePopover();
+
+      // Case E: Plain section, script tags, and XSS sanitization
+      const citationXss = {
+        title: "Security Test",
+        section: "Methods <script>alert(1)</script> <img src=x onerror=alert(1)> > Implementation",
+      };
+      sidebar.showEvidencePopover(pill, citationXss);
+      const popoverXss = env.document.body.querySelector(".evidence-popover");
+      const secBadgeXss = popoverXss.querySelector(".evidence-popover-section-badge");
+      assert.ok(secBadgeXss, "Section badge should exist");
+      assert.ok(!secBadgeXss.innerHTML.includes("<script"), "Script tags must be stripped");
+      assert.ok(!secBadgeXss.innerHTML.includes("onerror"), "Event handlers must be sanitized");
+      assert.ok(secBadgeXss.textContent.startsWith("§ Methods"), "Prefix § must be present");
+      assert.ok(secBadgeXss.textContent.includes("Implementation"), "Section title text must be preserved");
+      sidebar.closeEvidencePopover();
+    } finally {
+      env.window.katex = prevKatex;
+    }
   });
 
   // 6. Citation pills inside Markdown tables
