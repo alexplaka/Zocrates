@@ -194,7 +194,6 @@ def search_corpus_core(
                         if doc_md.exists():
                             try:
                                 import yaml
-                                import re
                                 lines = doc_md.read_text(encoding="utf-8").split("---", 2)
                                 if len(lines) >= 3:
                                     fm = yaml.safe_load(lines[1])
@@ -619,7 +618,6 @@ def read_document_core(
                 doc_text_head = doc_md_path.read_text(encoding="utf-8")
                 if doc_text_head.startswith("---"):
                     import yaml
-                    import re
                     parts = doc_text_head.split("---", 2)
                     if len(parts) >= 3:
                         fm = yaml.safe_load(parts[1])
@@ -653,6 +651,52 @@ def read_document_core(
             s_idx = max(0, start_line - 1)
             e_idx = max(0, end_line)
             return "".join(doc_lines[s_idx:e_idx])
+
+        # Precompute hierarchical breadcrumb headings for section assets
+        def _is_fm_or_title(h_text: str) -> bool:
+            clean_h = h_text.strip().lower()
+            if not clean_h or clean_h in ("frontmatter", "title", "document body"):
+                return True
+            if re.match(r"^(?:figure|table)\s+\d", clean_h, re.IGNORECASE):
+                return True
+            if doc_title:
+                norm_h = re.sub(r"[^\w\s]", "", clean_h).replace(" ", "")
+                norm_t = re.sub(r"[^\w\s]", "", doc_title.lower()).replace(" ", "")
+                if norm_h and norm_h == norm_t:
+                    return True
+            return False
+
+        sec_breadcrumb_headings: dict[int, str] = {}
+        heading_stack: list[dict[str, Any]] = []
+
+        for sec in toc_json_data.get("sections", []):
+            s_id = sec.get("id", "")
+            raw_h = sec.get("heading", "")
+            lvl = int(sec.get("level") or 1)
+
+            if sec.get("level") in (0, "0") or s_id == "s0" or _is_fm_or_title(raw_h):
+                sec_breadcrumb_headings[id(sec)] = raw_h
+                continue
+
+            while heading_stack and heading_stack[-1]["level"] >= lvl:
+                heading_stack.pop()
+
+            if " > " in raw_h:
+                computed_h = raw_h
+                leaf_h = raw_h.split(" > ")[-1].strip()
+            else:
+                parents = [item["heading"] for item in heading_stack]
+                if parents:
+                    computed_h = f"{' > '.join(parents)} > {raw_h}"
+                else:
+                    computed_h = raw_h
+                leaf_h = raw_h
+
+            sec_breadcrumb_headings[id(sec)] = computed_h
+            heading_stack.append({"level": lvl, "heading": leaf_h})
+
+        def _get_sec_heading(s_dict: dict[str, Any]) -> str:
+            return sec_breadcrumb_headings.get(id(s_dict), s_dict.get("heading", ""))
 
         # Case 1: Whole document paginated mode (asset_id is None)
         if asset_id is None:
@@ -752,7 +796,7 @@ def read_document_core(
                         return {
                             "asset_id": sec["id"],
                             "asset_type": "section",
-                            "heading": sec.get("heading", ""),
+                            "heading": _get_sec_heading(sec),
                             "content": p_content,
                             "word_count": len(p_words),
                             "path": None,
@@ -817,7 +861,7 @@ def read_document_core(
                     return {
                         "asset_id": sec["id"],
                         "asset_type": "section",
-                        "heading": sec.get("heading", ""),
+                        "heading": _get_sec_heading(sec),
                         "content": p_content,
                         "word_count": len(p_words),
                         "path": None,
@@ -878,7 +922,14 @@ def read_document_core(
             for sec in toc_json_data.get("sections", []):
                 h = sec.get("heading", "")
                 norm_h = re.sub(r"[^\w\s]", "", h).lower().strip()
-                if norm_aid == norm_h or (norm_aid and norm_aid in norm_h):
+                b_h = _get_sec_heading(sec)
+                norm_b = re.sub(r"[^\w\s]", "", b_h).lower().strip()
+                if (
+                    norm_aid == norm_h
+                    or (norm_aid and norm_aid in norm_h)
+                    or norm_aid == norm_b
+                    or (norm_aid and norm_aid in norm_b)
+                ):
                     best_sec = sec
                     break
 
@@ -902,7 +953,7 @@ def read_document_core(
                 return {
                     "asset_id": best_sec["id"],
                     "asset_type": "section",
-                    "heading": best_sec.get("heading", ""),
+                    "heading": _get_sec_heading(best_sec),
                     "content": p_content,
                     "word_count": len(p_words),
                     "path": None,

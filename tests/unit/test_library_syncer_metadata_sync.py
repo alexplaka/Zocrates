@@ -166,6 +166,7 @@ def mock_syncer_environment(tmp_path: Path):
     syncer.db = ZoteroDB(sqlite_path, storage_dir)
 
     mock_processor = MagicMock()
+    mock_processor._cache_dir = cache_dir
     mock_processor.list_cached_keys.return_value = []
     mock_processor.ensure_parent_item_key = MagicMock()
     mock_processor.regenerate_root_index = MagicMock()
