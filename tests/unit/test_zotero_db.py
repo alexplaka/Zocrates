@@ -4,19 +4,23 @@ from contextlib import contextmanager
 import os
 import shutil
 import sqlite3
+import tempfile
 from pathlib import Path
 
 import pytest
 
+from zocrates.rag import zotero_db as zdb_module
 from zocrates.rag.zotero_db import (
     ZoteroAttachment,
     ZoteroCollection,
     ZoteroDB,
     ZoteroNote,
     _cleanup_sqlite_snapshots,
+    _is_pid_alive,
     _open_db,
     _open_snapshot_connection,
     _sqlite_snapshots,
+    _sweep_stale_sqlite_snapshots,
     extract_year,
     normalize_doi,
 )
@@ -1095,4 +1099,281 @@ def test_open_db_closes_probe_connection_on_failure(tmp_path, monkeypatch):
 
     mock_probe_conn.close.assert_called_once()
 
+
+def test_open_db_probes_sqlite_master_not_bare_select_one(tmp_path, monkeypatch):
+    """Verify probe checks sqlite_master rather than bare SELECT 1, sets busy timeout, and cleans up."""
+    from unittest.mock import MagicMock
+    from zocrates.rag import zotero_db as zdb_module
+
+    _cleanup_sqlite_snapshots()
+    try:
+        db_path = tmp_path / "contended.sqlite"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE t (x INTEGER)")
+        conn.commit()
+        conn.close()
+
+        # Mock probe connection: succeeds on bare 'SELECT 1' but raises on 'sqlite_master'
+        mock_probe_conn = MagicMock(spec=sqlite3.Connection)
+
+        def mock_execute(sql, *args, **kwargs):
+            if "sqlite_master" in sql:
+                raise sqlite3.OperationalError("database is locked")
+            mock_cursor = MagicMock()
+            mock_cursor.fetchone.return_value = (1,)
+            return mock_cursor
+
+        mock_probe_conn.execute.side_effect = mock_execute
+
+        orig_connect = zdb_module.sqlite3.connect
+        connect_calls = []
+
+        def mock_connect(*args, **kwargs):
+            connect_calls.append((args, kwargs))
+            # First connection attempt is the mode=ro probe
+            if len(connect_calls) == 1:
+                return mock_probe_conn
+            return orig_connect(*args, **kwargs)
+
+        monkeypatch.setattr(zdb_module.sqlite3, "connect", mock_connect)
+
+        # 1. Probe fails because it queries sqlite_master -> falls back to snapshot tier
+        with _open_db(db_path) as c:
+            assert c is not None
+            # Verify it's a functioning connection to the recovered copy
+            assert c.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchone() is not None
+
+        mock_probe_conn.close.assert_called_once()
+        assert str(db_path) in _sqlite_snapshots
+        snapshot_dir = os.path.dirname(_sqlite_snapshots[str(db_path)][0])
+        assert os.path.isdir(snapshot_dir)
+
+        # 2. On an uncontended normal database, calling _open_db(normal_db_path) returns
+        # a Tier 1 connection where conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5000.
+        normal_db_path = tmp_path / "normal.sqlite"
+        normal_conn = sqlite3.connect(str(normal_db_path))
+        normal_conn.execute("CREATE TABLE t (x INTEGER)")
+        normal_conn.commit()
+        normal_conn.close()
+
+        # Reset monkeypatch so normal_db_path uses real sqlite3.connect without probe failure
+        monkeypatch.undo()
+
+        with _open_db(normal_db_path) as tier1_conn:
+            timeout_res = tier1_conn.execute("PRAGMA busy_timeout").fetchone()
+            assert timeout_res[0] == 5000
+            # Tier 1 does not populate snapshots
+            assert str(normal_db_path) not in _sqlite_snapshots
+
+        # 3. Clean up snapshots at the end with _cleanup_sqlite_snapshots()
+        _cleanup_sqlite_snapshots()
+        assert len(_sqlite_snapshots) == 0
+        assert not os.path.exists(snapshot_dir)
+    finally:
+        _cleanup_sqlite_snapshots()
+
+
+def test_snapshot_failure_cleans_tmp_dir_and_falls_through_to_tier3(tmp_path, monkeypatch):
+    """Failed copy or corrupt snapshot cleans up tmp_dir, does not cache the broken entry, and allows caller to fall through to Tier 3."""
+    from zocrates.rag import zotero_db as zdb_module
+
+    _cleanup_sqlite_snapshots()
+    try:
+        db_path = tmp_path / "failing.sqlite"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE items (itemID INTEGER PRIMARY KEY, key TEXT)")
+        conn.execute("INSERT INTO items VALUES (1, 'KEY1')")
+        conn.commit()
+        conn.close()
+
+        # Track any temporary directory created by mkdtemp
+        created_dirs: list[str] = []
+        orig_mkdtemp = tempfile.mkdtemp
+
+        def tracked_mkdtemp(*args, **kwargs):
+            d = orig_mkdtemp(*args, **kwargs)
+            created_dirs.append(d)
+            return d
+
+        monkeypatch.setattr(zdb_module.tempfile, "mkdtemp", tracked_mkdtemp)
+
+        # 1. Test failed copy inside _open_snapshot_connection directly
+        def failing_copy2(src, dst, *args, **kwargs):
+            raise OSError("Simulated disk error during snapshot copy")
+
+        monkeypatch.setattr(zdb_module.shutil, "copy2", failing_copy2)
+        with pytest.raises(OSError, match="Simulated disk error"):
+            _open_snapshot_connection(db_path)
+
+        assert len(created_dirs) == 1
+        assert not os.path.exists(created_dirs[0]), "tmp_dir must be cleaned up on copy error"
+        assert str(db_path) not in _sqlite_snapshots, "Failed snapshot must not be cached"
+
+        # 2. Test corrupt snapshot: copy creates a corrupt file that fails SQLite probe
+        monkeypatch.undo()
+        monkeypatch.setattr(zdb_module.tempfile, "mkdtemp", tracked_mkdtemp)
+
+        def corrupt_copy2(src, dst, *args, **kwargs):
+            # Write invalid header to simulate corrupted database copy
+            with open(dst, "wb") as f:
+                f.write(b"not a valid sqlite database content")
+
+        monkeypatch.setattr(zdb_module.shutil, "copy2", corrupt_copy2)
+        with pytest.raises(sqlite3.DatabaseError):
+            _open_snapshot_connection(db_path)
+
+        assert len(created_dirs) == 2
+        assert not os.path.exists(created_dirs[1]), "tmp_dir must be cleaned up on corrupt probe error"
+        assert str(db_path) not in _sqlite_snapshots, "Corrupt snapshot must not be cached"
+
+        # 3. Test that in _get_connection, failure in Tier 1 probe + failure in Tier 2 snapshot
+        # cleanly falls through to Tier 3 (immutable=1)
+        orig_connect = sqlite3.connect
+
+        def mock_connect(uri_or_path, *args, **kwargs):
+            # Make Tier 1 mode=ro fail
+            if isinstance(uri_or_path, str) and "mode=ro" in uri_or_path:
+                raise sqlite3.OperationalError("database is locked")
+            return orig_connect(uri_or_path, *args, **kwargs)
+
+        monkeypatch.setattr(zdb_module.sqlite3, "connect", mock_connect)
+        # corrupt_copy2 is still active, so Tier 2 will fail validation and raise DatabaseError
+        with _open_db(db_path) as tier3_conn:
+            # Query must succeed on Tier 3 immutable=1
+            row = tier3_conn.execute("SELECT itemID, key FROM items").fetchone()
+            assert row[0] == 1
+            assert row[1] == "KEY1"
+
+        # Verify broken snapshot was never cached
+        assert str(db_path) not in _sqlite_snapshots
+    finally:
+        _cleanup_sqlite_snapshots()
+
+
+def test_snapshot_sidecar_copy_filenotfound_handled_gracefully(tmp_path, monkeypatch):
+    """FileNotFoundError during sidecar copy is caught and treated as absent without error."""
+    from zocrates.rag import zotero_db as zdb_module
+
+    _cleanup_sqlite_snapshots()
+    try:
+        db_path = tmp_path / "sidecar_race.sqlite"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE items (itemID INTEGER PRIMARY KEY, key TEXT)")
+        conn.execute("INSERT INTO items VALUES (42, 'ITEM42')")
+        conn.commit()
+        conn.close()
+
+        # Create a dummy WAL file on disk so sidecar.exists() is True
+        wal_path = Path(str(db_path) + "-wal")
+        wal_path.write_bytes(b"dummy wal bytes")
+
+        orig_copy2 = shutil.copy2
+        sidecar_copy_attempted = []
+
+        def race_copy2(src, dst, *args, **kwargs):
+            if str(src).endswith("-wal"):
+                sidecar_copy_attempted.append(str(src))
+                # Simulate TOCTOU: file deleted right before copy
+                raise FileNotFoundError(f"No such file or directory: {src}")
+            return orig_copy2(src, dst, *args, **kwargs)
+
+        monkeypatch.setattr(zdb_module.shutil, "copy2", race_copy2)
+
+        # _open_snapshot_connection should succeed despite FileNotFoundError during sidecar copy
+        snap_conn = _open_snapshot_connection(db_path)
+        try:
+            assert len(sidecar_copy_attempted) == 1
+            row = snap_conn.execute("SELECT itemID, key FROM items").fetchone()
+            assert row[0] == 42
+            assert row[1] == "ITEM42"
+            assert str(db_path) in _sqlite_snapshots
+        finally:
+            snap_conn.close()
+    finally:
+        _cleanup_sqlite_snapshots()
+
+
+def test_sweep_stale_sqlite_snapshots(tmp_path, monkeypatch):
+    """_sweep_stale_sqlite_snapshots() deletes directories for dead PIDs while strictly preserving directories for the current active PID."""
+    import time
+
+    monkeypatch.setattr(zdb_module.tempfile, "gettempdir", lambda: str(tmp_path))
+
+    temp_base = tmp_path
+    curr_pid = os.getpid()
+
+    # Find a dead PID using _is_pid_alive so it is 100% portable on Windows
+    dead_pid = 999999
+    while _is_pid_alive(dead_pid):
+        dead_pid += 1
+
+    # Create test directories in temp dir
+    curr_dir = temp_base / f"zocrates-zdb-{curr_pid}-test-active"
+    dead_dir = temp_base / f"zocrates-zdb-{dead_pid}-test-stale"
+    legacy_old_dir = temp_base / "zocrates-zdb-legacy-old-test"
+    legacy_fresh_dir = temp_base / "zocrates-zdb-legacy-fresh-test"
+    other_dir = temp_base / "other-temp-dir-not-zocrates"
+
+    created = [curr_dir, dead_dir, legacy_old_dir, legacy_fresh_dir, other_dir]
+    for d in created:
+        d.mkdir(exist_ok=True)
+        (d / "dummy.txt").write_text("hello")
+
+    try:
+        # Age legacy_old_dir to > 25 hours ago
+        old_time = time.time() - 90000
+        os.utime(legacy_old_dir, (old_time, old_time))
+
+        _sweep_stale_sqlite_snapshots()
+
+        # Dead PID directory must be swept
+        assert not dead_dir.exists(), "Dead PID snapshot directory must be removed"
+        # Old legacy directory must be swept
+        assert not legacy_old_dir.exists(), "Stale legacy directory (> 24h) must be removed"
+        # Active current PID directory must be preserved
+        assert curr_dir.exists(), "Current PID directory must be preserved"
+        # Fresh legacy directory (< 24h) must be preserved
+        assert legacy_fresh_dir.exists(), "Fresh legacy directory must be preserved"
+        # Unrelated directory must be untouched
+        assert other_dir.exists(), "Unrelated directory must not be touched"
+    finally:
+        for d in created:
+            if d.exists():
+                shutil.rmtree(d, ignore_errors=True)
+
+
+def test_sweep_stale_sqlite_snapshots_skips_different_uid(tmp_path, monkeypatch):
+    """Snapshot directories belonging to a different UID are never touched."""
+    monkeypatch.setattr(zdb_module.tempfile, "gettempdir", lambda: str(tmp_path))
+
+    dead_pid = 999999
+    while _is_pid_alive(dead_pid):
+        dead_pid += 1
+
+    foreign_dir = tmp_path / f"zocrates-zdb-{dead_pid}-foreign-test"
+    foreign_dir.mkdir(exist_ok=True)
+    (foreign_dir / "dummy.txt").write_text("hello")
+
+    if hasattr(os, "getuid"):
+        curr_uid = os.getuid()
+        monkeypatch.setattr(zdb_module.os, "getuid", lambda: curr_uid + 1)
+        _sweep_stale_sqlite_snapshots()
+        assert foreign_dir.exists(), "Foreign UID directory must NOT be swept"
+
+
+def test_cleanup_sqlite_snapshots_lock_timeout(tmp_path, monkeypatch):
+    """_cleanup_sqlite_snapshots proceeds cleanly if lock acquisition times out."""
+    from unittest.mock import MagicMock
+
+    fake_path = str(tmp_path / "fake_snapshot.sqlite")
+    zdb_module._sqlite_snapshots["test_db_key"] = (fake_path, (0, 0, 0))
+
+    mock_lock = MagicMock()
+    mock_lock.acquire.return_value = False
+    monkeypatch.setattr(zdb_module, "_sqlite_snapshot_lock", mock_lock)
+
+    _cleanup_sqlite_snapshots()
+    assert len(zdb_module._sqlite_snapshots) == 0
+    mock_lock.acquire.assert_called_once_with(timeout=1.0)
+    mock_lock.release.assert_not_called()
 
