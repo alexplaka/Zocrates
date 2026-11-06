@@ -6,7 +6,7 @@
   <title>Zocrates — Local-First AI Research Assistant for Zotero</title>
   <meta name="description" content="Transform your personal Zotero library into an active, verifiable, and local-first research partner with multi-agent search, vectorless section reading, and local MCP server." />
   <meta name="keywords" content="Zotero, Zotero agentic assistant, AI research assistant, Zotero AI plugin, academic assistant, RAG, vectorless reading, literature discovery, Open Knowledge Format, MCP server, local LLM, academic research tool" />
-  <meta name="author" content="Alex Plaka" />
+  <meta name="author" content="Alex Plakantonakis" />
   <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
   <meta name="theme-color" content="#0f172a" />
 
@@ -53,7 +53,7 @@
         },
         "author": {
           "@type": "Person",
-          "name": "Alex Plaka",
+          "name": "Alex Plakantonakis",
           "url": "https://github.com/alexplaka"
         },
         "image": "https://alexplaka.github.io/Zocrates/assets/Zocrates-logo.png",
@@ -64,7 +64,7 @@
           "Per-Occurrence Citation Verification",
           "Open Knowledge Format (OKF v0.2) Markdown Bundles",
           "Local Model Context Protocol (MCP) Server Bridge",
-          "Adaptive Context Compaction for 50+ Turn Sessions",
+          "Adaptive Context Compaction for Long Sessions",
           "One-Click Online Literature Discovery and Zotero Import",
           "Zotero 10 PDF Reader Text Excerpt and Area Snippet Bridge"
         ]
@@ -176,8 +176,7 @@
             </div>
             <div class="workbench-tabs">
               <span id="tab-my-library" class="workbench-tab">My Library (1,420 items)</span>
-              <span class="workbench-tab active">📄 Vaswani et al. (2017) — Attention Is All You Need.pdf</span>
-              <span class="workbench-tab">🕸️ Paper Relations Network</span>
+              <span id="tab-active-paper" class="workbench-tab active">📄 Vaswani et al. (2017) — Attention Is All You Need.pdf</span>
             </div>
           </div>
 
@@ -185,8 +184,8 @@
             <!-- Left Pane: Simulated Zotero 10+ PDF Reader -->
             <div id="zotero-reader-pane" class="zotero-reader-pane">
               <div class="reader-toolbar">
-                <span id="reader-status-label">Zotero 10+ Built-in PDF Reader • Page 4 of 15</span>
-                <span class="mono" style="color:var(--text-muted);">Scope: Papers Mode (Auto-Anchored)</span>
+                <span id="reader-status-label" class="reader-status-label">📖 Zotero PDF Reader • Page 4 of 15</span>
+                <span id="reader-outline-badge" class="reader-outline-badge">📑 Outline: § 3.2.2</span>
               </div>
 
               <div class="pdf-page-canvas">
@@ -195,10 +194,13 @@
                   <div class="pdf-paper-meta">Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit et al. • NeurIPS 2017</div>
                 </div>
 
-                <div class="pdf-section-heading">3.2.2 Multi-Head Attention</div>
+                <div id="pdf-section-heading" class="pdf-section-heading">
+                  <span class="heading-title">3.2.2 Multi-Head Attention</span>
+                  <span id="pdf-outline-dest-tag" class="pdf-outline-dest-tag">📑 Outline Destination</span>
+                </div>
 
-                <div id="pdf-passage-1" class="pdf-highlight-passage">
-                  "Multi-head attention allows the model to jointly attend to information from different representation subspaces at different positions. With a single attention head, averaging inhibits this."
+                <div id="pdf-passage-1" class="pdf-passage-text">
+                  Multi-head attention allows the model to jointly attend to information from different representation subspaces at different positions. With a single attention head, averaging inhibits this.
                 </div>
 
                 <div id="pdf-passage-2" class="pdf-equation-text">
@@ -276,9 +278,9 @@
                   <div class="evidence-popover" aria-live="polite">
                     <div class="popover-top">
                       <span id="popover-doc-title" class="popover-doc-title">Vaswani et al. (2017) — Attention Is All You Need</span>
-                      <span id="popover-confidence" class="confidence-badge">Verified Support: 94%</span>
+                      <span id="popover-confidence" class="confidence-badge">Support Probability: 0.94</span>
                     </div>
-                    <div id="popover-section" class="popover-section-crumb">§ 3.2.2 Multi-Head Attention (Lines 142–168)</div>
+                    <div id="popover-section" class="popover-section-crumb">§ 3.2.2 Multi-Head Attention</div>
                     <blockquote id="popover-quote" class="popover-quote">
                       "Multi-head attention allows the model to jointly attend to information from different representation subspaces at different positions. With a single attention head, averaging inhibits this."
                     </blockquote>
@@ -329,7 +331,7 @@
               <!-- Active Context Chips Row (Positioned right above the message input bar, faithful to Zocrates) -->
               <div class="chips-strip">
                 <span style="color:var(--text-muted); font-weight:600;">Active Context:</span>
-                <span class="context-chip">📄 Vaswani et al. (2017)</span>
+                <span id="chip-active-paper" class="context-chip">📄 Vaswani et al. (2017)</span>
                 <span class="context-chip">📄 Dao et al. (2022)</span>
                 <span class="context-chip excerpt-pill">🖼️ Crop: Fig. 2 Head Ablation (p. 4) ✕</span>
               </div>
@@ -830,7 +832,7 @@
           <article class="bento-card span-6">
             <div>
               <span class="bento-tag">SelfCompact Algorithm • Zero-Latency Background Optimization</span>
-              <h3>Adaptive Context Compaction &amp; 50+ Turn Scaling</h3>
+              <h3>Adaptive Context Compaction for Long Sessions</h3>
               <p style="margin-top:0.5rem;">
                 Extended multi-turn literature reviews quickly hit model context limits or inflate token costs. Running in the background with zero latency impact, an AI decision model evaluates topic closure to compact earlier turns while retaining the latest completed turns 100% verbatim. Raw search loops and chunk payloads are consolidated, keeping multi-hour research conversations fast, affordable, and context-rich.
               </p>
