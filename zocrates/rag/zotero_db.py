@@ -12,8 +12,10 @@ import os
 import re
 import shutil
 import sqlite3
+import sys
 import tempfile
 import threading
+import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -228,7 +230,7 @@ def _get_connection(sqlite_path: Path) -> sqlite3.Connection:
             try:
                 sig = _sqlite_snapshot_signature(sqlite_path)
                 if cached[1] == sig:
-                    conn = sqlite3.connect(cached[0], timeout=1.0)
+                    conn = sqlite3.connect(cached[0], timeout=5.0)
                     conn.row_factory = sqlite3.Row
                     return conn
             except (OSError, sqlite3.Error):
@@ -246,7 +248,8 @@ def _get_connection(sqlite_path: Path) -> sqlite3.Connection:
         # query (edge lock states) should fall through to the snapshot tier
         # instead of raising deep inside a sync pipeline.
         try:
-            conn.execute("SELECT 1")
+            conn.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchone()
+            conn.execute("PRAGMA busy_timeout = 5000;")
             return conn
         except sqlite3.Error:
             conn.close()
@@ -309,19 +312,76 @@ def _open_db(sqlite_path: Path) -> Iterator[sqlite3.Connection]:
 # ---------------------------------------------------------------------------
 
 _sqlite_snapshot_lock = threading.Lock()
-# source path -> (temp DB path, (main mtime_ns, wal size)) signature
-_sqlite_snapshots: dict[str, tuple[str, tuple[int, int]]] = {}
+# source path -> (temp DB path, (main mtime_ns, wal size, wal mtime_ns)) signature
+_sqlite_snapshots: dict[str, tuple[str, tuple[int, int, int]]] = {}
+_swept_stale_snapshots = False
+
+
+def _is_pid_alive(pid: int) -> bool:
+    """Check whether a process with the given PID is currently alive."""
+    if pid <= 0:
+        return False
+    try:
+        import psutil
+
+        return psutil.pid_exists(pid)
+    except Exception:
+        pass
+    if sys.platform == "win32":
+        return True
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def _sweep_stale_sqlite_snapshots() -> None:
+    """Scan and clean up orphaned snapshot temp directories from dead processes or legacy runs."""
+    try:
+        temp_dir = Path(tempfile.gettempdir())
+        now = time.time()
+        for entry in temp_dir.iterdir():
+            try:
+                if not entry.is_dir() or not entry.name.startswith("zocrates-zdb-"):
+                    continue
+                try:
+                    st = entry.stat()
+                except OSError:
+                    continue
+                if hasattr(st, "st_uid") and hasattr(os, "getuid") and st.st_uid != os.getuid():
+                    continue
+                m = re.match(r"^zocrates-zdb-(\d+)-", entry.name)
+                if m:
+                    pid = int(m.group(1))
+                    if not _is_pid_alive(pid):
+                        shutil.rmtree(entry, ignore_errors=True)
+                else:
+                    # Legacy snapshot directory without PID segment
+                    try:
+                        if now - st.st_mtime > 86400:
+                            shutil.rmtree(entry, ignore_errors=True)
+                    except OSError:
+                        pass
+            except (OSError, PermissionError):
+                pass
+    except Exception:
+        pass
 
 
 def _sqlite_snapshot_signature(sqlite_path: Path) -> tuple[int, int, int]:
     """Signature used to invalidate cached snapshots: main mtime + WAL size + WAL mtime."""
     st = sqlite_path.stat()
     wal_path = Path(str(sqlite_path) + "-wal")
-    if wal_path.exists():
+    try:
         wal_st = wal_path.stat()
         wal_size = wal_st.st_size
         wal_mtime = wal_st.st_mtime_ns
-    else:
+    except FileNotFoundError:
         wal_size = 0
         wal_mtime = 0
     return (st.st_mtime_ns, wal_size, wal_mtime)
@@ -329,13 +389,22 @@ def _sqlite_snapshot_signature(sqlite_path: Path) -> tuple[int, int, int]:
 
 def _cleanup_sqlite_snapshots() -> None:
     """Remove all cached snapshot temp files (registered via atexit)."""
-    for tmp_path, _sig in list(_sqlite_snapshots.values()):
-        for suffix in ("", "-wal", "-shm", "-journal"):
+    acquired = _sqlite_snapshot_lock.acquire(timeout=1.0)
+    try:
+        for tmp_path, _sig in list(_sqlite_snapshots.values()):
+            for suffix in ("", "-wal", "-shm", "-journal"):
+                try:
+                    os.remove(tmp_path + suffix)
+                except OSError:
+                    pass
             try:
-                os.remove(tmp_path + suffix)
+                os.rmdir(os.path.dirname(tmp_path))
             except OSError:
                 pass
-    _sqlite_snapshots.clear()
+        _sqlite_snapshots.clear()
+    finally:
+        if acquired:
+            _sqlite_snapshot_lock.release()
 
 
 atexit.register(_cleanup_sqlite_snapshots)
@@ -350,28 +419,52 @@ def _open_snapshot_connection(sqlite_path: Path) -> sqlite3.Connection:
     file mtime or WAL size changes (the fallback regime is by definition a
     static, Zotero-closed state, so the copy cost is paid once).
     """
+    global _swept_stale_snapshots
     with _sqlite_snapshot_lock:
+        if not _swept_stale_snapshots:
+            _swept_stale_snapshots = True
+            _sweep_stale_sqlite_snapshots()
         sig = _sqlite_snapshot_signature(sqlite_path)
         cached = _sqlite_snapshots.get(str(sqlite_path))
         if cached is not None and cached[1] == sig:
-            conn = sqlite3.connect(cached[0], timeout=5)
+            conn = sqlite3.connect(cached[0], timeout=5.0)
             conn.row_factory = sqlite3.Row
             return conn
-        tmp_dir = tempfile.mkdtemp(prefix="zocrates-zdb-")
+        tmp_dir = tempfile.mkdtemp(prefix=f"zocrates-zdb-{os.getpid()}-")
         tmp_path = os.path.join(tmp_dir, "zotero.sqlite")
-        shutil.copy2(sqlite_path, tmp_path)
-        for suffix in ("-wal", "-journal"):
-            sidecar = Path(str(sqlite_path) + suffix)
-            if sidecar.exists():
-                shutil.copy2(sidecar, tmp_path + suffix)
+        conn: sqlite3.Connection | None = None
+        try:
+            shutil.copy2(sqlite_path, tmp_path)
+            for suffix in ("-wal", "-journal"):
+                sidecar = Path(str(sqlite_path) + suffix)
+                try:
+                    if sidecar.exists():
+                        shutil.copy2(sidecar, tmp_path + suffix)
+                except FileNotFoundError:
+                    pass
+            conn = sqlite3.connect(tmp_path, timeout=5.0)
+            conn.row_factory = sqlite3.Row
+            conn.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchone()
+        except BaseException:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise
+
+        # Only after the new snapshot is copied and verified:
         if cached is not None:
             for suffix in ("", "-wal", "-shm", "-journal"):
                 try:
                     os.remove(cached[0] + suffix)
                 except OSError:
                     pass
-        conn = sqlite3.connect(tmp_path, timeout=5)
-        conn.row_factory = sqlite3.Row
+            try:
+                os.rmdir(os.path.dirname(cached[0]))
+            except OSError:
+                pass
         _sqlite_snapshots[str(sqlite_path)] = (tmp_path, sig)
         return conn
 

@@ -180,6 +180,15 @@ AGENT_DIR = os.path.dirname(os.path.abspath(__file__))
 # ---------------------------------------------------------------------------
 
 
+def _safe_cleanup_snapshots() -> None:
+    try:
+        from zocrates.rag.zotero_db import _cleanup_sqlite_snapshots
+
+        _cleanup_sqlite_snapshots()
+    except Exception:
+        pass
+
+
 def _parent_watchdog(
     parent_pid: int,
     poll_interval: float = 2.0,
@@ -195,6 +204,7 @@ def _parent_watchdog(
         handle = kernel32.OpenProcess(SYNCHRONIZE, False, parent_pid)
         if not handle:
             logger.info("Parent process %d handle unavailable. Exiting backend.", parent_pid)
+            _safe_cleanup_snapshots()
             exit_fn(0)
             return
         try:
@@ -204,6 +214,7 @@ def _parent_watchdog(
                 ret = kernel32.WaitForSingleObject(handle, timeout_ms)
                 if ret != 0x00000102:
                     logger.info("Parent Zotero process %d terminated. Exiting backend.", parent_pid)
+                    _safe_cleanup_snapshots()
                     exit_fn(0)
                     return
         finally:
@@ -215,6 +226,7 @@ def _parent_watchdog(
                 os.kill(parent_pid, 0)
             except ProcessLookupError:
                 logger.info("Parent Zotero process %d terminated. Exiting backend.", parent_pid)
+                _safe_cleanup_snapshots()
                 exit_fn(0)
                 return
             except PermissionError:
@@ -222,6 +234,7 @@ def _parent_watchdog(
             except OSError as exc:
                 if exc.errno == errno.ESRCH:
                     logger.info("Parent Zotero process %d terminated. Exiting backend.", parent_pid)
+                    _safe_cleanup_snapshots()
                     exit_fn(0)
                     return
 
@@ -229,15 +242,22 @@ def _parent_watchdog(
 def _trigger_shutdown() -> None:
     """Terminate the process after sending the shutdown response."""
     logger.info("Executing scheduled backend shutdown.")
+
+    def _force_exit() -> None:
+        _safe_cleanup_snapshots()
+        os._exit(0)
+
     try:
         import signal
 
         if hasattr(signal, "SIGTERM") and sys.platform != "win32":
-            threading.Timer(2.0, lambda: os._exit(0)).start()
+            threading.Timer(2.0, _force_exit).start()
+            _safe_cleanup_snapshots()
             os.kill(os.getpid(), signal.SIGTERM)
             return
     except Exception as exc:
         logger.warning("Error signaling SIGTERM: %s. Forcing exit.", exc)
+    _safe_cleanup_snapshots()
     os._exit(0)
 
 
@@ -389,6 +409,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         pass  # Not initialized, nothing to clean up
     except Exception as exc:
         logger.warning("Error during shutdown cleanup: %s", exc)
+
+    _safe_cleanup_snapshots()
 
 
 # ---------------------------------------------------------------------------

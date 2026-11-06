@@ -2469,13 +2469,27 @@ class TestBackendLifecycleEndpoints:
                 assert thread.name == "ZoteroParentWatchdog"
                 assert thread.is_alive()
 
+    def test_safe_cleanup_snapshots(self) -> None:
+        """Verify _safe_cleanup_snapshots invokes _cleanup_sqlite_snapshots and swallows exceptions."""
+        from zocrates.fast_api_app import _safe_cleanup_snapshots
+
+        with patch("zocrates.rag.zotero_db._cleanup_sqlite_snapshots") as mock_cleanup:
+            _safe_cleanup_snapshots()
+            mock_cleanup.assert_called_once()
+
+        with patch("zocrates.rag.zotero_db._cleanup_sqlite_snapshots", side_effect=RuntimeError("boom")):
+            # Must not raise
+            _safe_cleanup_snapshots()
+
     def test_parent_watchdog_terminates_on_dead_process(self) -> None:
         """Verify _parent_watchdog calls exit_fn(0) when parent PID does not exist."""
         from zocrates.fast_api_app import _parent_watchdog
 
         mock_exit = MagicMock()
-        with patch("os.kill", side_effect=ProcessLookupError):
+        with patch("os.kill", side_effect=ProcessLookupError), \
+             patch("zocrates.fast_api_app._safe_cleanup_snapshots") as mock_cleanup:
             _parent_watchdog(parent_pid=999999, poll_interval=0.001, exit_fn=mock_exit)
+            mock_cleanup.assert_called_once()
             mock_exit.assert_called_once_with(0)
 
     @pytest.mark.asyncio
