@@ -4240,54 +4240,423 @@ function selectItemInZotero(itemKey) {
   }
 }
 
-function openItemInReader(attachmentKey) {
-  if (!attachmentKey) return;
-  try {
-    const zot = resolveZotero();
-    if (!zot) {
-      console.warn("Zocrates: Zotero object not found for openItemInReader");
-      return;
-    }
-    const reader = zot.Reader || window.top?.Zotero?.Reader || window.parent?.Zotero?.Reader;
-    if (!reader || typeof reader.open !== "function") {
-      console.warn("Zocrates: Zotero.Reader.open not available");
-      return;
-    }
+// Module-level in-flight tracker to coalesce duplicate clicks and avoid race conditions
+const _activeReaderNavigations = new Map();
 
-    let item = null;
-    if (zot.Items && typeof zot.Items.getByLibraryAndKey === "function") {
-      try {
-        const userLibID = zot.Libraries?.userLibraryID;
-        if (userLibID !== undefined) {
-          item = zot.Items.getByLibraryAndKey(userLibID, attachmentKey);
+function extractLeafHeading(rawSection, documentTitle = "") {
+  if (!rawSection || typeof rawSection !== "string") return { leaf: "", parents: [] };
+  let clean = rawSection.trim();
+  // Strip leading section symbols and Markdown formatting
+  clean = clean.replace(/^§\s*/, "").replace(/[*`_]/g, "").replace(/\$[^$]*\$/g, "");
+
+  // Take the last component of a hierarchy breadcrumb
+  let parents = [];
+  if (clean.includes(" > ")) {
+    const parts = clean.split(" > ").map(p => p.trim()).filter(Boolean);
+    clean = parts.pop() || "";
+    parents = parts;
+  }
+  clean = clean.replace(/^§\s*/, "").trim();
+
+  // Ignore synthetic or document-level labels
+  const lower = clean.toLowerCase();
+  if (
+    !clean ||
+    lower === "frontmatter" ||
+    lower === "full document" ||
+    lower === "abstract" ||
+    /^(?:figure|table)\s+\d/i.test(clean)
+  ) {
+    return { leaf: "", parents: [] };
+  }
+
+  // If the leaf heading simply equals the document title, skip it
+  if (documentTitle && normalizeForComparison(clean) === normalizeForComparison(documentTitle)) {
+    return { leaf: "", parents: [] };
+  }
+
+  return { leaf: clean, parents };
+}
+
+function normalizeForComparison(str) {
+  if (!str) return "";
+  return str
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "") // strip combining diacritics
+    .replace(/[^\p{L}\p{N}\s]/gu, " ") // Unicode-aware letter/number filtering
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function parseHeadingParts(rawTitle) {
+  const clean = (rawTitle || "").trim().replace(/^§\s*/, "");
+  if (!clean) return { numbering: null, core: "" };
+
+  // Case 1: The entire heading is purely a section number (e.g. "3.2.2", "III", "Appendix B", "B.1")
+  const pureNumMatch = clean.match(/^(?:[Aa]ppendix\s+[A-Z]|[IVXLCDM]+(?:[\.\-][\dA-Za-z]+)*|\d+(?:[\.\-][\dA-Za-z]+)*|[A-Z](?:[\.\-][\dA-Za-z]+)+)$/);
+  if (pureNumMatch) {
+    return {
+      numbering: clean.toLowerCase().replace(/[^a-z0-9\.\-]/g, "").replace(/[\.\-]+$/, ""),
+      core: ""
+    };
+  }
+
+  // Case 2: Numbering prefix followed by title.
+  // Match Arabic (3.2.2), uppercase Roman (III, IV.B), or uppercase Lettered (Appendix B, B.1, A.)
+  // Explicitly case-sensitive to avoid matching common words like "Mix of Experts" or "A Survey"
+  const numMatch = clean.match(/^((?:[Aa]ppendix\s+[A-Z]|[IVXLCDM]+(?:[\.\-][\dA-Za-z]+)*|\d+(?:[\.\-][\dA-Za-z]+)*|[A-Z](?:[\.\-][\dA-Za-z]+)+)[\.\:\s\-\)]+|[A-Z][\.\:\-\)][\.\:\s\-\)]*)(.*)$/);
+  if (numMatch) {
+    return {
+      numbering: numMatch[1].toLowerCase().replace(/[^a-z0-9\.\-]/g, "").replace(/[\.\-]+$/, ""),
+      core: normalizeForComparison(numMatch[2])
+    };
+  }
+
+  return {
+    numbering: null,
+    core: normalizeForComparison(clean)
+  };
+}
+
+function findOutlineDestination(outlineNodes, targetHeading, parentHeadings = []) {
+  if (!Array.isArray(outlineNodes) || outlineNodes.length === 0 || !targetHeading) return null;
+
+  const targetParts = parseHeadingParts(targetHeading);
+  const targetCore = targetParts.core;
+  if (!targetCore && !targetParts.numbering) return null;
+
+  const targetParentsNorm = parentHeadings.map(p => normalizeForComparison(p)).filter(Boolean);
+  const candidates = [];
+
+  function traverse(nodes, parentChain = []) {
+    for (const node of nodes) {
+      if (!node) continue;
+      const rawTitle = node.title || "";
+      const dest = node.dest || node.location?.dest || null;
+
+      if (rawTitle && dest) {
+        const nodeParts = parseHeadingParts(rawTitle);
+        let score = 0;
+
+        // Tier 1: Exact core title match + exact numbering match (Highest confidence: 100)
+        if (targetParts.numbering && nodeParts.numbering && targetParts.numbering === nodeParts.numbering) {
+          if (targetCore && nodeParts.core && targetCore === nodeParts.core) {
+            score = 100;
+          } else if (!targetCore || !nodeParts.core) {
+            score = 80;
+          } else {
+            score = -1; // Number matches but title differs significantly -> reject
+          }
         }
-      } catch (_) {}
-      if (!item && zot.Libraries?.getAll) {
-        try {
-          for (const lib of zot.Libraries.getAll()) {
-            const cand = zot.Items.getByLibraryAndKey(lib.id, attachmentKey);
-            if (cand) {
-              item = cand;
-              break;
+        // Tier 2: Exact core title match (Score: 70)
+        // If BOTH have numbering but they conflict (e.g. "3.2 Results" vs "4.2 Results"), reject
+        else if (targetCore && nodeParts.core && targetCore === nodeParts.core) {
+          if (targetParts.numbering && nodeParts.numbering && targetParts.numbering !== nodeParts.numbering) {
+            score = -1;
+          } else {
+            score = 70;
+          }
+        }
+        // Tier 3: Token-boundary core containment for multi-word titles (min 8 chars) (Score: 40)
+        else if (targetCore && nodeParts.core && targetCore.length >= 8 && nodeParts.core.length >= 8) {
+          const coreRegex = new RegExp(`\\b${escapeRegex(targetCore)}\\b`, "i");
+          const nodeRegex = new RegExp(`\\b${escapeRegex(nodeParts.core)}\\b`, "i");
+          if (coreRegex.test(nodeParts.core) || nodeRegex.test(targetCore)) {
+            if (targetParts.numbering && nodeParts.numbering && targetParts.numbering !== nodeParts.numbering) {
+              score = -1;
+            } else {
+              score = 40;
             }
           }
-        } catch (_) {}
+        }
+
+        // Parent chain corroboration bonus (+10 per matching parent)
+        if (score > 0 && targetParentsNorm.length > 0 && parentChain.length > 0) {
+          for (const p of parentChain) {
+            const pNorm = normalizeForComparison(p);
+            if (targetParentsNorm.some(tp => tp === pNorm || pNorm.includes(tp))) {
+              score += 10;
+            }
+          }
+        }
+
+        if (score >= 40) {
+          candidates.push({ node, dest, score, title: rawTitle });
+        }
+      }
+
+      if (Array.isArray(node.items) && node.items.length > 0) {
+        traverse(node.items, [...parentChain, rawTitle]);
+      }
+    }
+  }
+
+  traverse(outlineNodes, []);
+
+  if (candidates.length === 0) return null;
+
+  // Sort descending by score
+  candidates.sort((a, b) => b.score - a.score);
+
+  // If the top score is tied between two distinct destinations, reject to prevent jumping to wrong section
+  if (candidates.length > 1 && candidates[0].score === candidates[1].score) {
+    if (JSON.stringify(candidates[0].dest) !== JSON.stringify(candidates[1].dest)) {
+      return null;
+    }
+  }
+
+  return candidates[0].dest;
+}
+
+function findHtmlSnapshotHeading(doc, targetHeading) {
+  if (!doc || !targetHeading) return null;
+
+  const targetParts = parseHeadingParts(targetHeading);
+  const targetCore = targetParts.core;
+  if (!targetCore && !targetParts.numbering) return null;
+
+  let headings = [];
+  try {
+    const rawHeadings = doc.querySelectorAll("h1, h2, h3, h4, h5, h6, [role='heading']");
+    if (rawHeadings && rawHeadings.length > 0) {
+      headings = Array.from(rawHeadings);
+    }
+  } catch (_) {}
+
+  // Fallback for mock DOM or environments where comma-separated selector isn't supported
+  if (headings.length === 0) {
+    const selectors = ["h1", "h2", "h3", "h4", "h5", "h6", "[role='heading']"];
+    for (const sel of selectors) {
+      try {
+        const found = doc.querySelectorAll(sel);
+        if (found && found.length > 0) {
+          headings.push(...Array.from(found));
+        }
+      } catch (_) {}
+    }
+  }
+
+  if (headings.length === 0) return null;
+
+  let bestEl = null;
+  let bestScore = -1;
+
+  for (const el of headings) {
+    const rawText = el.textContent || "";
+    const nodeParts = parseHeadingParts(rawText);
+    let score = 0;
+
+    if (targetParts.numbering && nodeParts.numbering && targetParts.numbering === nodeParts.numbering) {
+      if (targetCore && nodeParts.core && targetCore === nodeParts.core) {
+        score = 100;
+      } else if (!targetCore || !nodeParts.core) {
+        score = 80;
+      } else {
+        score = -1;
+      }
+    } else if (targetCore && nodeParts.core && targetCore === nodeParts.core) {
+      if (targetParts.numbering && nodeParts.numbering && targetParts.numbering !== nodeParts.numbering) {
+        score = -1;
+      } else {
+        score = 70;
+      }
+    } else if (targetCore && nodeParts.core && targetCore.length >= 8 && nodeParts.core.length >= 8) {
+      const coreRegex = new RegExp(`\\b${escapeRegex(targetCore)}\\b`, "i");
+      const nodeRegex = new RegExp(`\\b${escapeRegex(nodeParts.core)}\\b`, "i");
+      if (coreRegex.test(nodeParts.core) || nodeRegex.test(targetCore)) {
+        if (targetParts.numbering && nodeParts.numbering && targetParts.numbering !== nodeParts.numbering) {
+          score = -1;
+        } else {
+          score = 40;
+        }
       }
     }
 
-    if (item) {
-      if (!item.isAttachment?.() && typeof item.getAttachments === "function") {
-        const attIDs = item.getAttachments();
-        if (attIDs && attIDs.length > 0) {
-          reader.open(attIDs[0]);
-          return;
+    if (score > bestScore) {
+      bestScore = score;
+      bestEl = el;
+    }
+  }
+
+  return bestScore >= 40 ? bestEl : null;
+}
+
+function openItemInReader(attachmentKey, rawSection) {
+  if (!attachmentKey) return;
+
+  const coalescingKey = `${attachmentKey}|${rawSection || ""}`;
+  // Debounce/coalesce concurrent clicks on the same attachment and section
+  if (_activeReaderNavigations.has(coalescingKey)) {
+    return _activeReaderNavigations.get(coalescingKey);
+  }
+
+  const navPromise = (async () => {
+    try {
+      const zot = resolveZotero();
+      if (!zot) {
+        console.warn("Zocrates: Zotero object not found for openItemInReader");
+        return;
+      }
+      const reader = zot.Reader || window.top?.Zotero?.Reader || window.parent?.Zotero?.Reader;
+      if (!reader || typeof reader.open !== "function") {
+        console.warn("Zocrates: Zotero.Reader.open not available");
+        return;
+      }
+
+      // 1. Resolve Zotero attachment item
+      let item = null;
+      if (zot.Items && typeof zot.Items.getByLibraryAndKey === "function") {
+        try {
+          const userLibID = zot.Libraries?.userLibraryID;
+          if (userLibID !== undefined) {
+            item = zot.Items.getByLibraryAndKey(userLibID, attachmentKey);
+          }
+        } catch (_) {}
+        if (!item && zot.Libraries?.getAll) {
+          try {
+            for (const lib of zot.Libraries.getAll()) {
+              const cand = zot.Items.getByLibraryAndKey(lib.id, attachmentKey);
+              if (cand) {
+                item = cand;
+                break;
+              }
+            }
+          } catch (_) {}
         }
       }
-      reader.open(item.id);
+
+      let targetItemID = null;
+      let targetAttachment = null;
+      if (item) {
+        if (!item.isAttachment?.() && typeof item.getAttachments === "function") {
+          const attIDs = item.getAttachments();
+          if (attIDs && attIDs.length > 0) {
+            targetItemID = attIDs[0];
+            targetAttachment = zot.Items?.get?.(targetItemID);
+          }
+        } else {
+          targetItemID = item.id;
+          targetAttachment = item;
+        }
+      }
+
+      if (!targetItemID) return;
+
+      let isPdf = Boolean(
+        targetAttachment?.attachmentReaderType === "pdf" ||
+        targetAttachment?.attachmentContentType === "application/pdf" ||
+        (targetAttachment?.attachmentFilename && targetAttachment.attachmentFilename.toLowerCase().endsWith(".pdf")) ||
+        (targetAttachment?.contentType === "application/pdf")
+      );
+
+      let isSnapshot = Boolean(
+        targetAttachment?.attachmentReaderType === "snapshot" ||
+        targetAttachment?.attachmentContentType === "text/html" ||
+        (targetAttachment?.attachmentFilename && (targetAttachment.attachmentFilename.toLowerCase().endsWith(".html") || targetAttachment.attachmentFilename.toLowerCase().endsWith(".htm"))) ||
+        (targetAttachment?.contentType === "text/html")
+      );
+
+      // 2. Open or focus reader tab
+      const readerInstance = await reader.open(targetItemID);
+      if (!readerInstance) return;
+
+      const docTitle = item?.getField?.("title") || item?.getDisplayTitle?.() || "";
+      const { leaf, parents } = extractLeafHeading(rawSection, docTitle);
+      if (!leaf) return;
+
+      // 3. Overall timeout deadline (3.5 seconds)
+      const deadlineMs = 3500;
+      const startTime = Date.now();
+
+      // =====================================================================
+      // BRANCH A: PDF Attachment Navigation via Native Outline
+      // =====================================================================
+      if (isPdf) {
+        let outline = null;
+
+        while (Date.now() - startTime < deadlineMs) {
+          const internalReader = readerInstance._internalReader || readerInstance;
+
+          // Attempt 1: Zotero's cached internal outline
+          if (internalReader?._state?.outline && Array.isArray(internalReader._state.outline) && internalReader._state.outline.length > 0) {
+            outline = internalReader._state.outline;
+            break;
+          }
+
+          // Attempt 2: PDFViewerApplication.pdfDocument.getOutline()
+          const iframeWin = internalReader?._primaryView?._iframeWindow;
+          const pdfViewerApp = iframeWin?.wrappedJSObject?.PDFViewerApplication || iframeWin?.PDFViewerApplication;
+          const pdfDoc = pdfViewerApp?.pdfDocument;
+
+          if (pdfDoc && typeof pdfDoc.getOutline === "function") {
+            try {
+              const docOutline = await pdfDoc.getOutline();
+              if (Array.isArray(docOutline) && docOutline.length > 0) {
+                outline = docOutline;
+                break;
+              }
+            } catch (_) {}
+          }
+
+          await new Promise(resolve => setTimeout(resolve, 120));
+        }
+
+        if (!outline || !Array.isArray(outline) || outline.length === 0) return;
+
+        const dest = findOutlineDestination(outline, leaf, parents);
+        if (!dest) return;
+
+        const internalReader = readerInstance._internalReader || readerInstance;
+        // Execute destination jump (Zero highlighting)
+        if (typeof internalReader.navigate === "function") {
+          internalReader.navigate({ dest });
+        } else {
+          const iframeWin = internalReader?._primaryView?._iframeWindow;
+          const pdfViewerApp = iframeWin?.wrappedJSObject?.PDFViewerApplication || iframeWin?.PDFViewerApplication;
+          const linkService = pdfViewerApp?.pdfLinkService;
+
+          if (linkService && typeof linkService.goToDestination === "function") {
+            await linkService.goToDestination(dest);
+          }
+        }
+      }
+
+      // =====================================================================
+      // BRANCH B: HTML Web Snapshot Navigation via DOM scrollIntoView
+      // =====================================================================
+      else if (isSnapshot) {
+        while (Date.now() - startTime < deadlineMs) {
+          const internalReader = readerInstance._internalReader || readerInstance;
+          const iframeDoc = internalReader?._primaryView?._iframeWindow?.document ||
+                            internalReader?._iframeWindow?.document ||
+                            internalReader?.document;
+
+          if (iframeDoc && iframeDoc.readyState === "complete") {
+            const matchedEl = findHtmlSnapshotHeading(iframeDoc, leaf);
+            if (matchedEl && typeof matchedEl.scrollIntoView === "function") {
+              matchedEl.scrollIntoView({ behavior: "smooth", block: "start" });
+            }
+            break; // Stop polling once document is complete
+          }
+
+          await new Promise(resolve => setTimeout(resolve, 120));
+        }
+      }
+    } catch (err) {
+      console.warn("Zocrates: openItemInReader navigation error:", err);
     }
-  } catch (err) {
-    console.warn("Zocrates: openItemInReader error:", err);
-  }
+  })();
+
+  _activeReaderNavigations.set(coalescingKey, navPromise);
+  navPromise.finally(() => {
+    _activeReaderNavigations.delete(coalescingKey);
+  });
+  return navPromise;
 }
 
 
@@ -5387,6 +5756,9 @@ function showEvidencePopover(pill, citation) {
     const readerBtn = document.createElementNS(XHTMLNS, "button");
     readerBtn.className = "evidence-popover-btn popover-open-reader-btn";
     readerBtn.setAttribute("data-attachment-key", attKey);
+    if (sec) {
+      readerBtn.setAttribute("data-section", sec);
+    }
     readerBtn.setAttribute("type", "button");
     readerBtn.textContent = "Open in Reader";
     footerDiv.appendChild(readerBtn);
@@ -13692,7 +14064,8 @@ document.addEventListener("click", (e) => {
   if (popoverReaderBtn) {
     e.stopPropagation();
     const attKey = popoverReaderBtn.dataset.attachmentKey || popoverReaderBtn.getAttribute("data-attachment-key");
-    openItemInReader(attKey);
+    const section = popoverReaderBtn.dataset.section || popoverReaderBtn.getAttribute("data-section");
+    openItemInReader(attKey, section);
     return;
   }
 
@@ -13757,6 +14130,12 @@ if (typeof module !== "undefined" && module.exports) {
     updateGhostVisibility,
     showEvidencePopover,
     closeEvidencePopover,
+    extractLeafHeading,
+    normalizeForComparison,
+    parseHeadingParts,
+    findOutlineDestination,
+    findHtmlSnapshotHeading,
+    openItemInReader,
     stripCitationsFromText,
     buildReferencesMarkdown,
     getMessageTextForCopy,

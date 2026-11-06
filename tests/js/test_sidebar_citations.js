@@ -3,7 +3,7 @@
  */
 
 const assert = require("assert");
-const { test, getTestStats, printTestSummary, createMockElement, setupMockEnvironment } = require("./test_helpers.js");
+const { test, testAsync, getTestStats, printTestSummary, createMockElement, setupMockEnvironment } = require("./test_helpers.js");
 
 async function runTests() {
   console.log("\n--- Suite: Sidebar Citations & Evidence Peeks ---");
@@ -144,6 +144,7 @@ async function runTests() {
     assert.ok(readerBtn);
     assert.strictEqual(readerBtn.textContent, "Open in Reader");
     assert.strictEqual(readerBtn.getAttribute("data-attachment-key"), "ATT_FA2");
+    assert.strictEqual(readerBtn.getAttribute("data-section"), "Hardware Benchmarks");
 
     const selectBtn = popover.querySelector(".popover-select-item-btn");
     assert.ok(selectBtn);
@@ -246,6 +247,314 @@ async function runTests() {
     for (const match of pillTitleMatches) {
       assert.ok(!match.includes("\n"), "Title attribute must not contain raw unencoded newlines");
       assert.ok(!match.includes("\r"), "Title attribute must not contain raw unencoded carriage returns");
+    }
+  });
+
+  // 7. extractLeafHeading & normalizeForComparison
+  test("extractLeafHeading: extracts leaf headings, breadcrumbs, strips symbols, and rejects synthetic labels", () => {
+    // Single heading
+    const single = sidebar.extractLeafHeading("3.2.2 Multi-Head Attention");
+    assert.strictEqual(single.leaf, "3.2.2 Multi-Head Attention");
+    assert.deepStrictEqual(single.parents, []);
+
+    // Breadcrumbs
+    const crumbs = sidebar.extractLeafHeading("A > B > C");
+    assert.strictEqual(crumbs.leaf, "C");
+    assert.deepStrictEqual(crumbs.parents, ["A", "B"]);
+
+    const deepCrumbs = sidebar.extractLeafHeading("Attention Is All You Need > 3 Model Architecture > 3.2 Attention > 3.2.2 Multi-Head Attention");
+    assert.strictEqual(deepCrumbs.leaf, "3.2.2 Multi-Head Attention");
+    assert.deepStrictEqual(deepCrumbs.parents, ["Attention Is All You Need", "3 Model Architecture", "3.2 Attention"]);
+
+    // Section symbol
+    const secSym = sidebar.extractLeafHeading("§ 4.1");
+    assert.strictEqual(secSym.leaf, "4.1");
+    assert.deepStrictEqual(secSym.parents, []);
+
+    const secSymWithCrumbs = sidebar.extractLeafHeading("Paper > § 4.1 Setup");
+    assert.strictEqual(secSymWithCrumbs.leaf, "4.1 Setup");
+    assert.deepStrictEqual(secSymWithCrumbs.parents, ["Paper"]);
+
+    // Markdown symbols and math formatting
+    const formatted = sidebar.extractLeafHeading("§ *4.2* `$W_i^Q$` `Projections`");
+    assert.strictEqual(formatted.leaf, "4.2  Projections");
+
+    // Real sections starting with Table / Figure should NOT be rejected
+    assert.strictEqual(sidebar.extractLeafHeading("Table Detection Methods").leaf, "Table Detection Methods");
+    assert.strictEqual(sidebar.extractLeafHeading("Figure Generation Algorithms").leaf, "Figure Generation Algorithms");
+
+    // Synthetic or document-level labels return empty leaf
+    assert.deepStrictEqual(sidebar.extractLeafHeading("Frontmatter"), { leaf: "", parents: [] });
+    assert.deepStrictEqual(sidebar.extractLeafHeading("Full Document"), { leaf: "", parents: [] });
+    assert.deepStrictEqual(sidebar.extractLeafHeading("Abstract"), { leaf: "", parents: [] });
+    assert.deepStrictEqual(sidebar.extractLeafHeading("Figure 3: Attention diagram"), { leaf: "", parents: [] });
+    assert.deepStrictEqual(sidebar.extractLeafHeading("Table 1: BLEU scores"), { leaf: "", parents: [] });
+    assert.deepStrictEqual(sidebar.extractLeafHeading(""), { leaf: "", parents: [] });
+    assert.deepStrictEqual(sidebar.extractLeafHeading(null), { leaf: "", parents: [] });
+
+    // Document title match returns empty leaf
+    const docTitleMatch = sidebar.extractLeafHeading("Deep Residual Learning for Image Recognition", "Deep Residual Learning for Image Recognition");
+    assert.deepStrictEqual(docTitleMatch, { leaf: "", parents: [] });
+
+    // normalizeForComparison
+    assert.strictEqual(sidebar.normalizeForComparison("Café naïve résumé"), "cafe naive resume");
+    assert.strictEqual(sidebar.normalizeForComparison("Multi-Head  Attention: [2023]"), "multi head attention 2023");
+    assert.strictEqual(sidebar.normalizeForComparison(""), "");
+    assert.strictEqual(sidebar.normalizeForComparison(null), "");
+  });
+
+  // 8. parseHeadingParts
+  test("parseHeadingParts: isolates numbering and core titles, preserving unnumbered words via case sensitivity", () => {
+    // Numbered
+    const numbered = sidebar.parseHeadingParts("3.2.2 Multi-Head Attention");
+    assert.strictEqual(numbered.numbering, "3.2.2");
+    assert.strictEqual(numbered.core, "multi head attention");
+
+    // Roman
+    const roman = sidebar.parseHeadingParts("III. Methodology");
+    assert.strictEqual(roman.numbering, "iii");
+    assert.strictEqual(roman.core, "methodology");
+
+    // Appendix
+    const appendix = sidebar.parseHeadingParts("Appendix B. Implementation");
+    assert.strictEqual(appendix.numbering, "appendixb");
+    assert.strictEqual(appendix.core, "implementation");
+
+    // Unnumbered
+    const unnumbered = sidebar.parseHeadingParts("Discussion");
+    assert.strictEqual(unnumbered.numbering, null);
+    assert.strictEqual(unnumbered.core, "discussion");
+
+    // Pure numbering
+    const pureNum = sidebar.parseHeadingParts("3.2.2");
+    assert.strictEqual(pureNum.numbering, "3.2.2");
+    assert.strictEqual(pureNum.core, "");
+
+    const pureRoman = sidebar.parseHeadingParts("IV");
+    assert.strictEqual(pureRoman.numbering, "iv");
+    assert.strictEqual(pureRoman.core, "");
+
+    // Case-sensitive guard: words like "Mix of Experts" or "A Survey" must NOT have their first word falsely stripped as numbering
+    const moe = sidebar.parseHeadingParts("Mix of Experts");
+    assert.strictEqual(moe.numbering, null);
+    assert.strictEqual(moe.core, "mix of experts");
+
+    const survey = sidebar.parseHeadingParts("A Survey");
+    assert.strictEqual(survey.numbering, null);
+    assert.strictEqual(survey.core, "a survey");
+
+    const simple = sidebar.parseHeadingParts("A Simple Baseline for Speech");
+    assert.strictEqual(simple.numbering, null);
+    assert.strictEqual(simple.core, "a simple baseline for speech");
+
+    // Explicit lettered numbering with punctuation is recognized
+    const letteredWithDot = sidebar.parseHeadingParts("A. Survey of Methods");
+    assert.strictEqual(letteredWithDot.numbering, "a");
+    assert.strictEqual(letteredWithDot.core, "survey of methods");
+
+    const subLettered = sidebar.parseHeadingParts("B.1 Proof of Theorem");
+    assert.strictEqual(subLettered.numbering, "b.1");
+    assert.strictEqual(subLettered.core, "proof of theorem");
+  });
+
+  // 9. findOutlineDestination
+  test("findOutlineDestination: traverses PDF outline with scoring, prefix matching, conflict rejection, and parent disambiguation", () => {
+    const mockOutline = [
+      { title: "1. Introduction", dest: "dest-intro" },
+      {
+        title: "2. Related Work",
+        dest: "dest-related",
+        items: [
+          { title: "2.1 Traditional Methods", dest: "dest-traditional" },
+          { title: "2.2 Deep Learning", dest: "dest-dl" },
+        ],
+      },
+      {
+        title: "3. Methodology",
+        dest: "dest-method",
+        items: [
+          {
+            title: "3.1 Overview",
+            dest: "dest-overview",
+            items: [
+              { title: "3.1.1 Problem Formulation", dest: "dest-formulation" },
+            ],
+          },
+          { title: "3.2 Multi-Head Attention", dest: "dest-mha" },
+          { title: "Data Processing", dest: "dest-method-dp" },
+        ],
+      },
+      {
+        title: "4. Experiments",
+        dest: "dest-exp",
+        items: [
+          { title: "4.1 Setup", dest: "dest-setup" },
+          { title: "4.2 Results", dest: "dest-results-4.2" },
+          { title: "Data Processing", dest: "dest-exp-dp" },
+        ],
+      },
+      { title: "Discussion and Future Work", dest: "dest-discussion" },
+      { title: "Appendix A. Proofs", dest: "named.dest.appendix" },
+    ];
+
+    // Flat and nested outline exact match
+    assert.strictEqual(sidebar.findOutlineDestination(mockOutline, "1. Introduction"), "dest-intro");
+    assert.strictEqual(sidebar.findOutlineDestination(mockOutline, "3.2 Multi-Head Attention"), "dest-mha");
+    assert.strictEqual(sidebar.findOutlineDestination(mockOutline, "3.1.1 Problem Formulation"), "dest-formulation");
+
+    // Numbered prefix match
+    assert.strictEqual(sidebar.findOutlineDestination(mockOutline, "3.2"), "dest-mha");
+    assert.strictEqual(sidebar.findOutlineDestination(mockOutline, "2.1"), "dest-traditional");
+
+    // Numbering conflict rejection (3.2 Results vs 4.2 Results rejected)
+    assert.strictEqual(sidebar.findOutlineDestination(mockOutline, "3.2 Results"), null);
+
+    // Parent chain disambiguation: duplicate "Data Processing" disambiguated by parent
+    const methodDp = sidebar.findOutlineDestination(mockOutline, "Data Processing", ["3. Methodology"]);
+    assert.strictEqual(methodDp, "dest-method-dp");
+
+    const expDp = sidebar.findOutlineDestination(mockOutline, "Data Processing", ["4. Experiments"]);
+    assert.strictEqual(expDp, "dest-exp-dp");
+
+    // Tied scores across distinct destinations returns null (safe fail-open)
+    const tiedDp = sidebar.findOutlineDestination(mockOutline, "Data Processing", []);
+    assert.strictEqual(tiedDp, null);
+
+    // Named destination string preserved intact
+    assert.strictEqual(sidebar.findOutlineDestination(mockOutline, "Appendix A. Proofs"), "named.dest.appendix");
+
+    // Token-boundary core containment (min 8 chars)
+    assert.strictEqual(sidebar.findOutlineDestination(mockOutline, "Discussion and Future"), "dest-discussion");
+
+    // Unmatched returns null
+    assert.strictEqual(sidebar.findOutlineDestination(mockOutline, "Nonexistent Section"), null);
+    assert.strictEqual(sidebar.findOutlineDestination([], "1. Introduction"), null);
+    assert.strictEqual(sidebar.findOutlineDestination(null, "1. Introduction"), null);
+  });
+
+  // 10. findHtmlSnapshotHeading
+  test("findHtmlSnapshotHeading: locates matching semantic heading in HTML snapshot DOM and rejects conflicts", () => {
+    const doc = createMockElement("div");
+
+    const h1 = createMockElement("h1");
+    h1.textContent = "A Survey of Language Models";
+    doc.appendChild(h1);
+
+    const h2_1 = createMockElement("h2");
+    h2_1.textContent = "1. Introduction";
+    doc.appendChild(h2_1);
+
+    const h2_2 = createMockElement("h2");
+    h2_2.textContent = "2. Architecture Overview";
+    doc.appendChild(h2_2);
+
+    const h3_2_1 = createMockElement("h3");
+    h3_2_1.textContent = "2.1 Attention Layers";
+    doc.appendChild(h3_2_1);
+
+    const h2_3 = createMockElement("h2");
+    h2_3.textContent = "3.2 Results";
+    doc.appendChild(h2_3);
+
+    const roleHeading = createMockElement("div");
+    roleHeading.setAttribute("role", "heading");
+    roleHeading.textContent = "Discussion & Conclusions";
+    doc.appendChild(roleHeading);
+
+    // Matches <h2> in mock DOM
+    assert.strictEqual(sidebar.findHtmlSnapshotHeading(doc, "2. Architecture Overview"), h2_2);
+    assert.strictEqual(sidebar.findHtmlSnapshotHeading(doc, "2.1 Attention Layers"), h3_2_1);
+
+    // Matches unnumbered and role=heading
+    assert.strictEqual(sidebar.findHtmlSnapshotHeading(doc, "Discussion & Conclusions"), roleHeading);
+
+    // Rejects conflicting numbering
+    assert.strictEqual(sidebar.findHtmlSnapshotHeading(doc, "4.2 Results"), null);
+
+    // Returns null if unmatched
+    assert.strictEqual(sidebar.findHtmlSnapshotHeading(doc, "Nonexistent Heading"), null);
+    assert.strictEqual(sidebar.findHtmlSnapshotHeading(null, "1. Introduction"), null);
+    assert.strictEqual(sidebar.findHtmlSnapshotHeading(doc, ""), null);
+  });
+
+  // 11. openItemInReader & click delegation
+  await testAsync("openItemInReader: coalesces duplicate clicks, queries PDF outline, and jumps to section destination", async () => {
+    const origReader = env.window.Zotero?.Reader;
+    const origGetByLib = env.window.Zotero?.Items?.getByLibraryAndKey;
+    let goToDestinationCalledWith = null;
+    let readerOpenedWithID = null;
+
+    try {
+      const mockOutline = [
+        { title: "1. Introduction", dest: "dest-intro" },
+        { title: "2. Architecture", dest: "dest-arch" },
+        { title: "3.2 Multi-Head Attention", dest: "dest-mha" },
+      ];
+
+      const mockInternalReader = {
+        _state: { outline: mockOutline },
+        _primaryView: {
+          _iframeWindow: {
+            PDFViewerApplication: {
+              pdfLinkService: {
+                goToDestination: async (dest) => {
+                  goToDestinationCalledWith = dest;
+                },
+              },
+            },
+          },
+        },
+      };
+
+      const mockItem = {
+        id: 991,
+        isAttachment: () => true,
+        attachmentReaderType: "pdf",
+        attachmentContentType: "application/pdf",
+      };
+
+      if (!env.window.Zotero) env.window.Zotero = {};
+      env.window.Zotero.Reader = {
+        open: async (id) => {
+          readerOpenedWithID = id;
+          return mockInternalReader;
+        },
+      };
+      if (!env.window.Zotero.Items) env.window.Zotero.Items = {};
+      env.window.Zotero.Items.getByLibraryAndKey = (libId, key) => (key === "ATT_TEST" ? mockItem : null);
+
+      // Concurrent double-click coalescing
+      const p1 = sidebar.openItemInReader("ATT_TEST", "§ 3.2 Multi-Head Attention");
+      const p2 = sidebar.openItemInReader("ATT_TEST", "§ 3.2 Multi-Head Attention");
+      assert.strictEqual(p1, p2, "Concurrent calls for same key and section must return the same coalesced promise");
+
+      await p1;
+
+      assert.strictEqual(readerOpenedWithID, 991);
+      assert.strictEqual(goToDestinationCalledWith, "dest-mha");
+
+      // Fail-open for synthetic section
+      goToDestinationCalledWith = null;
+      await sidebar.openItemInReader("ATT_TEST", "Frontmatter");
+      assert.strictEqual(goToDestinationCalledWith, null, "Synthetic headings must not trigger outline jump");
+
+      // Verify unresolvable key does not leave dead promise in coalescing map
+      await sidebar.openItemInReader("NON_EXISTENT_KEY", "§ 1 Introduction");
+      // Subsequent call for real key must proceed normally and navigate
+      goToDestinationCalledWith = null;
+      await sidebar.openItemInReader("ATT_TEST", "§ 3.2 Multi-Head Attention");
+      assert.strictEqual(goToDestinationCalledWith, "dest-mha", "Subsequent navigation must succeed after early-return key");
+    } finally {
+      if (origReader !== undefined) {
+        env.window.Zotero.Reader = origReader;
+      } else {
+        delete env.window.Zotero.Reader;
+      }
+      if (origGetByLib !== undefined) {
+        env.window.Zotero.Items.getByLibraryAndKey = origGetByLib;
+      } else if (env.window.Zotero?.Items) {
+        delete env.window.Zotero.Items.getByLibraryAndKey;
+      }
     }
   });
 }
