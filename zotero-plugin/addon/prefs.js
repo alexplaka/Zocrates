@@ -10,6 +10,8 @@ pref("extensions.zocrates.session_titles", "{}");
 pref("extensions.zocrates.last_active_session_id", "");
 pref("zocrates.theme", "auto");
 pref("extensions.zotero.zocrates.theme", "auto");
+pref("zocrates.fontSize", "default");
+pref("extensions.zotero.zocrates.fontSize", "default");
 pref("extensions.zocrates.citationsEnabled", true);
 pref("extensions.zocrates.referencesSectionEnabled", true);
 pref("extensions.zocrates.scholarPoliteEmail", "");

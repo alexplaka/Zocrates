@@ -563,6 +563,7 @@ async function runTests() {
       assert.strictEqual(st.sessionId, "session-detached-999");
       assert.strictEqual(st.contextMode, "papers");
       assert.strictEqual(st.theme, "amoled");
+      assert.strictEqual(st.fontSize, "default");
       assert.strictEqual(st.inputDraft, "Explain topological fault tolerance");
       assert.strictEqual(st.activeItemsList.length, 1);
       assert.strictEqual(st.activeItemsList[0].key, "ITEMX");
@@ -597,6 +598,45 @@ async function runTests() {
         delete global.Zotero.Zocrates._detachedNeedsRefresh;
       }
     }
+  });
+
+  test("font size management: applyFontSize, loadSavedFontSize, and syncFromDetachedState", () => {
+    // 1. applyFontSize updates body attribute and data-selected
+    sidebar.setCurrentFontSizeSetting("large");
+    sidebar.applyFontSize();
+    assert.strictEqual(global.document.body.getAttribute("data-font-size"), "large");
+    assert.strictEqual(sidebar.getCurrentFontSizeSetting(), "large");
+
+    // Invalid size falls back to default
+    sidebar.setCurrentFontSizeSetting("invalid-size");
+    sidebar.applyFontSize();
+    assert.strictEqual(global.document.body.getAttribute("data-font-size"), "default");
+    assert.strictEqual(sidebar.getCurrentFontSizeSetting(), "default");
+
+    // 2. loadSavedFontSize reads from zot.Prefs
+    global.Zotero.Prefs.set("zocrates.fontSize", "small");
+    sidebar.loadSavedFontSize();
+    assert.strictEqual(sidebar.getCurrentFontSizeSetting(), "small");
+    assert.strictEqual(global.document.body.getAttribute("data-font-size"), "small");
+
+    // Falls back to localStorage
+    global.Zotero.Prefs.set("zocrates.fontSize", null);
+    global.localStorage.setItem("zocrates_font_size", "xlarge");
+    sidebar.loadSavedFontSize();
+    assert.strictEqual(sidebar.getCurrentFontSizeSetting(), "xlarge");
+    assert.strictEqual(global.document.body.getAttribute("data-font-size"), "xlarge");
+
+    // 3. syncFromDetachedState syncs font size
+    sidebar.syncFromDetachedState({ fontSize: "large" });
+    assert.strictEqual(sidebar.getCurrentFontSizeSetting(), "large");
+    assert.strictEqual(global.document.body.getAttribute("data-font-size"), "large");
+    assert.strictEqual(global.localStorage.getItem("zocrates_font_size"), "large");
+
+    // Cleanup
+    sidebar.setCurrentFontSizeSetting("default");
+    sidebar.applyFontSize();
+    global.Zotero.Prefs.set("zocrates.fontSize", "default");
+    global.localStorage.setItem("zocrates_font_size", "default");
   });
 
   // 13. message action button ordering (Save Note immediately left of Copy)

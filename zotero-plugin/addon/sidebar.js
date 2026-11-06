@@ -154,6 +154,9 @@ let currentResolvedView = null; // { type: "collection", collections: [...] } or
 const themeMenuOption = document.getElementById("theme-menu-option");
 const themeMenuContainer = document.getElementById("theme-menu-container");
 const themeOptionsDropdown = document.getElementById("theme-options-dropdown");
+const fontSizeMenuOption = document.getElementById("font-size-menu-option");
+const fontSizeMenuContainer = document.getElementById("font-size-menu-container");
+const fontSizeOptionsDropdown = document.getElementById("font-size-options-dropdown");
 const aboutMenuContainer = document.getElementById("about-menu-container");
 const aboutMenuOption = document.getElementById("about-menu-option");
 const aboutOptionsDropdown = document.getElementById("about-options-dropdown");
@@ -10231,9 +10234,56 @@ function loadSavedTheme() {
   }
 }
 
+// Font size management
+let currentFontSizeSetting = "default"; // "small", "default", "large", "xlarge"
+
+function applyFontSize() {
+  const allowedSizes = ["small", "default", "large", "xlarge"];
+  if (!allowedSizes.includes(currentFontSizeSetting)) {
+    currentFontSizeSetting = "default";
+  }
+
+  if (document.body) {
+    document.body.setAttribute("data-font-size", currentFontSizeSetting);
+  }
+
+  const fontSizeOptionBtns = document.querySelectorAll(".font-size-option-btn");
+  fontSizeOptionBtns.forEach(btn => {
+    btn.setAttribute("data-selected", btn.getAttribute("data-font-size") === currentFontSizeSetting ? "true" : "false");
+  });
+
+  if (chatInput) {
+    chatInput.dispatchEvent(new Event("input"));
+  }
+}
+
+function loadSavedFontSize() {
+  let changed = false;
+  try {
+    let savedSize = null;
+    const zot = resolveZotero() || (typeof Zotero !== "undefined" ? Zotero : null);
+    if (zot && zot.Prefs) {
+      savedSize = zot.Prefs.get("zocrates.fontSize") || zot.Prefs.get("extensions.zotero.zocrates.fontSize");
+    }
+    if (!savedSize) {
+      savedSize = localStorage.getItem("zocrates_font_size");
+    }
+    if (savedSize && ["small", "default", "large", "xlarge"].includes(savedSize)) {
+      if (savedSize !== currentFontSizeSetting) {
+        currentFontSizeSetting = savedSize;
+        changed = true;
+      }
+    }
+  } catch (e) {}
+  if (changed || !document.body || !document.body.getAttribute("data-font-size")) {
+    applyFontSize();
+  }
+}
+
 // H5: Capture observer ID for cleanup on unload
 let themePrefsObserverId = null;
 let zocratesThemeObserverId = null;
+let zocratesFontSizeObserverId = null;
 let llmPrefsObserverId = null;
 let llmTimestampObserverId = null;
 let autoRenderMermaidObserverId = null;
@@ -10293,6 +10343,9 @@ try {
     });
     zocratesThemeObserverId = zot.Prefs.registerObserver("zocrates.theme", () => {
       loadSavedTheme();
+    });
+    zocratesFontSizeObserverId = zot.Prefs.registerObserver("zocrates.fontSize", () => {
+      loadSavedFontSize();
     });
     llmPrefsObserverId = zot.Prefs.registerObserver("zocrates.llm_model", () => {
       const savedModel = zot.Prefs.get("zocrates.llm_model");
@@ -10369,17 +10422,26 @@ function positionThemeSubmenu() {
   positionFlyoutSubmenu(themeOptionsDropdown, themeMenuContainer);
 }
 
+function positionFontSizeSubmenu() {
+  positionFlyoutSubmenu(fontSizeOptionsDropdown, fontSizeMenuContainer);
+}
+
 function positionAboutSubmenu() {
   positionFlyoutSubmenu(aboutOptionsDropdown, aboutMenuContainer);
 }
 
 let hideThemeSubmenuTimeout = null;
+let hideFontSizeSubmenuTimeout = null;
 let hideAboutSubmenuTimeout = null;
 
 function clearFlyoutTimeouts() {
   if (hideThemeSubmenuTimeout) {
     clearTimeout(hideThemeSubmenuTimeout);
     hideThemeSubmenuTimeout = null;
+  }
+  if (hideFontSizeSubmenuTimeout) {
+    clearTimeout(hideFontSizeSubmenuTimeout);
+    hideFontSizeSubmenuTimeout = null;
   }
   if (hideAboutSubmenuTimeout) {
     clearTimeout(hideAboutSubmenuTimeout);
@@ -10390,6 +10452,7 @@ function clearFlyoutTimeouts() {
 function hideAllFlyoutSubmenus() {
   clearFlyoutTimeouts();
   if (themeOptionsDropdown) themeOptionsDropdown.classList.add("hidden");
+  if (fontSizeOptionsDropdown) fontSizeOptionsDropdown.classList.add("hidden");
   if (aboutOptionsDropdown) aboutOptionsDropdown.classList.add("hidden");
 }
 
@@ -10397,6 +10460,7 @@ if (themeMenuOption) {
   themeMenuOption.addEventListener("mouseenter", () => {
     clearFlyoutTimeouts();
     if (aboutOptionsDropdown) aboutOptionsDropdown.classList.add("hidden");
+    if (fontSizeOptionsDropdown) fontSizeOptionsDropdown.classList.add("hidden");
     if (themeOptionsDropdown) {
       themeOptionsDropdown.classList.remove("hidden");
       positionThemeSubmenu();
@@ -10407,6 +10471,7 @@ if (themeMenuOption) {
     e.stopPropagation();
     clearFlyoutTimeouts();
     if (aboutOptionsDropdown) aboutOptionsDropdown.classList.add("hidden");
+    if (fontSizeOptionsDropdown) fontSizeOptionsDropdown.classList.add("hidden");
     if (themeOptionsDropdown) {
       const isHidden = themeOptionsDropdown.classList.toggle("hidden");
       if (!isHidden) {
@@ -10445,6 +10510,7 @@ if (aboutMenuOption) {
   aboutMenuOption.addEventListener("mouseenter", () => {
     clearFlyoutTimeouts();
     if (themeOptionsDropdown) themeOptionsDropdown.classList.add("hidden");
+    if (fontSizeOptionsDropdown) fontSizeOptionsDropdown.classList.add("hidden");
     if (aboutOptionsDropdown) {
       aboutOptionsDropdown.classList.remove("hidden");
       positionAboutSubmenu();
@@ -10455,6 +10521,7 @@ if (aboutMenuOption) {
     e.stopPropagation();
     clearFlyoutTimeouts();
     if (themeOptionsDropdown) themeOptionsDropdown.classList.add("hidden");
+    if (fontSizeOptionsDropdown) fontSizeOptionsDropdown.classList.add("hidden");
     if (aboutOptionsDropdown) {
       const isHidden = aboutOptionsDropdown.classList.toggle("hidden");
       if (!isHidden) {
@@ -10503,6 +10570,56 @@ moreActionsSiblingBtns.forEach(btn => {
   }
 });
 
+if (fontSizeMenuOption) {
+  fontSizeMenuOption.addEventListener("mouseenter", () => {
+    clearFlyoutTimeouts();
+    if (themeOptionsDropdown) themeOptionsDropdown.classList.add("hidden");
+    if (aboutOptionsDropdown) aboutOptionsDropdown.classList.add("hidden");
+    if (fontSizeOptionsDropdown) {
+      fontSizeOptionsDropdown.classList.remove("hidden");
+      positionFontSizeSubmenu();
+    }
+  });
+
+  fontSizeMenuOption.addEventListener("click", (e) => {
+    e.stopPropagation();
+    clearFlyoutTimeouts();
+    if (themeOptionsDropdown) themeOptionsDropdown.classList.add("hidden");
+    if (aboutOptionsDropdown) aboutOptionsDropdown.classList.add("hidden");
+    if (fontSizeOptionsDropdown) {
+      const isHidden = fontSizeOptionsDropdown.classList.toggle("hidden");
+      if (!isHidden) {
+        positionFontSizeSubmenu();
+      }
+    }
+  });
+}
+
+if (fontSizeMenuContainer) {
+  fontSizeMenuContainer.addEventListener("mouseleave", () => {
+    if (hideFontSizeSubmenuTimeout) clearTimeout(hideFontSizeSubmenuTimeout);
+    hideFontSizeSubmenuTimeout = setTimeout(() => {
+      if (fontSizeOptionsDropdown) fontSizeOptionsDropdown.classList.add("hidden");
+    }, 400);
+  });
+
+  fontSizeMenuContainer.addEventListener("mouseenter", () => {
+    if (hideFontSizeSubmenuTimeout) {
+      clearTimeout(hideFontSizeSubmenuTimeout);
+      hideFontSizeSubmenuTimeout = null;
+    }
+  });
+}
+
+if (fontSizeOptionsDropdown) {
+  fontSizeOptionsDropdown.addEventListener("mouseenter", () => {
+    if (hideFontSizeSubmenuTimeout) {
+      clearTimeout(hideFontSizeSubmenuTimeout);
+      hideFontSizeSubmenuTimeout = null;
+    }
+  });
+}
+
 const themeOptionBtns = document.querySelectorAll(".theme-option-btn");
 themeOptionBtns.forEach(btn => {
   btn.addEventListener("click", (e) => {
@@ -10520,6 +10637,31 @@ themeOptionBtns.forEach(btn => {
         }
       } catch (err) {}
       applyTheme();
+    }
+    hideAllFlyoutSubmenus();
+    if (moreActionsDropdown) {
+      moreActionsDropdown.classList.add("hidden");
+    }
+  });
+});
+
+const fontSizeOptionBtns = document.querySelectorAll(".font-size-option-btn");
+fontSizeOptionBtns.forEach(btn => {
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const newFontSize = btn.getAttribute("data-font-size");
+    if (newFontSize) {
+      currentFontSizeSetting = newFontSize;
+      try {
+        localStorage.setItem("zocrates_font_size", currentFontSizeSetting);
+      } catch (err) {}
+      try {
+        const zot = resolveZotero() || (typeof Zotero !== "undefined" ? Zotero : null);
+        if (zot && zot.Prefs) {
+          zot.Prefs.set("zocrates.fontSize", currentFontSizeSetting);
+        }
+      } catch (err) {}
+      applyFontSize();
     }
     hideAllFlyoutSubmenus();
     if (moreActionsDropdown) {
@@ -13630,6 +13772,7 @@ if (networkGraphMenuBtn) {
   networkGraphMenuBtn.addEventListener("click", () => {
     if (moreActionsDropdown) moreActionsDropdown.classList.add("hidden");
     if (themeOptionsDropdown) themeOptionsDropdown.classList.add("hidden");
+    if (fontSizeOptionsDropdown) fontSizeOptionsDropdown.classList.add("hidden");
     if (aboutOptionsDropdown) aboutOptionsDropdown.classList.add("hidden");
     openNetworkGraphTab();
   });
@@ -13641,6 +13784,7 @@ function snapshotDetachedState() {
     contextMode,
     isStickyMode,
     theme: currentThemeSetting,
+    fontSize: currentFontSizeSetting,
     activeItemsList: activeItemsList ? [...activeItemsList] : [],
     activeSnippetsList: activeSnippetsList ? [...activeSnippetsList] : [],
     inputDraft: chatInput ? chatInput.value : ""
@@ -13785,6 +13929,18 @@ function syncFromDetachedState(state) {
   } else {
     loadSavedTheme();
   }
+  const VALID_FONT_SIZES = ["small", "default", "large", "xlarge"];
+  if (state.fontSize && VALID_FONT_SIZES.includes(state.fontSize)) {
+    if (state.fontSize !== currentFontSizeSetting || !document.body || !document.body.getAttribute("data-font-size")) {
+      currentFontSizeSetting = state.fontSize;
+      try {
+        localStorage.setItem("zocrates_font_size", currentFontSizeSetting);
+      } catch (e) {}
+      applyFontSize();
+    }
+  } else {
+    loadSavedFontSize();
+  }
   if (state.sessionId) {
     setActiveSessionId(state.sessionId);
     renderSessionsList();
@@ -13827,6 +13983,7 @@ window.syncFromDetachedState = syncFromDetachedState;
 
 window.addEventListener("focus", () => {
   loadSavedTheme();
+  loadSavedFontSize();
   if (!isDetached) {
     try {
       const zot = resolveZotero();
@@ -13962,6 +14119,14 @@ window.addEventListener("unload", () => {
         console.error("Zocrates: Failed to unregister zocrates theme observer:", e);
       }
     }
+    if (zocratesFontSizeObserverId) {
+      try {
+        zot.Prefs.unregisterObserver(zocratesFontSizeObserverId);
+        console.log("Zocrates: Unregistered zocrates font size observer successfully");
+      } catch(e) {
+        console.error("Zocrates: Failed to unregister zocrates font size observer:", e);
+      }
+    }
     if (llmPrefsObserverId) {
       try {
         zot.Prefs.unregisterObserver(llmPrefsObserverId);
@@ -14025,6 +14190,13 @@ function restoreDetachedInitialState() {
           localStorage.setItem("zocrates_theme", currentThemeSetting);
         } catch (e) {}
         applyTheme();
+      }
+      if (st.fontSize) {
+        currentFontSizeSetting = st.fontSize;
+        try {
+          localStorage.setItem("zocrates_font_size", currentFontSizeSetting);
+        } catch (e) {}
+        applyFontSize();
       }
       if (st.contextMode) contextMode = st.contextMode;
       if (st.isStickyMode !== undefined) {
@@ -14261,6 +14433,7 @@ window.addEventListener("scroll", (e) => {
 // Load theme and mode on startup
 if (typeof module === "undefined") {
   loadSavedTheme();
+  loadSavedFontSize();
   loadSavedMode();
 
   // Set up activity-gated selection checker polling at 400ms
@@ -14418,6 +14591,10 @@ if (typeof module !== "undefined" && module.exports) {
     applyTheme,
     getCurrentThemeSetting: () => currentThemeSetting,
     setCurrentThemeSetting: (t) => { currentThemeSetting = t; },
+    loadSavedFontSize,
+    applyFontSize,
+    getCurrentFontSizeSetting: () => currentFontSizeSetting,
+    setCurrentFontSizeSetting: (s) => { currentFontSizeSetting = s; },
     syncFromDetachedState,
     restoreDetachedInitialState,
     getAutoRenderMermaidPref,

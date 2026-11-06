@@ -19,6 +19,21 @@
   --chip-hover-bg: rgba(255, 255, 255, 0.1);
   --header-bg: linear-gradient(135deg, #131230 0%, #0c0f1d 100%);
   --header-text-gradient: linear-gradient(to right, #818cf8, #22d3ee);
+  --chat-font-scale: 1;
+}
+
+/* ---- Text Size Presets ---- */
+body[data-font-size="small"] {
+  --chat-font-scale: 0.85;
+}
+body[data-font-size="default"] {
+  --chat-font-scale: 1;
+}
+body[data-font-size="large"] {
+  --chat-font-scale: 1.15;
+}
+body[data-font-size="xlarge"] {
+  --chat-font-scale: 1.3;
 }
 
 /* ---- Themes ---- */
@@ -1354,7 +1369,7 @@ body[data-theme="sepia"] .message-wrapper.assistant {
 .message {
   padding: 0;
   border-radius: 0;
-  font-size: 13.5px;
+  font-size: calc(13.5px * var(--chat-font-scale, 1));
   line-height: 1.5;
   word-break: break-word;
   overflow-wrap: anywhere;
@@ -1943,7 +1958,7 @@ body[data-theme="sepia"] .mermaid-error-banner {
   padding: 0;
   border-radius: 0;
   font-family: var(--font-family-mono);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--chat-font-scale, 1));
   line-height: 1.5;
   color: #e2e8f0;
 }
@@ -2078,7 +2093,7 @@ body[data-theme="zotero-light"] .hljs-function, body[data-theme="sepia"] .hljs-f
   border: none;
   color: var(--text-main);
   font-family: var(--font-family-sans);
-  font-size: 13.5px;
+  font-size: calc(13.5px * var(--chat-font-scale, 1));
   resize: none;
   height: 46px; /* Comfortable height for 2 lines */
   max-height: calc(50vh - 100px) !important;
@@ -2113,7 +2128,7 @@ body[data-theme="zotero-light"] .hljs-function, body[data-theme="sepia"] .hljs-f
   align-items: flex-start;
   overflow: hidden;
   font-family: var(--font-family-sans);
-  font-size: 13.5px;
+  font-size: calc(13.5px * var(--chat-font-scale, 1));
   line-height: 1.5;
   z-index: 1;
 }
@@ -3103,7 +3118,7 @@ figure th {
   flex-direction: column;
   gap: 8px;
   font-family: var(--font-family-sans);
-  font-size: 12px;
+  font-size: calc(12px * var(--chat-font-scale, 1));
   color: var(--text-main);
   animation: popoverFadeIn 0.15s ease-out;
   overflow: hidden;
@@ -3133,7 +3148,7 @@ figure th {
 
 .evidence-popover-title {
   font-weight: 600;
-  font-size: 13px;
+  font-size: calc(13px * var(--chat-font-scale, 1));
   line-height: 1.35;
   color: var(--text-main);
   flex: 1 1 auto;
@@ -3236,66 +3251,6 @@ figure th {
   cursor: nwse-resize;
 }
 
-.evidence-popover-resizer.resizer-se::before,
-.evidence-popover-resizer.resizer-se::after {
-  content: "";
-  position: absolute;
-  border-right: 1.5px solid var(--text-muted);
-  border-bottom: 1.5px solid var(--text-muted);
-  box-sizing: border-box;
-  opacity: 0.55;
-  transition: opacity 0.15s ease;
-}
-
-.evidence-popover-resizer.resizer-se:hover::before,
-.evidence-popover-resizer.resizer-se:hover::after {
-  opacity: 1;
-}
-
-.evidence-popover-resizer.resizer-se::before {
-  right: 6px;
-  bottom: 6px;
-  width: 4px;
-  height: 4px;
-}
-
-.evidence-popover-resizer.resizer-se::after {
-  right: 2px;
-  bottom: 2px;
-  width: 8px;
-  height: 8px;
-}
-
-.evidence-popover-resizer.resizer-sw::before,
-.evidence-popover-resizer.resizer-sw::after {
-  content: "";
-  position: absolute;
-  border-left: 1.5px solid var(--text-muted);
-  border-bottom: 1.5px solid var(--text-muted);
-  box-sizing: border-box;
-  opacity: 0.55;
-  transition: opacity 0.15s ease;
-}
-
-.evidence-popover-resizer.resizer-sw:hover::before,
-.evidence-popover-resizer.resizer-sw:hover::after {
-  opacity: 1;
-}
-
-.evidence-popover-resizer.resizer-sw::before {
-  left: 6px;
-  bottom: 6px;
-  width: 4px;
-  height: 4px;
-}
-
-.evidence-popover-resizer.resizer-sw::after {
-  left: 2px;
-  bottom: 2px;
-  width: 8px;
-  height: 8px;
-}
-
 @keyframes popoverFadeIn {
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
@@ -3305,7 +3260,7 @@ figure th {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: calc(11px * var(--chat-font-scale, 1));
   color: var(--text-muted);
   flex-shrink: 0;
 }
@@ -3334,7 +3289,7 @@ figure th {
 .evidence-popover-section-badge {
   display: inline-block;
   align-self: flex-start;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--chat-font-scale, 1));
   padding: 2px 6px;
   border-radius: 3px;
   background: var(--chip-bg);
@@ -3367,7 +3322,7 @@ figure th {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--chat-font-scale, 1));
   font-weight: 600;
   padding: 2px 6px;
   border-radius: 3px;
@@ -3404,7 +3359,7 @@ figure th {
 }
 
 .evidence-popover-quote {
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--chat-font-scale, 1));
   line-height: 1.45;
   color: var(--text-muted);
   word-break: break-word;
@@ -3434,7 +3389,7 @@ figure th {
   justify-content: center;
   gap: 4px;
   padding: 6px 10px;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--chat-font-scale, 1));
   font-weight: 500;
   border-radius: 4px;
   border: 1px solid var(--border);
