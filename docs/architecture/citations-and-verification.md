@@ -40,7 +40,7 @@ graph TD
 4. **Zero Internal Key Exposure**: 8-character Zotero database item keys (e.g. `HCZLU22L`) are strictly barred from prompt outputs and rendered as human-readable author-year labels or academic badges in the UI.
 5. **No Out-of-Band SQL Mutations**: Citation resolution executes synchronously inside `search_pipeline.py` within the native ADK runner context, preventing desynchronization of `session._storage_update_marker` and eliminating `StaleSessionError`.
 6. **Strict Turn Scoping**: Citations are coupled to the current turn's retrieval `invocation_id`. Purely conversational follow-ups without search execution never inherit stale prior-turn reference lists.
-7. **Quote Extractive Bounding**: Supporting quote snippets are capped at 1,000 characters (`MAX_EXTRACTIVE_QUOTE_CHARS = 1000`) with ellipsis, rendered as formatted Markdown without artificial quote marks.
+7. **Full Supporting Passage Preservation**: Supporting quote/passage text from retrieved chunks is preserved in full (`MAX_EXTRACTIVE_QUOTE_CHARS = None`) without artificial character truncation, allowing researchers to inspect unbroken proofs, complete paragraphs, and experimental tables in the scrollable, resizable Evidence Peek popover.
 8. **Per-Occurrence Claim Evaluation**: Each citation token occurrence in synthesized prose is evaluated individually against its cited chunk ($p_{\text{occ}}$). Citation tokens are never evaluated via aggregated $\max()$ across disparate sentences.
 9. **Two-Tier Source Partitioning Under Verification**: A document moves to Tier 1 (`# Cited Sources`) if ≥ 1 cited occurrence survives verification threshold $\tau$. If 0 occurrences survive anywhere in the text, the document moves to Tier 2 (`## Other Considered Sources`), preserving $U = C \cup R$.
 10. **Empty Tier 1 Safeguard (No False Promotion on Verification Failure)**: When the synthesizer emits citations but all citations fail verification thresholds, zero-citation fallback is explicitly disabled. Tier 1 remains empty and all candidate documents are placed in Tier 2 (`## Other Considered Sources`), preventing unverified literature from being falsely promoted as cited sources.
@@ -106,7 +106,7 @@ The resolution engine runs synchronously at the pipeline boundary:
 3. **Bounds Checking & Hallucination Suppression**:
    Validates indices against 1 ≤ idx ≤ len(ranked_chunks). Any hallucinated out-of-bounds index (e.g. `[99]`) is safely stripped from the text rather than left dangling.
 4. **Metadata Extraction & Attachment Parent Resolution**:
-   Extracts `chunk_id`, `item_key`, `attachment_key`, `title`, `authors`, `year`, `section`, `publication`, and an extractive quote capped at `MAX_EXTRACTIVE_QUOTE_CHARS = 1000`. If an item is an attachment (e.g. HTML Snapshot, PDF) where direct `creators` or `year` are empty in Zotero's schema, it automatically traverses to the parent bibliographic item and falls back to `document.md` YAML frontmatter.
+   Extracts `chunk_id`, `item_key`, `attachment_key`, `title`, `authors`, `year`, `section`, `publication`, and the complete supporting quote text without artificial character truncation (or bounded by `MAX_EXTRACTIVE_QUOTE_CHARS` if explicitly configured). If an item is an attachment (e.g. HTML Snapshot, PDF) where direct `creators` or `year` are empty in Zotero's schema, it automatically traverses to the parent bibliographic item and falls back to `document.md` YAML frontmatter.
 5. **Two-Tier Source Partitioning**:
    - **Tier 1 (Cited Sources)**: Unique papers whose chunks were explicitly cited in text.
    - **Tier 2 (Other Considered Sources)**: Papers retrieved by the search agent but not cited in text.
@@ -360,7 +360,11 @@ The popover is constructed using native DOM APIs (`document.createElementNS("htt
   - Decision Support Badge (`.evidence-support-badge`): Calibrated attribution confidence badge (`high`, `moderate`, `low`) displaying `✓ Support Probability: 0.XX` or `ⓘ Support Probability: 0.XX`.
 - **Quote Box**: Extractive quote rendered via `formatMarkdown(quote)` without quotes, supporting full markdown formatting (bolding, lists, code blocks).
 - **Action Buttons (`flex-shrink: 0`)**:
-  - `Open in Reader`: Resolves attachment IDs and invokes `window.top.Zotero.Reader.open(attachmentID)`.
+  - `Open in Reader`: Resolves attachment IDs, opens or focuses the reader tab via `window.top.Zotero.Reader.open(attachmentID)`, and executes a **best-effort section navigation** (`openItemInReader(attachmentKey, section)`):
+    - **PDF Documents**: Traverses the embedded PDF Document Outline (`PDFViewerApplication.pdfDocument.getOutline()` or Zotero's internal cached outline `internalReader._state.outline`) via scored pre-order DFS matching, jumping directly to the section heading destination (`internalReader.navigate({ dest })` or `pdfLinkService.goToDestination(dest)`).
+    - **HTML Web Snapshots**: Traverses the snapshot document DOM (`internalReader._primaryView._iframeWindow.document`), locating the matching semantic heading element (`<h1>`–`<h6>`, `[role="heading"]`) and smoothly scrolling it into view via `headingEl.scrollIntoView({ behavior: 'smooth', block: 'start' })`.
+    - **Highlight-Free Invariant**: Operates completely highlight-free with zero persistent database annotations in `zotero.sqlite`, zero yellow canvas highlights, and zero find-bar clutter.
+    - **Best-Effort & Fail-Open Resilience**: If an outline or heading element is absent or unindexed, it cleanly leaves the document open at its standard/last-viewed position without throwing errors or stalling reader interactions.
   - `Select in Library`: Resolves items (including traversing parent items for attachments) and calls `ZoteroPane.selectItem(itemID, false, true)`.
 - **Dynamic Viewport Clamping**: Evaluates `spaceBelow` vs `spaceAbove` relative to `window.innerHeight`, automatically anchoring above or below the pill and capping `maxHeight` so footer buttons are never cut off.
 - **Corner Resizing Grip**: Features a dedicated `.evidence-popover-resize-handle` draggable corner grip in the bottom-right allowing researchers to smoothly expand both width and height simultaneously while dynamically lifting initial viewport max-height clamps.
@@ -394,7 +398,7 @@ The citation, sources, and verification architecture is validated by dedicated a
   - `test_regex_matching`: Validates single, multi-citation, and fullwidth bracket parsing.
   - `test_code_block_protection`: Verifies array indexing in code blocks is ignored.
   - `test_out_of_bounds_index`: Confirms hallucinated tokens (e.g. `[99]`) are stripped.
-  - `test_exact_section_and_quote_extraction`: Validates section headings and 1,000-character extractive quote capping.
+  - `test_extractive_quote_preserves_full_supporting_text`: Confirms untruncated chunk preservation without artificial character caps.
   - `test_two_tier_partitioning_100_percent_recall`: Verifies $U = C \cup R$ and disjointness ($C \cap R = \emptyset$).
   - `test_zero_citations_fallback`: Validates promotion of all evidence to Tier 1 when citations are omitted.
 * **`tests/unit/test_citation_verifier.py`**:
