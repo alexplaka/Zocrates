@@ -5712,11 +5712,70 @@ function showEvidencePopover(pill, citation) {
   const attKey = citation.attachment_key || citation.item_key || "";
   const itemKey = citation.item_key || "";
 
-  // 1. Header Title
+  // 1. Header Row (Title + Maximize Button)
+  const headerDiv = document.createElementNS(XHTMLNS, "div");
+  headerDiv.className = "evidence-popover-header";
+
   const titleDiv = document.createElementNS(XHTMLNS, "div");
   titleDiv.className = "evidence-popover-title";
   titleDiv.textContent = title;
-  popover.appendChild(titleDiv);
+  headerDiv.appendChild(titleDiv);
+
+  const maximizeBtn = document.createElementNS(XHTMLNS, "button");
+  maximizeBtn.className = "evidence-popover-maximize-btn";
+  maximizeBtn.setAttribute("type", "button");
+  maximizeBtn.setAttribute("title", "Maximize in sidebar");
+  maximizeBtn.textContent = "⤢";
+
+  function toggleMaximize() {
+    const isMax = popover.classList.contains("is-maximized");
+    if (!isMax) {
+      popover._prevGeometry = {
+        left: popover.style.left,
+        top: popover.style.top,
+        width: popover.style.width,
+        height: popover.style.height,
+        maxHeight: popover.style.maxHeight,
+      };
+      popover.classList.add("is-maximized");
+      maximizeBtn.textContent = "⤡";
+      maximizeBtn.setAttribute("title", "Restore size");
+      const bodyEl = popover.querySelector(".evidence-popover-body");
+      if (bodyEl) {
+        bodyEl.style.maxHeight = "none";
+      }
+    } else {
+      popover.classList.remove("is-maximized");
+      maximizeBtn.textContent = "⤢";
+      maximizeBtn.setAttribute("title", "Maximize in sidebar");
+      if (popover._prevGeometry) {
+        popover.style.left = popover._prevGeometry.left;
+        popover.style.top = popover._prevGeometry.top;
+        popover.style.width = popover._prevGeometry.width;
+        popover.style.height = popover._prevGeometry.height;
+        popover.style.maxHeight = popover._prevGeometry.maxHeight;
+      }
+    }
+  }
+
+  maximizeBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleMaximize();
+  });
+
+  maximizeBtn.addEventListener("dblclick", (e) => {
+    e.stopPropagation();
+  });
+
+  headerDiv.addEventListener("dblclick", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleMaximize();
+  });
+
+  headerDiv.appendChild(maximizeBtn);
+  popover.appendChild(headerDiv);
 
   // 2. Metadata (Authors, Year, Pub)
   if (authYear || pub) {
@@ -5822,52 +5881,111 @@ function showEvidencePopover(pill, citation) {
 
   popover.appendChild(footerDiv);
 
-  // 6. Corner resize handle
-  const resizeHandle = document.createElementNS(XHTMLNS, "div");
-  resizeHandle.className = "evidence-popover-resize-handle";
-  resizeHandle.setAttribute("title", "Drag to resize");
+  // 6. Multi-directional resizers
+  const resizerDirections = ["n", "s", "e", "w", "nw", "ne", "sw", "se"];
+  for (const dir of resizerDirections) {
+    const resizer = document.createElementNS(XHTMLNS, "div");
+    resizer.className = `evidence-popover-resizer resizer-${dir}`;
+    resizer.setAttribute("data-direction", dir);
+    resizer.setAttribute("title", "Drag to resize");
 
-  resizeHandle.addEventListener("mousedown", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const startX = e.clientX;
-    const startY = e.clientY;
-    const startWidth = popover.offsetWidth;
-    const startHeight = popover.offsetHeight;
+    resizer.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
 
-    const onMouseMove = (moveEvt) => {
-      const newWidth = Math.max(260, Math.min(window.innerWidth - popover.offsetLeft - 10, startWidth + (moveEvt.clientX - startX)));
-      const newHeight = Math.max(160, Math.min(window.innerHeight - popover.offsetTop - 10, startHeight + (moveEvt.clientY - startY)));
-      popover.style.width = newWidth + "px";
-      popover.style.height = newHeight + "px";
-      popover.style.maxHeight = newHeight + "px";
-      const bodyEl = popover.querySelector(".evidence-popover-body");
-      if (bodyEl) {
-        bodyEl.style.maxHeight = "none";
-      }
-    };
+      popover._isResizing = true;
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const rect = popover.getBoundingClientRect();
+      const startLeft = parseFloat(popover.style.left) || rect.left || popover.offsetLeft || 0;
+      const startTop = parseFloat(popover.style.top) || rect.top || popover.offsetTop || 0;
+      const startWidth = parseFloat(popover.style.width) || popover.offsetWidth || rect.width || 320;
+      const startHeight = parseFloat(popover.style.height) || popover.offsetHeight || rect.height || 220;
 
-    const onMouseUp = () => {
-      window.removeEventListener("mousemove", onMouseMove, true);
-      window.removeEventListener("mouseup", onMouseUp, true);
-    };
+      const minWidth = 260;
+      const minHeight = 180;
+      const margin = 10;
 
-    window.addEventListener("mousemove", onMouseMove, true);
-    window.addEventListener("mouseup", onMouseUp, true);
-  });
+      const onMouseMove = (moveEvt) => {
+        if (popover.classList.contains("is-maximized")) {
+          popover.classList.remove("is-maximized");
+          maximizeBtn.textContent = "⤢";
+          maximizeBtn.setAttribute("title", "Maximize in sidebar");
+        }
 
-  popover.appendChild(resizeHandle);
+        const deltaX = moveEvt.clientX - startX;
+        const deltaY = moveEvt.clientY - startY;
+
+        let newWidth = startWidth;
+        let newLeft = startLeft;
+        let newHeight = startHeight;
+        let newTop = startTop;
+
+        if (dir.includes("e")) {
+          const maxW = Math.max(minWidth, window.innerWidth - startLeft - margin);
+          newWidth = Math.min(maxW, Math.max(minWidth, startWidth + deltaX));
+          popover.style.width = newWidth + "px";
+        } else if (dir.includes("w")) {
+          newLeft = Math.max(margin, Math.min(startLeft + startWidth - minWidth, startLeft + deltaX));
+          newWidth = startWidth + (startLeft - newLeft);
+          popover.style.left = newLeft + "px";
+          popover.style.width = newWidth + "px";
+        }
+
+        if (dir.includes("s")) {
+          const maxH = Math.max(minHeight, window.innerHeight - startTop - margin);
+          newHeight = Math.min(maxH, Math.max(minHeight, startHeight + deltaY));
+          popover.style.height = newHeight + "px";
+          popover.style.maxHeight = newHeight + "px";
+        } else if (dir.includes("n")) {
+          newTop = Math.max(margin, Math.min(startTop + startHeight - minHeight, startTop + deltaY));
+          newHeight = startHeight + (startTop - newTop);
+          popover.style.top = newTop + "px";
+          popover.style.height = newHeight + "px";
+          popover.style.maxHeight = newHeight + "px";
+        }
+
+        const bodyEl = popover.querySelector(".evidence-popover-body");
+        if (bodyEl) {
+          bodyEl.style.maxHeight = "none";
+        }
+      };
+
+      const onMouseUp = () => {
+        popover._isResizing = false;
+        popover._justResized = true;
+        setTimeout(() => {
+          if (popover) popover._justResized = false;
+        }, 100);
+        window.removeEventListener("mousemove", onMouseMove, true);
+        window.removeEventListener("mouseup", onMouseUp, true);
+      };
+
+      window.addEventListener("mousemove", onMouseMove, true);
+      window.addEventListener("mouseup", onMouseUp, true);
+    });
+
+    popover.appendChild(resizer);
+  }
+
   document.body.appendChild(popover);
 
   // Position calculation and viewport clamping
   const margin = 10;
   const pillRect = pill.getBoundingClientRect();
-  const popoverWidth = 320;
   let left = pillRect.left;
-  if (left + popoverWidth > window.innerWidth - margin) {
-    left = Math.max(margin, window.innerWidth - popoverWidth - margin);
+
+  if (window.innerWidth < 420) {
+    const popoverWidth = Math.max(260, window.innerWidth - 2 * margin);
+    popover.style.width = popoverWidth + "px";
+    left = margin;
+  } else {
+    const popoverWidth = 320;
+    if (left + popoverWidth > window.innerWidth - margin) {
+      left = Math.max(margin, window.innerWidth - popoverWidth - margin);
+    }
+    if (left < margin) left = margin;
   }
-  if (left < margin) left = margin;
 
   const spaceBelow = window.innerHeight - pillRect.bottom - margin - 6;
   const spaceAbove = pillRect.top - margin - 6;
@@ -14125,6 +14243,9 @@ document.addEventListener("click", (e) => {
   }
 
   if (activeEvidencePopover && !e.target.closest(".evidence-popover")) {
+    if (activeEvidencePopover._isResizing || activeEvidencePopover._justResized) {
+      return;
+    }
     closeEvidencePopover();
   }
 });

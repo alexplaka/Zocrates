@@ -122,8 +122,44 @@ async function runTests() {
     const popover = env.document.body.querySelector(".evidence-popover");
     assert.ok(popover, "Popover should be appended to document.body");
 
-    // Header title
+    // Header row and title
+    const headerRow = popover.querySelector(".evidence-popover-header");
+    assert.ok(headerRow, "Header row should exist");
     assert.strictEqual(popover.querySelector(".evidence-popover-title").textContent, "FlashAttention-2");
+
+    const maxBtn = headerRow.querySelector(".evidence-popover-maximize-btn");
+    assert.ok(maxBtn, "Maximize button should exist");
+    assert.strictEqual(maxBtn.textContent, "⤢");
+    assert.strictEqual(maxBtn.getAttribute("title"), "Maximize in sidebar");
+
+    // 8 Resizer elements
+    const resizers = popover.querySelectorAll(".evidence-popover-resizer");
+    assert.strictEqual(resizers.length, 8, "Should create 8 resizers");
+    const directions = ["n", "s", "e", "w", "nw", "ne", "sw", "se"];
+    directions.forEach((dir) => {
+      const resizerEl = popover.querySelector(`.evidence-popover-resizer.resizer-${dir}`);
+      assert.ok(resizerEl, `Resizer for direction ${dir} should exist`);
+      assert.strictEqual(resizerEl.getAttribute("data-direction"), dir);
+    });
+
+    // Maximize button click toggles is-maximized
+    maxBtn.dispatchEvent("click");
+    assert.ok(popover.classList.contains("is-maximized"), "Clicking maximize button should add is-maximized");
+    assert.strictEqual(maxBtn.textContent, "⤡");
+    assert.strictEqual(maxBtn.getAttribute("title"), "Restore size");
+    assert.ok(popover._prevGeometry, "Should store previous geometry");
+
+    // Restore via maximize button click
+    maxBtn.dispatchEvent("click");
+    assert.strictEqual(popover.classList.contains("is-maximized"), false, "Clicking restore button should remove is-maximized");
+    assert.strictEqual(maxBtn.textContent, "⤢");
+    assert.strictEqual(maxBtn.getAttribute("title"), "Maximize in sidebar");
+
+    // Header double-click toggles is-maximized
+    headerRow.dispatchEvent("dblclick");
+    assert.ok(popover.classList.contains("is-maximized"), "Double-clicking header should maximize");
+    headerRow.dispatchEvent("dblclick");
+    assert.strictEqual(popover.classList.contains("is-maximized"), false, "Double-clicking header again should restore");
 
     // Meta
     assert.strictEqual(popover.querySelector(".evidence-popover-author-year").textContent, "Dao (2023)");
@@ -217,6 +253,176 @@ async function runTests() {
     } finally {
       env.window.katex = prevKatex;
     }
+  });
+
+  // 6. Smart placement in narrow sidebars (< 420px)
+  test("showEvidencePopover: smart placement in narrow sidebars (< 420px)", () => {
+    sidebar.closeEvidencePopover();
+    const pill = createMockElement("span");
+    pill.offsetLeft = 50;
+    pill.offsetWidth = 20;
+    const citation = { title: "Narrow Sidebar Test" };
+
+    const origInnerWidth = env.window.innerWidth;
+    try {
+      // 1. Sidebar width 360px (< 420): width = Math.max(260, 360 - 20) = 340px, left = 10px
+      env.window.innerWidth = 360;
+      sidebar.showEvidencePopover(pill, citation);
+      let popover = env.document.body.querySelector(".evidence-popover");
+      assert.ok(popover);
+      assert.strictEqual(popover.style.width, "340px");
+      assert.strictEqual(popover.style.left, "10px");
+      sidebar.closeEvidencePopover();
+
+      // 2. Very narrow sidebar 270px: width = Math.max(260, 270 - 20) = 260px (minWidth clamp)
+      env.window.innerWidth = 270;
+      sidebar.showEvidencePopover(pill, citation);
+      popover = env.document.body.querySelector(".evidence-popover");
+      assert.ok(popover);
+      assert.strictEqual(popover.style.width, "260px");
+      assert.strictEqual(popover.style.left, "10px");
+      sidebar.closeEvidencePopover();
+
+      // 3. Normal sidebar width 800px (>= 420): standard clamped positioning
+      env.window.innerWidth = 800;
+      sidebar.showEvidencePopover(pill, citation);
+      popover = env.document.body.querySelector(".evidence-popover");
+      assert.ok(popover);
+      assert.strictEqual(popover.style.left, "50px");
+      sidebar.closeEvidencePopover();
+    } finally {
+      env.window.innerWidth = origInnerWidth;
+      sidebar.closeEvidencePopover();
+    }
+  });
+
+  // 7. Multi-directional resizers and dragging
+  test("showEvidencePopover: multi-directional resizers resize popover and clear maximized state on drag", () => {
+    sidebar.closeEvidencePopover();
+    const pill = createMockElement("span");
+    pill.offsetLeft = 40;
+    const citation = { title: "Resize Test", quote: "Testing multi-directional resize." };
+
+    sidebar.showEvidencePopover(pill, citation);
+    const popover = env.document.body.querySelector(".evidence-popover");
+    assert.ok(popover);
+
+    const maxBtn = popover.querySelector(".evidence-popover-maximize-btn");
+    const origLeft = popover.style.left;
+    const origTop = popover.style.top;
+    const origWidth = popover.style.width;
+    const origHeight = popover.style.height;
+
+    // Maximize first
+    maxBtn.dispatchEvent("click");
+    assert.ok(popover.classList.contains("is-maximized"));
+
+    // Toggle back (restore)
+    maxBtn.dispatchEvent("click");
+    assert.strictEqual(popover.classList.contains("is-maximized"), false);
+    assert.strictEqual(popover.style.left, origLeft, "Restored left must match pre-maximize left");
+    assert.strictEqual(popover.style.top, origTop, "Restored top must match pre-maximize top");
+    assert.strictEqual(popover.style.width, origWidth, "Restored width must match pre-maximize width");
+
+    // Maximize again for the drag test
+    maxBtn.dispatchEvent("click");
+    assert.ok(popover.classList.contains("is-maximized"));
+
+    // 1. Start drag on resizer-se: should clear maximized state and update width/height
+    const seResizer = popover.querySelector(".evidence-popover-resizer.resizer-se");
+    assert.ok(seResizer);
+    seResizer.dispatchEvent({
+      type: "mousedown",
+      clientX: 100,
+      clientY: 100,
+      preventDefault() {},
+      stopPropagation() {},
+    });
+
+    env.window.dispatchEvent({
+      type: "mousemove",
+      clientX: 150,
+      clientY: 160,
+    });
+
+    assert.strictEqual(popover.classList.contains("is-maximized"), false, "Manual drag should clear is-maximized");
+    assert.strictEqual(maxBtn.textContent, "⤢", "Maximize button icon should reset to unmaximized");
+    assert.strictEqual(maxBtn.getAttribute("title"), "Maximize in sidebar");
+    assert.strictEqual(popover.style.width, "350px"); // startWidth (300) + 50
+    assert.strictEqual(popover.style.height, "260px"); // startHeight (200) + 60
+    assert.strictEqual(popover.style.maxHeight, "260px");
+
+    env.window.dispatchEvent({ type: "mouseup" });
+
+    // 2. Drag west resizer (resizer-w): shrinks left and grows width
+    const wResizer = popover.querySelector(".evidence-popover-resizer.resizer-w");
+    assert.ok(wResizer);
+    wResizer.dispatchEvent({
+      type: "mousedown",
+      clientX: 100,
+      clientY: 100,
+      preventDefault() {},
+      stopPropagation() {},
+    });
+
+    // Move left by 20px -> left should become startLeft (40) - 20 = 20px, width grows by 20px (from 350 to 370)
+    env.window.dispatchEvent({
+      type: "mousemove",
+      clientX: 80,
+      clientY: 100,
+    });
+
+    assert.strictEqual(popover.style.left, "20px");
+    assert.strictEqual(popover.style.width, "370px");
+
+    env.window.dispatchEvent({ type: "mouseup" });
+
+    // 3. Drag north resizer (resizer-n): shrinks top and grows height
+    const nResizer = popover.querySelector(".evidence-popover-resizer.resizer-n");
+    assert.ok(nResizer);
+    nResizer.dispatchEvent({
+      type: "mousedown",
+      clientX: 100,
+      clientY: 100,
+      preventDefault() {},
+      stopPropagation() {},
+    });
+
+    const currTop = parseFloat(popover.style.top);
+    // Move up by 30px
+    env.window.dispatchEvent({
+      type: "mousemove",
+      clientX: 100,
+      clientY: 70,
+    });
+
+    assert.strictEqual(popover.style.top, `${Math.max(10, currTop - 30)}px`);
+    assert.strictEqual(popover.style.height, "290px"); // startHeight (260) + 30
+    assert.strictEqual(popover.style.maxHeight, "290px");
+
+    env.window.dispatchEvent({ type: "mouseup" });
+
+    // 4. Enforce minWidth (260) and minHeight (180) clamps
+    seResizer.dispatchEvent({
+      type: "mousedown",
+      clientX: 100,
+      clientY: 100,
+      preventDefault() {},
+      stopPropagation() {},
+    });
+
+    // Try to shrink width and height by 500px (beyond minWidth 260 and minHeight 180)
+    env.window.dispatchEvent({
+      type: "mousemove",
+      clientX: -400,
+      clientY: -400,
+    });
+
+    assert.strictEqual(popover.style.width, "260px", "Width must not shrink below minWidth 260");
+    assert.strictEqual(popover.style.height, "180px", "Height must not shrink below minHeight 180");
+
+    env.window.dispatchEvent({ type: "mouseup" });
+    sidebar.closeEvidencePopover();
   });
 
   // 6. Citation pills inside Markdown tables
