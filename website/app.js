@@ -96,24 +96,27 @@ document.addEventListener('DOMContentLoaded', () => {
   const CITATION_DATA = {
     '1': {
       title: 'Vaswani et al. (2017) — Attention Is All You Need',
-      section: '§ 3.2.2 Multi-Head Attention (Lines 142–168)',
-      confidence: 'Verified Support: 94%',
+      section: '§ 3.2.2 Multi-Head Attention',
+      sectionBadge: '📑 Outline: § 3.2.2',
+      confidence: 'Support Probability: 0.94',
       quote: '"Multi-head attention allows the model to jointly attend to information from different representation subspaces at different positions. With a single attention head, averaging inhibits this."',
-      readerHighlightId: 'pdf-passage-1'
+      targetSectionTitle: '3.2.2 Multi-Head Attention'
     },
     '2': {
       title: 'Dao et al. (2022) — FlashAttention: Fast and Memory-Efficient Exact Attention',
-      section: '§ 2.1 IO-Aware Tiling & Softmax Recomputation (Lines 88–119)',
-      confidence: 'Verified Support: 91%',
+      section: '§ 2.1 IO-Aware Tiling & Softmax Recomputation',
+      sectionBadge: '📑 Outline: § 2.1',
+      confidence: 'Support Probability: 0.91',
       quote: '"By splitting Q, K, V into blocks and computing exact softmax increments in fast SRAM, FlashAttention avoids materializing the N×N attention matrix in slow HBM."',
-      readerHighlightId: 'pdf-passage-2'
+      targetSectionTitle: '2.1 IO-Aware Tiling'
     },
     '3': {
       title: 'Beltagy et al. (2020) — Longformer: The Long-Document Transformer',
-      section: '§ 3.1 Sliding Window & Dilated Attention (Lines 204–231)',
-      confidence: 'Verified Support: 87%',
+      section: '§ 3.1 Sliding Window & Dilated Attention',
+      sectionBadge: '📑 Outline: § 3.1',
+      confidence: 'Support Probability: 0.87',
       quote: '"Combining local windowed attention with task-motivated global attention scales linearly O(N) with sequence length while preserving full-context capacity on key tokens."',
-      readerHighlightId: 'pdf-passage-1'
+      targetSectionTitle: '3.1 Sliding Window Attention'
     }
   };
 
@@ -126,10 +129,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const selectInLibBtn = document.getElementById('btn-select-in-library');
   const popoverStatus = document.getElementById('popover-action-status');
   const readerStatusLabel = document.getElementById('reader-status-label');
-  const libraryTab = document.getElementById('tab-my-library');
+  const outlineBadge = document.getElementById('reader-outline-badge');
+  const paperTab = document.getElementById('tab-active-paper');
+  const paperChip = document.getElementById('chip-active-paper');
   const readerPane = document.getElementById('zotero-reader-pane');
 
   let currentCitationKey = '1';
+  let openInReaderTimeout = null;
+  let selectInLibTimeout = null;
 
   function updateEvidencePopover(key) {
     const item = CITATION_DATA[key];
@@ -144,6 +151,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (popoverConfidence) popoverConfidence.textContent = item.confidence;
     if (popoverSection) popoverSection.textContent = item.section;
     if (popoverQuote) popoverQuote.textContent = item.quote;
+    if (outlineBadge && item.sectionBadge) {
+      outlineBadge.textContent = item.sectionBadge;
+    }
+    const headingTitle = document.querySelector('#pdf-section-heading .heading-title');
+    if (headingTitle && item.targetSectionTitle) {
+      headingTitle.textContent = item.targetSectionTitle;
+    }
   }
 
   pillButtons.forEach((btn) => {
@@ -154,45 +168,53 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (openInReaderBtn) {
     openInReaderBtn.addEventListener('click', () => {
-      const origText = openInReaderBtn.innerHTML;
-      const targetId = CITATION_DATA[currentCitationKey]?.readerHighlightId || 'pdf-passage-1';
-      const targetEl = document.getElementById(targetId);
+      clearTimeout(openInReaderTimeout);
+      const origText = '📖 Open in Reader';
+      const targetHeading = document.getElementById('pdf-section-heading');
+      const item = CITATION_DATA[currentCitationKey] || CITATION_DATA['1'];
+      const sectionNum = item.section?.split(' ')[1] || '§ 3.2.2';
 
       // 1. In-place button feedback on the right
-      openInReaderBtn.innerHTML = '✓ Opened in Reader ◀';
+      openInReaderBtn.innerHTML = '✓ Opened at Section ◀';
       openInReaderBtn.style.color = 'var(--success)';
       openInReaderBtn.style.borderColor = 'var(--success)';
 
       if (popoverStatus) {
-        popoverStatus.textContent = '◀ Opened paper in Zotero Reader';
+        popoverStatus.textContent = '◀ Jumped to section via PDF Outline';
         popoverStatus.classList.add('show');
       }
 
-      // 2. High-visibility pulse in the left pane
-      if (targetEl) {
-        targetEl.classList.remove('flash-active');
-        void targetEl.offsetWidth; // force reflow
-        targetEl.classList.add('flash-active');
+      // 2. High-visibility pulse on section heading & reader pane (highlight-free prose)
+      if (targetHeading) {
+        targetHeading.classList.remove('flash-active');
+        void targetHeading.offsetWidth; // force reflow
+        targetHeading.classList.add('flash-active');
       }
       if (readerPane) {
         readerPane.classList.remove('flash-pane');
         void readerPane.offsetWidth;
         readerPane.classList.add('flash-pane');
       }
+      if (outlineBadge) {
+        outlineBadge.classList.add('active-jump');
+      }
 
-      // 3. Update reader status bar
+      // 3. Update reader status bar (single-line, zero wrap)
       if (readerStatusLabel) {
-        readerStatusLabel.textContent = '✓ Attention Is All You Need.pdf • Opened in Reader';
+        readerStatusLabel.textContent = `✓ Jumped to ${sectionNum} via PDF Outline`;
         readerStatusLabel.style.color = 'var(--success)';
       }
 
-      setTimeout(() => {
+      openInReaderTimeout = setTimeout(() => {
         openInReaderBtn.innerHTML = origText;
         openInReaderBtn.style.color = '';
         openInReaderBtn.style.borderColor = '';
         if (popoverStatus) popoverStatus.classList.remove('show');
+        if (targetHeading) targetHeading.classList.remove('flash-active');
+        if (readerPane) readerPane.classList.remove('flash-pane');
+        if (outlineBadge) outlineBadge.classList.remove('active-jump');
         if (readerStatusLabel) {
-          readerStatusLabel.textContent = 'Zotero 10+ Built-in PDF Reader • Page 4 of 15';
+          readerStatusLabel.textContent = '📖 Zotero PDF Reader • Page 4 of 15';
           readerStatusLabel.style.color = '';
         }
       }, 2600);
@@ -201,28 +223,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (selectInLibBtn) {
     selectInLibBtn.addEventListener('click', () => {
-      const origText = selectInLibBtn.innerHTML;
-      selectInLibBtn.innerHTML = '✓ Selected in Tree';
+      clearTimeout(selectInLibTimeout);
+      const origText = '🗂️ Select in Library';
+      selectInLibBtn.innerHTML = '✓ Selected in Library ◀';
       selectInLibBtn.style.color = 'var(--accent)';
       selectInLibBtn.style.borderColor = 'var(--accent)';
 
       if (popoverStatus) {
-        popoverStatus.textContent = 'Item focused in library';
+        popoverStatus.textContent = '◀ Paper focused in Zotero library';
         popoverStatus.classList.add('show');
       }
 
-      if (libraryTab) {
-        libraryTab.classList.remove('flash-tab');
-        void libraryTab.offsetWidth;
-        libraryTab.classList.add('flash-tab');
+      if (paperTab) {
+        paperTab.classList.remove('flash-tab');
+        void paperTab.offsetWidth;
+        paperTab.classList.add('flash-tab');
+      }
+      if (paperChip) {
+        paperChip.classList.remove('flash-chip');
+        void paperChip.offsetWidth;
+        paperChip.classList.add('flash-chip');
       }
 
-      setTimeout(() => {
+      selectInLibTimeout = setTimeout(() => {
         selectInLibBtn.innerHTML = origText;
         selectInLibBtn.style.color = '';
         selectInLibBtn.style.borderColor = '';
         if (popoverStatus) popoverStatus.classList.remove('show');
-        if (libraryTab) libraryTab.classList.remove('flash-tab');
+        if (paperTab) paperTab.classList.remove('flash-tab');
+        if (paperChip) paperChip.classList.remove('flash-chip');
       }, 2600);
     });
   }

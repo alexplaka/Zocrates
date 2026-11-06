@@ -399,3 +399,69 @@ The coordinator agent's system instructions enforce an adaptive retrieval strate
 
 1. **Self-Contained Excerpts**: If the researcher's query can be fully answered using the focal snippet alone (e.g., explaining notation in a specific equation, translating a sentence, or interpreting a clear chart trend), the coordinator answers directly with **zero tool overhead** and **zero numeric citation brackets** (`[1]`).
 2. **Context-Dependent Inquiries**: If resolving the question requires information beyond the snippet (e.g., experimental parameters described in an earlier section, mathematical proofs in an appendix, or comparisons to other library items), the coordinator invokes `search_library` or `search_online_literature`, passing the focal excerpt and paper title into the retrieval pipeline.
+
+---
+
+## 9. Highlight-Free Best-Effort Section Heading Navigation
+
+In addition to micro-focal excerpt capture from the reader into chat, Zocrates provides a complementary reverse bridge: when researchers inspect citation pills in chat, clicking **Open in Reader** navigates directly to the cited section within Zotero's built-in reader.
+
+### 9.1 The "Best-Effort" Philosophy & Invariants
+
+Navigating academic literature inside PDF and HTML readers presents fundamental layout and search challenges:
+* Raw in-PDF text search (`FindController`) often matches common phrases elsewhere in the document, wraps across multi-column layouts unpredictably, fails across line breaks or soft hyphens, and leaves distracting yellow highlight overlays on the screen.
+* Modifying user annotations to insert artificial anchors pollutes the user's permanent SQLite database (`zotero.sqlite`).
+
+To maintain strict reading ergonomics and database purity, Zocrates implements **Highlight-Free Best-Effort Section Navigation**:
+1. **Best-Effort Navigation**: The system navigates to the cited section heading whenever a structural document outline (for PDFs) or semantic heading element (for HTML snapshots) is available. If an outline is absent, unindexed, or does not contain the heading, the document cleanly opens at its standard/last-viewed position without throwing errors or breaking workflow.
+2. **Zero Database Pollution**: Never writes transient search markers, bookmark tags, or artificial annotations to `zotero.sqlite`.
+3. **Zero Visual Clutter (Highlight-Free)**: Never activates yellow find-bar highlights, search overlays, or persistent focus borders on the canvas.
+
+### 9.2 Execution Pipeline (`openItemInReader`)
+
+When a researcher clicks "Open in Reader" on an Evidence Peek popover, `sidebar.js` dispatches `openItemInReader(attachmentKey, rawSection)`:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as Researcher
+    participant Popover as Evidence Peek Popover
+    participant Sidebar as sidebar.js (openItemInReader)
+    participant Reader as Zotero.Reader Instance
+    participant PDF as PDFViewerApplication / DOM
+
+    User->>Popover: Click "Open in Reader"
+    Popover->>Sidebar: openItemInReader(attachmentKey, rawSection)
+    Sidebar->>Sidebar: Coalesce duplicate clicks via _activeReaderNavigations
+    Sidebar->>Reader: reader.open(targetItemID)
+    Sidebar->>Sidebar: extractLeafHeading(rawSection, docTitle)
+
+    alt Branch A: PDF Attachment
+        Sidebar->>PDF: Poll internalReader._state.outline / pdfDocument.getOutline() (<= 3.5s)
+        Sidebar->>Sidebar: findOutlineDestination(outline, leaf, parents)
+        Sidebar->>PDF: internalReader.navigate({ dest }) or linkService.goToDestination(dest)
+    else Branch B: HTML Snapshot
+        Sidebar->>PDF: Poll iframeWindow.document readyState === 'complete' (<= 3.5s)
+        Sidebar->>Sidebar: findHtmlSnapshotHeading(doc, leaf)
+        Sidebar->>PDF: headingEl.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    end
+```
+
+### 9.3 Heading Extraction & Outline Scoring
+
+1. **Heading Extraction (`extractLeafHeading`)**:
+   - Parses breadcrumbs (`"Attention > 3 Architecture > 3.2 Attention"` $\rightarrow$ leaf: `"3.2 Attention"`, parents: `["Attention", "3 Architecture"]`).
+   - Strips leading section symbols (`§`), Markdown formatting (`**bold**`, `*italic*`), and backticks.
+   - Filters out non-navigable document labels (`"Frontmatter"`, `"Full Document"`, `"Abstract"`, `/^(?:figure|table)\s+\d/i`).
+   - Compares against the document title to avoid redundant jumps to the top of page 1.
+2. **Heading Decomposition (`parseHeadingParts`)**:
+   - Separates numbering prefixes (`3.2.2`, `III`, `Appendix B`) from core titles using case-sensitive rules (preserving plain titles like `"Mix of Experts"` and `"A Survey"`).
+3. **Scored Pre-Order DFS Traversal (`findOutlineDestination`)**:
+   - Evaluates outline entries across structural tiers:
+     - Exact match on core title + numbering ($+100$).
+     - Numbering conflict rejection: if the query specifies section `3.2` and the candidate is `4.2`, the match is rejected ($-\infty$).
+     - Parent corroboration: candidate nodes whose ancestors match query breadcrumbs receive $+20$ points per matching ancestor.
+     - Ambiguity rejection: if multiple destinations tie with the exact same top score, navigation is skipped to prevent jumping to the wrong location.
+4. **Lifecycle & Concurrency Guards**:
+   - **Promise Coalescing**: Rapid multi-clicks on the same attachment and section coalesce into a single in-flight `Promise` in `_activeReaderNavigations`, with `.finally()` cleanup guaranteeing no stuck promises on early returns.
+   - **Deadline Bounds**: Both PDF outline polling and HTML document readiness are bounded by a strict 3.5-second timeout, immediately failing open if the reader takes longer to load.

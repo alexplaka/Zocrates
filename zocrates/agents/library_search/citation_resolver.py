@@ -15,7 +15,7 @@ __all__ = [
     "build_coordinator_view",
 ]
 
-MAX_EXTRACTIVE_QUOTE_CHARS: int = 1000
+MAX_EXTRACTIVE_QUOTE_CHARS: int | None = None
 
 # Regex patterns for citations:
 # Standard brackets with optional E/Chunk prefix: [1], [E 1], [Chunk 2], [1, 2], [1; 3]
@@ -448,7 +448,10 @@ def resolve_citations_and_references(
 
         sec = str(chunk.get("heading") or "").strip()
         raw_text = str(chunk.get("text") or "").strip()
-        quote = raw_text[:MAX_EXTRACTIVE_QUOTE_CHARS] + ("..." if len(raw_text) > MAX_EXTRACTIVE_QUOTE_CHARS else "")
+        if MAX_EXTRACTIVE_QUOTE_CHARS and len(raw_text) > MAX_EXTRACTIVE_QUOTE_CHARS:
+            quote = raw_text[:MAX_EXTRACTIVE_QUOTE_CHARS] + "..."
+        else:
+            quote = raw_text
         pub = _resolve_publication(item_key, att_key, zotero_dir=zotero_dir, cache=pub_cache)
 
         citation_dict: dict[str, Any] = {

@@ -687,6 +687,36 @@ a {
   border: 1px solid var(--border);
   border-radius: 8px;
   font-size: 0.78rem;
+  white-space: nowrap;
+  gap: 0.75rem;
+  overflow: hidden;
+}
+
+.reader-status-label {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.reader-outline-badge {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  transition: all 0.3s ease;
+}
+
+.reader-outline-badge.active-jump {
+  background: rgba(16, 185, 129, 0.2);
+  border-color: var(--success);
+  color: var(--success);
 }
 
 .pdf-page-canvas {
@@ -722,25 +752,43 @@ a {
 .pdf-section-heading {
   font-weight: 700;
   color: var(--text-main);
-  font-size: 0.85rem;
+  font-size: 0.88rem;
   margin-top: 0.25rem;
-}
-
-.pdf-highlight-passage {
-  background: rgba(245, 158, 11, 0.18);
-  border-left: 3px solid var(--warning);
-  padding: 0.55rem 0.75rem;
-  border-radius: 4px;
-  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.35rem 0.6rem;
+  border-radius: 6px;
+  border-left: 3px solid transparent;
   transition: all 0.3s ease;
 }
 
-.pdf-highlight-passage.flash-active {
-  background: rgba(16, 185, 129, 0.32);
+.pdf-section-heading.flash-active {
+  background: rgba(16, 185, 129, 0.14);
   border-left-color: var(--success);
-  border-left-width: 4px;
-  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.4);
-  transform: translateX(4px);
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.3);
+  transform: translateX(3px);
+}
+
+.pdf-outline-dest-tag {
+  font-size: 0.68rem;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  color: var(--success);
+  opacity: 0;
+  transform: scale(0.95);
+  transition: all 0.25s ease;
+  white-space: nowrap;
+}
+
+.pdf-section-heading.flash-active .pdf-outline-dest-tag {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.pdf-passage-text {
+  color: var(--text-secondary);
+  line-height: 1.6;
 }
 
 .pdf-area-crop-box {
@@ -863,6 +911,15 @@ a {
   background: var(--bg-card);
   border: 1px solid var(--border);
   color: var(--text-secondary);
+  transition: all 0.3s ease;
+}
+
+.context-chip.flash-chip {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.45);
+  transform: translateY(-1px);
 }
 
 .context-chip.excerpt-pill {
