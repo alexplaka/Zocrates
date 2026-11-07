@@ -1,6 +1,6 @@
 # Zocrates
 
-Zocrates is an LLM-powered assistant copilot and scholarly research agent embedded directly within the [Zotero](https://www.zotero.org/) desktop environment. It connects your local academic library to multi-agent retrieval workflows, hybrid vector/keyword search, AI decision-model citation verification, and online literature discovery.
+Zocrates is an LLM-powered scholarly research assistant embedded directly within the [Zotero](https://www.zotero.org/) desktop environment. It connects your local academic library to multi-agent retrieval workflows, hybrid vector/keyword search, AI decision-model citation verification, and online literature discovery.
 
 > **Why "Zocrates"?**  
 > The name **Zocrates** is a portmanteau of **Zotero** and **Socrates**, honoring the classical philosopher renowned for dialectical inquiry and intellectual honesty. Rather than acting as an ungrounded oracle, Zocrates embodies the Socratic method by actively questioning literature, probing research gaps, and demanding verifiable evidence for every claim. It transforms your personal Zotero collection from a passive repository into an inquisitive, rigorous dialogue partner.
