@@ -489,13 +489,13 @@ async def test_verify_citations_support_local_laya_batch(sample_ranked_chunks):
 # 11. Default Model and Logging Tests
 # ---------------------------------------------------------------------------
 def test_default_citation_verification_model():
-    """Verify default citation verification model is typesafe/jev-1.14 (Recommended tier, §5.2)."""
+    """Verify default citation verification model is ~typesafe/jev-latest (Recommended tier, §5.2)."""
     from zocrates.agents.library_search.citation_verifier import DEFAULT_OPENROUTER_MODEL
     from zocrates.config import DEFAULT_CITATION_VERIFICATION_MODEL, DEFAULT_CONFIG
 
-    assert DEFAULT_CITATION_VERIFICATION_MODEL == "typesafe/jev-1.14"
-    assert DEFAULT_OPENROUTER_MODEL == "typesafe/jev-1.14"
-    assert DEFAULT_CONFIG["citation_verification_model"] == "typesafe/jev-1.14"
+    assert DEFAULT_CITATION_VERIFICATION_MODEL == "~typesafe/jev-latest"
+    assert DEFAULT_OPENROUTER_MODEL == "~typesafe/jev-latest"
+    assert DEFAULT_CONFIG["citation_verification_model"] == "~typesafe/jev-latest"
 
 
 @pytest.mark.asyncio
@@ -911,7 +911,7 @@ async def test_compound_citation_prompt_instruction_dispatch():
 
     captured_calls = []
 
-    def mock_check(claim, source_text, model="typesafe/jev-1.14", api_key=None, timeout=10.0, is_compound=False):
+    def mock_check(claim, source_text, model="~typesafe/jev-latest", api_key=None, timeout=10.0, is_compound=False):
         captured_calls.append({"claim": claim, "is_compound": is_compound})
         return 0.85
 

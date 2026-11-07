@@ -770,36 +770,24 @@ body[data-theme="sepia"] .modal-input {
 .citation-support-stats {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   font-size: calc(11.5px * var(--chat-font-scale, 1));
-  line-height: 1.45;
+  line-height: 1.4;
 }
 
 .citation-support-mean {
-  font-weight: 600;
+  font-weight: 500;
   font-family: var(--font-family-mono);
   color: var(--text-main);
-  font-size: calc(12px * var(--chat-font-scale, 1));
+  font-size: calc(11.5px * var(--chat-font-scale, 1));
 }
 
 .citation-support-counts {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  display: block;
   color: var(--text-muted);
   font-size: calc(11px * var(--chat-font-scale, 1));
-}
-
-.citation-support-bullet {
-  padding-left: 6px;
-}
-
-.citation-support-bullet.verified {
-  color: #10b981;
-}
-
-.citation-support-bullet.rejected {
-  color: #f87171;
+  line-height: 1.4;
+  white-space: normal;
 }
 
 .citation-support-toggle-btn {

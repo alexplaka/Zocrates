@@ -182,7 +182,7 @@ async function runTests() {
       email: "me@example.edu",
     });
     assert.strictEqual(p.llmConfig.reranker_model, "qwen/qwen3-reranker-8b");
-    assert.strictEqual(p.llmConfig.citation_verification_model, "typesafe/jev-1.14");
+    assert.strictEqual(p.llmConfig.citation_verification_model, "~typesafe/jev-latest");
     assert.strictEqual(p.llmConfig.override_agent_models.library_synthesizer.model, "openrouter/google/gemini-3.8-flash");
     assert.strictEqual(p.llmConfig.override_agent_models.coordinator.model, null);
     assert.strictEqual(p.llmConfig.openrouter_api_key, "sk-test");

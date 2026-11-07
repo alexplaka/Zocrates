@@ -2632,7 +2632,7 @@ const ONBOARDING_PRESETS = {
       },
       reranker_model: "qwen/qwen3-reranker-8b",
       citation_verification_provider: "openrouter",
-      citation_verification_model: "typesafe/jev-1.14",
+      citation_verification_model: "~typesafe/jev-latest",
       enable_predictive_ghost_input: true,
       predictive_prompt_model: "openrouter/~deepseek/deepseek-flash-latest",
       compaction_summarizer_model: "openrouter/~deepseek/deepseek-flash-latest",
@@ -6917,6 +6917,8 @@ function openMessageInfoModal(meta) {
       const valEl = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
       valEl.className = "info-meta-value citation-support-value";
 
+      const threshFmt = Number(threshold).toFixed(3);
+
       const statsBox = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
       statsBox.className = "citation-support-stats";
 
@@ -6927,31 +6929,9 @@ function openMessageInfoModal(meta) {
 
       const countsBox = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
       countsBox.className = "citation-support-counts";
-
-      const totalLine = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
-      totalLine.textContent = `${total} claims evaluated:`;
-      countsBox.appendChild(totalLine);
-
-      const threshFmt = Number(threshold).toFixed(3);
-
-      const verifiedLine = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
-      verifiedLine.className = "citation-support-bullet verified";
-      verifiedLine.textContent = `• ${kept} verified (p ≥ ${threshFmt})`;
-      countsBox.appendChild(verifiedLine);
-
-      const rejectedLine = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
-      rejectedLine.className = "citation-support-bullet rejected";
-      rejectedLine.textContent = `• ${demoted} rejected (p < ${threshFmt})`;
-      countsBox.appendChild(rejectedLine);
-
-      if (failOpen > 0) {
-        const failOpenLine = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
-        failOpenLine.className = "citation-support-bullet fail-open";
-        failOpenLine.textContent = `• ${failOpen} unverified (fail-open)`;
-        countsBox.appendChild(failOpenLine);
-      }
-
+      countsBox.textContent = `${total} claims evaluated: ${kept} verified (p ≥ ${threshFmt}), ${demoted} rejected (p < ${threshFmt})${failOpen > 0 ? `, ${failOpen} unverified` : ""}`;
       statsBox.appendChild(countsBox);
+
       valEl.appendChild(statsBox);
 
       row.appendChild(valEl);
@@ -7729,7 +7709,7 @@ function createCitationToggleBtn(wrapperDiv) {
   toggleBtn.innerHTML = `
     <svg class="citation-toggle-icon icon-visible ${isCurrentlyHidden ? 'hidden' : ''}" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="currentColor" d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
     <svg class="citation-toggle-icon icon-hidden ${isCurrentlyHidden ? '' : 'hidden'}" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="currentColor" d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.44-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z"/></svg>
-    <span class="citation-toggle-label">${isCurrentlyHidden ? "Citations: Hidden" : "Citations"}</span>
+    <span class="citation-toggle-label">${isCurrentlyHidden ? "Citations: Hidden" : "Citations: Visible"}</span>
   `;
 
   toggleBtn.addEventListener("click", (e) => {
@@ -7748,7 +7728,7 @@ function createCitationToggleBtn(wrapperDiv) {
     } else {
       toggleBtn.classList.remove("muted");
       toggleBtn.setAttribute("title", "Hide citations");
-      if (label) label.textContent = "Citations";
+      if (label) label.textContent = "Citations: Visible";
       if (iconVis) iconVis.classList.remove("hidden");
       if (iconHid) iconHid.classList.add("hidden");
     }
@@ -8015,11 +7995,11 @@ function createClaimsInspectorBtn(wrapperDiv) {
   const btn = document.createElementNS("http://www.w3.org/1999/xhtml", "button");
   btn.className = "claims-inspector-btn";
   btn.setAttribute("type", "button");
-  btn.textContent = total > 0 ? `🛡️ Claims (${verified}/${total})` : "🛡️ Inspect Claims";
+  btn.textContent = "🛡️ Claim Verification Inspector";
   btn.setAttribute(
     "title",
     total > 0
-      ? `Inspect claim verification table (${verified} verified, ${demoted} rejected)`
+      ? `Inspect claim verification table (${verified} verified, ${demoted} rejected of ${total} total)`
       : "Inspect claim verification table"
   );
 
@@ -8060,9 +8040,9 @@ function ensureClaimsInspectorBtn(wrapperDiv) {
   const total = summary.batch_size !== undefined ? summary.batch_size : data.assessments.length;
   const verified = summary.kept !== undefined ? summary.kept : data.assessments.filter(a => a.verdict === "KEPT").length;
   const demoted = summary.demoted !== undefined ? summary.demoted : data.assessments.filter(a => a.verdict === "DEMOTED").length;
-  const btnLabel = total > 0 ? `🛡️ Claims (${verified}/${total})` : "🛡️ Inspect Claims";
+  const btnLabel = "🛡️ Claim Verification Inspector";
   const btnTitle = total > 0
-    ? `Inspect claim verification table (${verified} verified, ${demoted} rejected)`
+    ? `Inspect claim verification table (${verified} verified, ${demoted} rejected of ${total} total)`
     : "Inspect claim verification table";
 
   const existingBtn = leftContainer.querySelector(".claims-inspector-btn");

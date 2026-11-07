@@ -49,7 +49,7 @@ __all__ = [
 # Service endpoints & defaults
 OPENROUTER_DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions"
 OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
-DEFAULT_OPENROUTER_MODEL = "typesafe/jev-1.14"
+DEFAULT_OPENROUTER_MODEL = "~typesafe/jev-latest"
 DEFAULT_LOCAL_URL = "http://127.0.0.1:8005/v1/systemone"
 DEFAULT_HEALTH_TIMEOUT_SEC: float = 0.150  # 150ms probe
 DEFAULT_TIMEOUT_SEC: float = 10.0

@@ -1128,9 +1128,7 @@ async function runTests() {
 
       const countsBox = citRow.querySelector(".citation-support-counts");
       assert.ok(countsBox, "Counts box must exist");
-      assert.ok(countsBox.textContent.includes("2 claims evaluated:"));
-      assert.ok(countsBox.textContent.includes("• 2 verified (p ≥ 0.600)"));
-      assert.ok(countsBox.textContent.includes("• 0 rejected (p < 0.600)"));
+      assert.ok(countsBox.textContent.includes("2 claims evaluated: 2 verified (p ≥ 0.600), 0 rejected (p < 0.600)"));
 
       // demoted === 0 -> no toggle button or drawer
       const toggleBtn = citRow.querySelector(".citation-support-toggle-btn");
@@ -1199,9 +1197,7 @@ async function runTests() {
       assert.strictEqual(meanEl.textContent, "Mean p: 0.620 ± 0.325 (std)");
 
       const countsBox = citRow.querySelector(".citation-support-counts");
-      assert.ok(countsBox.textContent.includes("2 claims evaluated:"));
-      assert.ok(countsBox.textContent.includes("• 1 verified (p ≥ 0.600)"));
-      assert.ok(countsBox.textContent.includes("• 1 rejected (p < 0.600)"));
+      assert.ok(countsBox.textContent.includes("2 claims evaluated: 1 verified (p ≥ 0.600), 1 rejected (p < 0.600)"));
 
       // Verify cramped drawer and toggle button are removed from modal
       const toggleBtn = citRow.querySelector(".citation-support-toggle-btn");
@@ -1253,7 +1249,7 @@ async function runTests() {
       assert.strictEqual(meanEl0.textContent, "Mean p: N/A");
 
       const countsBox0 = overlay0.querySelector(".citation-support-counts");
-      assert.ok(countsBox0.textContent.includes("• 1 unverified (fail-open)"));
+      assert.ok(countsBox0.textContent.includes("1 unverified"));
     } finally {
       document.querySelectorAll(".info-modal-overlay").forEach(el => el.remove());
     }
@@ -1483,10 +1479,10 @@ async function runTests() {
 
     const claimsBtn = actionsLeftDiv.querySelector(".claims-inspector-btn");
     assert.ok(claimsBtn, "Claims Inspector button must be created in .message-actions-left");
-    assert.strictEqual(claimsBtn.textContent, "🛡️ Claims (3/5)");
+    assert.strictEqual(claimsBtn.textContent, "🛡️ Claim Verification Inspector");
     assert.strictEqual(
       claimsBtn.getAttribute("title"),
-      "Inspect claim verification table (3 verified, 2 rejected)"
+      "Inspect claim verification table (3 verified, 2 rejected of 5 total)"
     );
 
     // Verify ordering: toggleBtn comes first, claimsBtn is directly next to it
