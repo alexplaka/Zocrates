@@ -6954,131 +6954,6 @@ function openMessageInfoModal(meta) {
       statsBox.appendChild(countsBox);
       valEl.appendChild(statsBox);
 
-      if (demoted > 0) {
-        let rejectedItems = assessments.filter(a =>
-          a.verdict === "DEMOTED" ||
-          (typeof a.support_probability === "number" && a.support_probability < (a.threshold !== undefined ? a.threshold : threshold))
-        );
-
-        if (rejectedItems.length === 0 && citations.length > 0) {
-          citations.forEach(c => {
-            const occs = c.occurrences || (c.support_probability !== undefined ? [{ support_probability: c.support_probability, survived: c.support_probability >= threshold }] : []);
-            occs.forEach(o => {
-              if (o.survived === false || (typeof o.support_probability === "number" && o.support_probability < threshold)) {
-                rejectedItems.push({
-                  claim: o.claim || c.claim || "Citation claim",
-                  source_text: c.quote || c.text || "",
-                  title: c.title || "",
-                  authors: c.authors || [],
-                  year: c.year || "",
-                  section: c.section || "",
-                  support_probability: o.support_probability,
-                  threshold: threshold,
-                  verdict: "DEMOTED"
-                });
-              }
-            });
-          });
-        }
-
-        const toggleBtn = document.createElementNS("http://www.w3.org/1999/xhtml", "button");
-        toggleBtn.type = "button";
-        toggleBtn.className = "citation-support-toggle-btn";
-        toggleBtn.textContent = "Show details ▾";
-
-        const drawer = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
-        drawer.className = "citation-rejected-drawer";
-        drawer.style.display = "none";
-
-        rejectedItems.forEach(item => {
-          const card = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
-          card.className = "citation-rejected-card";
-
-          // 1. Claim FIRST (user requirement)
-          const claimRow = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
-          claimRow.className = "citation-rejected-claim-row";
-
-          const claimLabel = document.createElementNS("http://www.w3.org/1999/xhtml", "span");
-          claimLabel.className = "citation-rejected-claim-label";
-          claimLabel.textContent = "Claim:";
-
-          const claimText = document.createElementNS("http://www.w3.org/1999/xhtml", "span");
-          claimText.className = "citation-rejected-claim-text";
-          claimText.textContent = (item.claim || "No claim recorded").trim();
-
-          claimRow.appendChild(claimLabel);
-          claimRow.appendChild(claimText);
-          card.appendChild(claimRow);
-
-          // 2. Paper & Section: Author (Year) · § Section
-          let authorTag = "";
-          if (Array.isArray(item.authors) && item.authors.length > 0) {
-            const cleanAuthors = item.authors.map(a => String(a).split(",")[0].trim()).filter(Boolean);
-            if (cleanAuthors.length === 1) authorTag = cleanAuthors[0];
-            else if (cleanAuthors.length === 2) authorTag = cleanAuthors[0] + " & " + cleanAuthors[1];
-            else if (cleanAuthors.length > 2) authorTag = cleanAuthors[0] + " et al.";
-          } else if (typeof item.authors === "string" && item.authors.trim()) {
-            authorTag = item.authors.trim();
-          }
-
-          const paperLabel = item.title || "";
-          if (!authorTag) {
-            authorTag = paperLabel ? (paperLabel.length > 28 ? paperLabel.slice(0, 26) + "…" : paperLabel) : "Unknown Source";
-          }
-          const yearTag = item.year ? ` (${item.year})` : "";
-          const sectionTag = (item.section || item.heading || "").trim();
-
-          const paperRow = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
-          paperRow.className = "citation-rejected-paper-row";
-
-          const paperInfo = document.createElementNS("http://www.w3.org/1999/xhtml", "span");
-          paperInfo.className = "citation-rejected-paper-info";
-          paperInfo.textContent = `${authorTag}${yearTag}${sectionTag ? ` · § ${sectionTag}` : ""}`;
-          if (paperLabel) paperInfo.title = paperLabel;
-
-          paperRow.appendChild(paperInfo);
-          card.appendChild(paperRow);
-
-          // 3. Evaluated Passage (subtle quote container)
-          const passageText = (item.source_text || item.quote || item.text || "").trim();
-          if (passageText) {
-            const passageContainer = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
-            passageContainer.className = "citation-rejected-passage";
-            passageContainer.textContent = `"${passageText}"`;
-            card.appendChild(passageContainer);
-          }
-
-          // 4. Score: p = 0.xxx < 0.yyy (threshold)
-          const pVal = typeof item.support_probability === "number"
-            ? Math.max(0, Math.min(1, item.support_probability)).toFixed(3)
-            : "N/A";
-          const tVal = typeof item.threshold === "number"
-            ? Number(item.threshold).toFixed(3)
-            : Number(threshold).toFixed(3);
-
-          const scoreRow = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
-          scoreRow.className = "citation-rejected-score-row";
-
-          const scoreBadge = document.createElementNS("http://www.w3.org/1999/xhtml", "span");
-          scoreBadge.className = "citation-rejected-score-badge";
-          scoreBadge.textContent = `p = ${pVal} < ${tVal} (threshold)`;
-
-          scoreRow.appendChild(scoreBadge);
-          card.appendChild(scoreRow);
-
-          drawer.appendChild(card);
-        });
-
-        toggleBtn.addEventListener("click", () => {
-          const isHidden = drawer.style.display === "none";
-          drawer.style.display = isHidden ? "flex" : "none";
-          toggleBtn.textContent = isHidden ? "Hide details ▴" : "Show details ▾";
-        });
-
-        valEl.appendChild(toggleBtn);
-        valEl.appendChild(drawer);
-      }
-
       row.appendChild(valEl);
       table.appendChild(row);
     }
@@ -7905,7 +7780,266 @@ function ensureCitationToggleBtn(wrapperDiv) {
   }
   if (leftContainer.querySelector(".citation-toggle-btn")) return;
   const toggleBtn = createCitationToggleBtn(wrapperDiv);
-  leftContainer.appendChild(toggleBtn);
+  const existingClaimsBtn = leftContainer.querySelector(".claims-inspector-btn");
+  if (existingClaimsBtn) {
+    leftContainer.insertBefore(toggleBtn, existingClaimsBtn);
+  } else {
+    leftContainer.appendChild(toggleBtn);
+  }
+}
+
+/**
+ * Resolves an item selection in the Zotero library tree.
+ */
+function selectItemInLibrary(itemKey) {
+  return selectItemInZotero(itemKey);
+}
+
+/**
+ * Builds normalized data payload for the dedicated Claim Verification Inspector window.
+ * Reconciles verification assessments, summaries, and citations metadata.
+ */
+function buildClaimsInspectorData(meta) {
+  if (!meta) {
+    return {
+      assessments: [],
+      summary: { batch_size: 0, kept: 0, demoted: 0, fail_open: 0, mean_support: null, std_support: null, threshold: 0.60, latency_ms: null },
+      model: "decision-model",
+      provider: "openrouter",
+      threshold: 0.60,
+      latency_ms: null,
+      theme: (typeof document !== "undefined" && document.body?.getAttribute?.("data-theme")) || "slate"
+    };
+  }
+
+  const ver = meta.citation_verification || meta.citation_verification_telemetry || null;
+  const citations = Array.isArray(meta.citations) ? meta.citations : [];
+  let rows = [];
+
+  if (ver && Array.isArray(ver.assessments) && ver.assessments.length > 0) {
+    // Clone assessments to prevent mutating caller metadata
+    rows = ver.assessments.map(a => Object.assign({}, a));
+
+    // Cross-reference with citations to backfill any missing item_key, attachment_key, or citation metadata
+    if (citations.length > 0) {
+      rows.forEach(a => {
+        const c = citations.find(item =>
+          (item.index !== undefined && item.index === a.chunk_index) ||
+          (item.chunk_index !== undefined && item.chunk_index === a.chunk_index)
+        );
+        if (c) {
+          if (!a.item_key && c.item_key) a.item_key = String(c.item_key);
+          if (!a.attachment_key && c.attachment_key) a.attachment_key = c.attachment_key;
+          if (!a.title && c.title) a.title = c.title;
+          if ((!a.authors || a.authors.length === 0) && c.authors) a.authors = c.authors;
+          if (!a.year && c.year) a.year = c.year;
+          if (!a.section && c.section) a.section = c.section;
+          if (!a.source_text && (c.quote || c.text)) a.source_text = c.quote || c.text;
+        }
+      });
+    }
+  } else if (citations.length > 0) {
+    // Construct rows from citation occurrences when raw assessments array is absent
+    citations.forEach(c => {
+      const cIdx = c.index !== undefined ? c.index : (c.chunk_index !== undefined ? c.chunk_index : 1);
+      const occurrences = (Array.isArray(c.occurrences) && c.occurrences.length > 0)
+        ? c.occurrences
+        : (c.support_probability !== undefined
+            ? [{ occurrence: 1, support_probability: c.support_probability, survived: c.support_probability >= (c.threshold !== undefined ? c.threshold : 0.60) }]
+            : []);
+
+      if (occurrences.length > 0) {
+        occurrences.forEach(occ => {
+          const prob = occ.support_probability !== undefined ? occ.support_probability : (c.support_probability !== undefined ? c.support_probability : null);
+          const thresh = occ.threshold !== undefined ? occ.threshold : (c.threshold !== undefined ? c.threshold : 0.60);
+          let verdict = occ.verdict;
+          if (!verdict) {
+            if (prob === null || prob === undefined) verdict = "FAIL_OPEN";
+            else if (occ.survived === true || prob >= thresh) verdict = "KEPT";
+            else verdict = "DEMOTED";
+          }
+          rows.push({
+            chunk_index: cIdx,
+            occurrence: occ.occurrence || 1,
+            claim: occ.claim || c.claim || "Citation claim",
+            source_text: occ.source_text || c.quote || c.text || "",
+            title: c.title || "",
+            authors: c.authors || [],
+            year: c.year || "",
+            section: c.section || "",
+            item_key: c.item_key ? String(c.item_key) : "",
+            attachment_key: c.attachment_key || null,
+            support_probability: prob,
+            threshold: thresh,
+            verdict: verdict,
+            latency_ms: occ.latency_ms || null
+          });
+        });
+      }
+    });
+  }
+
+  // Determine or compute summary stats
+  let summary = (ver && ver.summary) ? Object.assign({}, ver.summary) : null;
+  const threshold = (ver && ver.threshold !== undefined)
+    ? ver.threshold
+    : (summary?.threshold !== undefined ? summary.threshold : (rows[0]?.threshold ?? 0.60));
+
+  if (!summary || summary.batch_size === undefined) {
+    const kept = rows.filter(r => r.verdict === "KEPT").length;
+    const demoted = rows.filter(r => r.verdict === "DEMOTED").length;
+    const failOpen = rows.filter(r => r.verdict === "FAIL_OPEN" || r.support_probability === null || r.support_probability === undefined).length;
+    const validProbs = rows.map(r => r.support_probability).filter(p => typeof p === "number");
+    const mean = validProbs.length > 0 ? Number((validProbs.reduce((a, b) => a + b, 0) / validProbs.length).toFixed(3)) : null;
+    let std = null;
+    if (validProbs.length >= 2) {
+      const vMean = validProbs.reduce((a, b) => a + b, 0) / validProbs.length;
+      std = Number(Math.sqrt(validProbs.reduce((acc, p) => acc + Math.pow(p - vMean, 2), 0) / (validProbs.length - 1)).toFixed(3));
+    } else if (validProbs.length === 1) {
+      std = 0.0;
+    }
+
+    summary = {
+      batch_size: rows.length,
+      kept,
+      demoted,
+      fail_open: failOpen,
+      mean_support: mean,
+      std_support: std,
+      threshold,
+      latency_ms: ver?.latency_ms ?? null
+    };
+  }
+
+  return {
+    assessments: rows,
+    summary,
+    model: ver?.model || meta.model || "decision-model",
+    provider: ver?.provider || "openrouter",
+    threshold,
+    latency_ms: (ver && ver.latency_ms !== undefined) ? ver.latency_ms : (summary?.latency_ms ?? null),
+    theme: meta.theme || (typeof document !== "undefined" && document.body?.getAttribute?.("data-theme")) || "slate"
+  };
+}
+
+/**
+ * Opens the standalone Claim Verification Inspector dialog window.
+ */
+function openClaimsInspectorWindow(meta = {}) {
+  const payload = buildClaimsInspectorData(meta);
+  payload.theme = (typeof document !== "undefined" && document.body?.getAttribute?.("data-theme")) || payload.theme || "slate";
+
+  try {
+    if (window.top) window.top._zocratesCurrentClaimsData = payload;
+    window._zocratesCurrentClaimsData = payload;
+    const Zotero = window.Zotero || window.top?.Zotero;
+    if (Zotero?.Zocrates) Zotero.Zocrates._currentClaimsData = payload;
+  } catch (e) {}
+
+  try {
+    const mainWin = window.top || window.parent || window;
+    if (mainWin && typeof mainWin.openDialog === "function") {
+      const win = mainWin.openDialog(
+        "chrome://zocrates/content/claims.html",
+        "zocrates-claims-window",
+        "chrome,centerscreen,resizable=yes,width=1180,height=760",
+        payload
+      );
+      if (win) {
+        win.updateClaimsData?.(payload);
+        win.focus?.();
+        return;
+      }
+      throw new Error("Dialog window could not be opened");
+    }
+    throw new Error("openDialog is not available on parent window");
+  } catch (err) {
+    console.error("Zocrates: Failed to open claim verification inspector window:", err);
+    if (typeof addNotification === "function") {
+      addNotification("Could not open claim verification inspector: " + (err?.message || err));
+    }
+  }
+}
+
+/**
+ * Creates the Claims Inspector action button for an assistant message.
+ */
+function createClaimsInspectorBtn(wrapperDiv) {
+  const bubble = wrapperDiv ? wrapperDiv.querySelector(".message-bubble") : null;
+  const meta = (bubble && bubble._metadata) || (wrapperDiv && wrapperDiv._metadata) || (wrapperDiv?.querySelector(".info-btn")?._metadata) || {};
+  const data = buildClaimsInspectorData(meta);
+  const summary = data.summary || {};
+  const total = summary.batch_size !== undefined ? summary.batch_size : data.assessments.length;
+  const verified = summary.kept !== undefined ? summary.kept : data.assessments.filter(a => a.verdict === "KEPT").length;
+  const demoted = summary.demoted !== undefined ? summary.demoted : data.assessments.filter(a => a.verdict === "DEMOTED").length;
+
+  const btn = document.createElementNS("http://www.w3.org/1999/xhtml", "button");
+  btn.className = "claims-inspector-btn";
+  btn.setAttribute("type", "button");
+  btn.textContent = total > 0 ? `🛡️ Claims (${verified}/${total})` : "🛡️ Inspect Claims";
+  btn.setAttribute(
+    "title",
+    total > 0
+      ? `Inspect claim verification table (${verified} verified, ${demoted} rejected)`
+      : "Inspect claim verification table"
+  );
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const currentMeta = (bubble && bubble._metadata) || (wrapperDiv && wrapperDiv._metadata) || (wrapperDiv?.querySelector(".info-btn")?._metadata) || meta;
+    openClaimsInspectorWindow(currentMeta);
+  });
+
+  return btn;
+}
+
+/**
+ * Ensures the Claims Inspector action button exists in .message-actions-left next to .citation-toggle-btn.
+ */
+function ensureClaimsInspectorBtn(wrapperDiv) {
+  if (!wrapperDiv) return;
+  const bubble = wrapperDiv.querySelector(".message-bubble");
+  const meta = (bubble && bubble._metadata) || wrapperDiv._metadata || (wrapperDiv.querySelector(".info-btn")?._metadata) || null;
+
+  const data = buildClaimsInspectorData(meta);
+  if (!data || !data.assessments || data.assessments.length === 0) {
+    const existing = wrapperDiv.querySelector(".claims-inspector-btn");
+    if (existing) existing.remove();
+    return;
+  }
+
+  let leftContainer = wrapperDiv.querySelector(".message-actions-left");
+  if (!leftContainer) {
+    const actionsDiv = wrapperDiv.querySelector(".message-actions");
+    if (!actionsDiv) return;
+    leftContainer = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+    leftContainer.className = "message-actions-left";
+    actionsDiv.insertBefore(leftContainer, actionsDiv.firstChild);
+  }
+
+  const summary = data.summary || {};
+  const total = summary.batch_size !== undefined ? summary.batch_size : data.assessments.length;
+  const verified = summary.kept !== undefined ? summary.kept : data.assessments.filter(a => a.verdict === "KEPT").length;
+  const demoted = summary.demoted !== undefined ? summary.demoted : data.assessments.filter(a => a.verdict === "DEMOTED").length;
+  const btnLabel = total > 0 ? `🛡️ Claims (${verified}/${total})` : "🛡️ Inspect Claims";
+  const btnTitle = total > 0
+    ? `Inspect claim verification table (${verified} verified, ${demoted} rejected)`
+    : "Inspect claim verification table";
+
+  const existingBtn = leftContainer.querySelector(".claims-inspector-btn");
+  if (existingBtn) {
+    existingBtn.textContent = btnLabel;
+    existingBtn.setAttribute("title", btnTitle);
+    return;
+  }
+
+  const btn = createClaimsInspectorBtn(wrapperDiv);
+  const citationToggle = leftContainer.querySelector(".citation-toggle-btn");
+  if (citationToggle && citationToggle.nextSibling) {
+    leftContainer.insertBefore(btn, citationToggle.nextSibling);
+  } else {
+    leftContainer.appendChild(btn);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -9003,9 +9137,11 @@ function appendMessageDOM(role, text, isMarkdown = true, timestamp = null, autho
     citations: metadata?.citations || null,
     references: metadata?.references || null,
     candidates: metadata?.candidates || null,
-    citation_verification: metadata?.citation_verification || null
+    citation_verification: metadata?.citation_verification || metadata?.citation_verification_telemetry || null
   };
   infoBtn._metadata = messageMeta;
+  wrapperDiv._metadata = messageMeta;
+  msgDiv._metadata = messageMeta;
 
   infoBtn.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -9024,6 +9160,10 @@ function appendMessageDOM(role, text, isMarkdown = true, timestamp = null, autho
     renderCandidatePapersGroup(wrapperDiv, metadata.candidates, metadata.invocation_id);
   }
   wrapperDiv.appendChild(actionsDiv);
+
+  if (role === "assistant") {
+    ensureClaimsInspectorBtn(wrapperDiv);
+  }
 
   chatMessages.appendChild(wrapperDiv);
   chatMessages.scrollTop = chatMessages.scrollHeight;
@@ -9630,6 +9770,7 @@ function finalizeChatStream(streamCtx, isAborted = false) {
         const existingToggle = wrapperDiv.querySelector(".citation-toggle-btn");
         if (existingToggle) existingToggle.remove();
       }
+      ensureClaimsInspectorBtn(wrapperDiv);
       if (finalMeta.candidates && Array.isArray(finalMeta.candidates) && finalMeta.candidates.length > 0) {
         renderCandidatePapersGroup(wrapperDiv, finalMeta.candidates, streamCtx.streamInvocationId);
       }
@@ -9772,8 +9913,11 @@ async function runChatStreamReader(res, streamCtx) {
         streamCtx.assistantBubble.innerHTML = formatMessageContent(streamCtx.currentResponseText, streamMeta);
         fixCodeBlockCopyButtons(streamCtx.assistantBubble);
         decorateAssetImages(streamCtx.assistantBubble);
-        if (streamCtx.assistantBubble.parentElement && hasMessageCitations(streamCtx.currentResponseText, streamMeta)) {
-          ensureCitationToggleBtn(streamCtx.assistantBubble.parentElement);
+        if (streamCtx.assistantBubble.parentElement) {
+          if (hasMessageCitations(streamCtx.currentResponseText, streamMeta)) {
+            ensureCitationToggleBtn(streamCtx.assistantBubble.parentElement);
+          }
+          ensureClaimsInspectorBtn(streamCtx.assistantBubble.parentElement);
         }
         if (chatMessages) chatMessages.scrollTop = chatMessages.scrollHeight;
       }
@@ -14805,8 +14949,22 @@ if (typeof module === "undefined") {
   }
 }
 
+if (typeof window !== "undefined") {
+  window.buildClaimsInspectorData = buildClaimsInspectorData;
+  window.openClaimsInspectorWindow = openClaimsInspectorWindow;
+  window.createClaimsInspectorBtn = createClaimsInspectorBtn;
+  window.ensureClaimsInspectorBtn = ensureClaimsInspectorBtn;
+  window.selectItemInLibrary = selectItemInLibrary;
+  window.openItemInReader = openItemInReader;
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
+    buildClaimsInspectorData,
+    openClaimsInspectorWindow,
+    createClaimsInspectorBtn,
+    ensureClaimsInspectorBtn,
+    selectItemInLibrary,
     sanitizeHTML,
     isSafeUrl,
     isSafeLinkUrl,

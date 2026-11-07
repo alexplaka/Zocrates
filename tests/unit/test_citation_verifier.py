@@ -964,6 +964,8 @@ async def test_verify_citations_support_telemetry_schema_and_verdicts(sample_ran
     assert a1["section"] == "Methods"
     assert a1["authors"] == ["Jonsson, Hakon", "Stefansson, Kari"]
     assert a1["year"] == "2021"
+    assert a1["item_key"] == "99R6SJ7T"
+    assert a1["attachment_key"] == "ATT99R6"
     assert len(a1["source_text"]) <= 1500
     assert isinstance(a1["latency_ms"], (int, float))
 

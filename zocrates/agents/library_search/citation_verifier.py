@@ -796,7 +796,7 @@ async def verify_citations_support(
             c_idx = item["chunk_index"]
             occ_idx = item["occurrence"]
             chunk = ranked_chunks[c_idx - 1] if (1 <= c_idx <= len(ranked_chunks)) else {}
-            src = prepare_source_text(chunk, item["claim"])[:1500]
+            src = prepare_source_text(chunk, item["claim"])
             input_assessments.append({
                 "chunk_index": c_idx,
                 "occurrence": occ_idx,
@@ -806,6 +806,8 @@ async def verify_citations_support(
                 "section": str(chunk.get("section") or chunk.get("heading") or ""),
                 "authors": chunk.get("authors") if chunk.get("authors") is not None else [],
                 "year": chunk.get("year") or "",
+                "item_key": str(chunk.get("item_key") or ""),
+                "attachment_key": chunk.get("attachment_key"),
             })
 
         metadata_dict = {
