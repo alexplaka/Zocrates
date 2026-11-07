@@ -1237,6 +1237,196 @@ async function runTests() {
       }
     }
   });
+
+  // 12. formatMessageContent: enriched_text vs raw unpruned text with canonical data-citation-occ
+  test("formatMessageContent: handles enriched_text with surviving occurrences and canonical data-citation-occ", () => {
+    // Occurrence 1 was rejected by verification (support_probability: 0.20, survived: false)
+    // Occurrence 2 survived (support_probability: 0.92, survived: true)
+    const metadata = {
+      citations: [
+        {
+          index: 1,
+          title: "Twins Study",
+          authors: "Jonsson et al.",
+          year: 2021,
+          section: "Methods",
+          occurrences: [
+            { occurrence: 1, survived: false, support_probability: 0.20 },
+            { occurrence: 2, survived: true, support_probability: 0.92 },
+          ],
+        },
+      ],
+      references: [
+        { title: "Twins Study", authors: "Jonsson et al.", year: 2021, tier: 1 },
+      ],
+    };
+
+    // Case A: enriched_text (where occurrence 1 was already removed from prose)
+    const enrichedText = "Only the second claim was verified [1].";
+    const renderedEnriched = sidebar.formatMessageContent(enrichedText, metadata);
+
+    assert.ok(renderedEnriched.includes('data-citation-idx="1"'));
+    assert.ok(renderedEnriched.includes('data-citation-occ="2"'), "Should attach canonical occurrence 2 to pill");
+    assert.ok(renderedEnriched.includes("Support probability: 0.92"), "Tooltip should show surviving occurrence probability");
+
+    // Case B: showEvidencePopover with this pill resolves canonical occurrence 2
+    sidebar.closeEvidencePopover();
+    const pill = createMockElement("span");
+    pill.setAttribute("data-citation-occ", "2");
+    sidebar.showEvidencePopover(pill, metadata.citations[0]);
+    const popover = env.document.body.querySelector(".evidence-popover");
+    assert.ok(popover, "Evidence popover should render");
+    const badge = popover.querySelector(".evidence-support-badge.high");
+    assert.ok(badge, "High support badge should be rendered for canonical occurrence 2");
+    assert.strictEqual(badge.textContent, "✓ Support Probability: 0.92");
+    sidebar.closeEvidencePopover();
+  });
+
+  test("formatMessageContent: handles raw unpruned text fallback and canonical data-citation-occ", () => {
+    const metadata = {
+      citations: [
+        {
+          index: 1,
+          title: "Twins Study",
+          authors: "Jonsson et al.",
+          year: 2021,
+          section: "Methods",
+          occurrences: [
+            { occurrence: 1, survived: false, support_probability: 0.20 },
+            { occurrence: 2, survived: true, support_probability: 0.92 },
+          ],
+        },
+      ],
+      references: [
+        { title: "Twins Study", authors: "Jonsson et al.", year: 2021, tier: 1 },
+      ],
+    };
+
+    // Raw unpruned text containing both occurrences in text
+    const rawText = "First ungrounded claim [1]. Second verified claim [1].";
+    const renderedRaw = sidebar.formatMessageContent(rawText, metadata);
+
+    // First [1] must NOT have a citation pill
+    assert.ok(!renderedRaw.includes("First ungrounded claim <span"), "First ungrounded claim must not have citation pill");
+    // Second [1] must have a citation pill with canonical occ 2
+    assert.ok(renderedRaw.includes('data-citation-idx="1"'));
+    assert.ok(renderedRaw.includes('data-citation-occ="2"'), "Surviving occurrence must have canonical occ 2");
+    assert.ok(renderedRaw.includes("Support probability: 0.92"));
+
+    // Verify only ONE pill is rendered total
+    const pillMatches = renderedRaw.match(/class="citation-pill"/g) || [];
+    assert.strictEqual(pillMatches.length, 1, "Only the surviving occurrence should be rendered as a pill");
+  });
+
+  test("formatMessageContent: deduplicates repeated numbers within the same bracket token", () => {
+    const metadata = {
+      citations: [
+        {
+          index: 1,
+          title: "Paper A",
+          authors: "Author A",
+          year: 2021,
+          support_probability: 0.85,
+        },
+      ],
+    };
+
+    const text = "Duplicate citation in token [1, 1].";
+    const rendered = sidebar.formatMessageContent(text, metadata);
+
+    const pillMatches = rendered.match(/data-citation-idx="1"/g) || [];
+    assert.strictEqual(pillMatches.length, 1, "Token [1, 1] must only render one citation pill for index 1");
+  });
+
+  test("formatMessageContent: strips lingering citation tokens when citations is empty and citation_verification is present", () => {
+    const metadata = {
+      citations: [],
+      citation_verification: {
+        model: "inception/mercury-decide:free",
+        summary: { batch_size: 1, kept: 0, demoted: 1 },
+      },
+    };
+
+    const text = "Claim that failed verification [1].";
+    const rendered = sidebar.formatMessageContent(text, metadata);
+    assert.ok(!rendered.includes("[1]"), "Bracket [1] should be stripped when citation verification demoted all citations");
+    assert.ok(rendered.includes("Claim that failed verification."), "Prose should be preserved");
+  });
+
+  test("finalizeChatStream: updates rawText with streamEnrichedText and verifies copy / citation toggle parity", () => {
+    const wrapper = createMockElement("div");
+    wrapper.className = "message-wrapper assistant";
+    const bubble = createMockElement("div");
+    bubble.className = "message-bubble";
+    wrapper.appendChild(bubble);
+
+    const actionsDiv = createMockElement("div");
+    actionsDiv.className = "message-actions";
+    const actionsLeft = createMockElement("div");
+    actionsLeft.className = "message-actions-left";
+    actionsDiv.appendChild(actionsLeft);
+    wrapper.appendChild(actionsDiv);
+
+    env.document.getElementById("chat-messages").appendChild(wrapper);
+
+    const rawStreamingText = "Raw streaming text with unverified citation [1].";
+    const verifiedEnrichedText = "Clean verified text without unverified citation.\n\n# Cited Sources\n- **Jonsson (2021)**. *Twins Study*.";
+
+    const streamCtx = {
+      assistantBubble: bubble,
+      currentResponseText: rawStreamingText,
+      streamEnrichedText: verifiedEnrichedText,
+      streamCitations: [],
+      streamReferences: [
+        { title: "Twins Study", authors: "Jonsson", year: 2021, tier: 1 },
+      ],
+      streamCitationVerification: { model: "inception/mercury-decide:free" },
+      streamModel: "google/gemini-2.5-flash",
+      streamUsage: { prompt_tokens: 100, candidates_tokens: 50, total_tokens: 150 },
+      streamFinishReason: "stop",
+      streamEventId: "evt-final-test",
+      streamInvocationId: "inv-final-test",
+      stepsBubble: null,
+      liveSteps: [],
+      payloadItems: [],
+      requestStartTime: Date.now() - 1000,
+      session: { messages: [] },
+    };
+
+    sidebar.finalizeChatStream(streamCtx, false);
+
+    // 1. Bubble raw text and currentResponseText should match streamEnrichedText
+    assert.strictEqual(streamCtx.currentResponseText, verifiedEnrichedText, "streamCtx.currentResponseText must be updated to streamEnrichedText");
+    assert.strictEqual(bubble._rawText, verifiedEnrichedText, "bubble._rawText must store verifiedEnrichedText");
+    assert.ok(bubble.innerHTML.includes("Clean verified text"), "Rendered innerHTML must reflect verified text");
+    assert.ok(!bubble.innerHTML.includes("[1]"), "Lingering [1] should be stripped");
+
+    // 2. Session messages must store verifiedEnrichedText
+    assert.strictEqual(streamCtx.session.messages.length, 1);
+    assert.strictEqual(streamCtx.session.messages[0].text, verifiedEnrichedText);
+
+    // 3. stripCitationsFromText preserves clean prose for copy-to-clipboard
+    const copiedCleanText = sidebar.stripCitationsFromText(bubble._rawText);
+    assert.strictEqual(copiedCleanText, "Clean verified text without unverified citation.");
+
+    // 4. Citation toggle functionality
+    assert.ok(sidebar.hasMessageCitations(bubble._rawText, bubble._metadata));
+    sidebar.ensureCitationToggleBtn(wrapper);
+    const toggleBtn = wrapper.querySelector(".citation-toggle-btn");
+    assert.ok(toggleBtn, "Citation toggle button should be present");
+
+    // Toggle off: citations hidden
+    toggleBtn.dispatchEvent("click");
+    assert.ok(wrapper.classList.contains("citations-hidden"));
+    assert.ok(toggleBtn.classList.contains("muted"));
+
+    // Toggle on: citations restored
+    toggleBtn.dispatchEvent("click");
+    assert.strictEqual(wrapper.classList.contains("citations-hidden"), false);
+    assert.strictEqual(toggleBtn.classList.contains("muted"), false);
+
+    wrapper.remove();
+  });
 }
 
 if (require.main === module) {

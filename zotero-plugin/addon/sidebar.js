@@ -5528,26 +5528,58 @@ function formatMessageContent(text, metadata = null, isUser = false) {
   const citationRegex = /\[(?:E\s?|Chunk\s?)?(\d{1,2}(?:\s*[,;]\s*\d{1,2})*)\]|【(\d{1,2}(?:\s*[,;]\s*\d{1,2})*)】/g;
 
   if (citations && citations.length > 0) {
+    const totalOccurrencesInText = {};
+    const countRegex = new RegExp(citationRegex.source, citationRegex.flags);
+    let countMatch;
+    while ((countMatch = countRegex.exec(processed)) !== null) {
+      const raw = countMatch[1] || countMatch[2] || "";
+      const parts = raw.split(/[,;]/).map(s => s.trim()).filter(Boolean);
+      const seenInCountToken = new Set();
+      for (const part of parts) {
+        const idx = parseInt(part, 10);
+        if (isNaN(idx) || seenInCountToken.has(idx)) continue;
+        seenInCountToken.add(idx);
+        totalOccurrencesInText[idx] = (totalOccurrencesInText[idx] || 0) + 1;
+      }
+    }
+
     const occCounters = {};
     // 2. Scan and replace citation tokens: [1], [1, 2], [1; 2], [Chunk 1], [E 1], 【1】
     processed = processed.replace(citationRegex, (match, p1, p2) => {
       const raw = p1 || p2 || "";
       const parts = raw.split(/[,;]/).map(s => s.trim()).filter(Boolean);
       const pills = [];
+      const seenInToken = new Set();
 
       for (const part of parts) {
         const idx = parseInt(part, 10);
-        if (isNaN(idx)) continue;
+        if (isNaN(idx) || seenInToken.has(idx)) continue;
+        seenInToken.add(idx);
+
         const c = citations.find(item => item.index === idx);
         if (c) {
-          const occ = (occCounters[idx] || 0) + 1;
-          occCounters[idx] = occ;
+          const seenCount = (occCounters[idx] || 0) + 1;
+          occCounters[idx] = seenCount;
 
-          const occRecords = (c.occurrences || []).filter(o => o.survived !== false);
-          const occRec = occRecords[occ - 1];
+          const allOccs = Array.isArray(c.occurrences) ? c.occurrences : [];
+          const survivingOccs = allOccs.filter(o => o.survived !== false);
+          const hasRejectedOccs = allOccs.some(o => o.survived === false);
+
+          let occRec = null;
+          if (hasRejectedOccs && (totalOccurrencesInText[idx] || 0) > survivingOccs.length) {
+            occRec = allOccs.find(o => o.occurrence === seenCount) || allOccs[seenCount - 1] || null;
+            if (!occRec || occRec.survived === false) continue;
+          } else {
+            if (allOccs.length > 0 && seenCount > survivingOccs.length) continue;
+            occRec = allOccs.length > 0 ? (survivingOccs[seenCount - 1] || null) : null;
+          }
+
+          const canonicalOcc = (occRec && typeof occRec.occurrence === "number")
+            ? occRec.occurrence
+            : seenCount;
           const occProb = (occRec && occRec.support_probability !== undefined && occRec.support_probability !== null)
             ? occRec.support_probability
-            : c.support_probability;
+            : (allOccs.length === 0 ? c.support_probability : null);
 
           const auth = c.authors ? c.authors.trim() : "";
           const yr = c.year ? String(c.year).trim() : "";
@@ -5580,7 +5612,7 @@ function formatMessageContent(text, metadata = null, isUser = false) {
 
           const tooltip = `Title: ${cleanTitle}\nSection: ${sec}\nSupport probability: ${probStr}`;
           const escapedTooltip = escapeHTML(tooltip).replace(/\r?\n/g, "&#10;");
-          pills.push(`<span class="citation-pill" data-citation-idx="${idx}" data-citation-occ="${occ}" title="${escapedTooltip}">${escapeHTML(label)}</span>`);
+          pills.push(`<span class="citation-pill" data-citation-idx="${idx}" data-citation-occ="${canonicalOcc}" title="${escapedTooltip}">${escapeHTML(label)}</span>`);
         }
       }
 
@@ -5592,9 +5624,9 @@ function formatMessageContent(text, metadata = null, isUser = false) {
       citationPlaceholders.push(pillGroup);
       return ph;
     });
-  } else if (metadata && Array.isArray(metadata.references) && metadata.references.length > 0) {
+  } else if ((metadata && Array.isArray(metadata.references) && metadata.references.length > 0) || (metadata && metadata.citation_verification)) {
     // Defense-in-depth: scrub any lingering bracket citation tokens if no citations were kept
-    processed = processed.replace(citationRegex, "");
+    processed = processed.replace(new RegExp(`[ \\t]*${citationRegex.source}[ \\t]*([.,;!?])?`, "g"), (m, p1, p2, punct) => punct || "");
   }
 
   // Ensure Cited Sources and the considered-sources drawer are rendered if references metadata exists
@@ -5804,9 +5836,16 @@ function showEvidencePopover(pill, citation) {
   const occ = parseInt(pill.getAttribute("data-citation-occ"), 10);
   let targetProb = citation.support_probability;
   if (Number.isFinite(occ) && Array.isArray(citation.occurrences)) {
-    const occRecords = citation.occurrences.filter(o => o.survived !== false);
-    if (occRecords[occ - 1] && occRecords[occ - 1].support_probability !== undefined && occRecords[occ - 1].support_probability !== null) {
-      targetProb = occRecords[occ - 1].support_probability;
+    const occRecord = citation.occurrences.find(o => o.occurrence === occ);
+    if (occRecord) {
+      targetProb = (occRecord.support_probability !== undefined && occRecord.support_probability !== null)
+        ? occRecord.support_probability
+        : null;
+    } else {
+      const occRecords = citation.occurrences.filter(o => o.survived !== false);
+      if (occRecords[occ - 1] && occRecords[occ - 1].support_probability !== undefined && occRecords[occ - 1].support_probability !== null) {
+        targetProb = occRecords[occ - 1].support_probability;
+      }
     }
   }
 
@@ -9533,9 +9572,33 @@ function finalizeChatStream(streamCtx, isAborted = false) {
     agent_models: turnAgentModels
   });
 
+  if (!isAborted && streamCtx.streamEnrichedText) {
+    streamCtx.currentResponseText = streamCtx.streamEnrichedText;
+  }
+
   const responseTextToRender = isAborted && streamCtx.currentResponseText
     ? streamCtx.currentResponseText + "\n\n*[Generation stopped by user]*"
     : streamCtx.currentResponseText;
+
+  if (!streamCtx.assistantBubble && streamCtx.currentResponseText) {
+    const initialModel = streamCtx.streamModel || streamCtx.usedModel;
+    streamCtx.assistantBubble = appendMessageDOM("assistant", responseTextToRender, true, null, streamCtx.authorName, initialModel, null, {
+      author: streamCtx.authorName,
+      model: initialModel,
+      active_context_items: streamCtx.payloadItems,
+      usage: streamCtx.streamUsage,
+      finish_reason: streamCtx.streamFinishReason,
+      event_id: streamCtx.streamEventId,
+      intermediate_steps: streamCtx.liveSteps,
+      citations: streamCtx.streamCitations,
+      references: streamCtx.streamReferences,
+      candidates: streamCtx.streamCandidates,
+      citation_verification: streamCtx.streamCitationVerification,
+    });
+    if (streamCtx.stepsBubble && streamCtx.assistantBubble && streamCtx.assistantBubble.parentElement) {
+      streamCtx.assistantBubble.parentElement.insertBefore(streamCtx.stepsBubble, streamCtx.assistantBubble);
+    }
+  }
 
   // Final render with full content (ensures last chunk is displayed)
   if (streamCtx.assistantBubble && streamCtx.currentResponseText) {
@@ -9852,6 +9915,8 @@ async function runChatStreamReader(res, streamCtx) {
           if (data.candidates) streamCtx.streamCandidates = data.candidates;
           if (data.citation_verification) streamCtx.streamCitationVerification = data.citation_verification;
           if (data.metadata?.citation_verification) streamCtx.streamCitationVerification = data.metadata.citation_verification;
+          if (data.enriched_text) streamCtx.streamEnrichedText = data.enriched_text;
+          if (data.metadata?.enriched_text) streamCtx.streamEnrichedText = data.metadata.enriched_text;
 
           if (data.parts && data.parts.length > 0) {
             for (let partIdx = 0; partIdx < data.parts.length; partIdx++) {
@@ -10074,6 +10139,8 @@ async function runChatStreamReader(res, streamCtx) {
           if (data.candidates) streamCtx.streamCandidates = data.candidates;
           if (data.citation_verification) streamCtx.streamCitationVerification = data.citation_verification;
           if (data.metadata?.citation_verification) streamCtx.streamCitationVerification = data.metadata.citation_verification;
+          if (data.enriched_text) streamCtx.streamEnrichedText = data.enriched_text;
+          if (data.metadata?.enriched_text) streamCtx.streamEnrichedText = data.metadata.enriched_text;
           if (data.error) {
             if (streamCtx.stepsBubble && !streamCtx.assistantBubble) {
               streamCtx.stepsBubble.remove();
@@ -10309,7 +10376,8 @@ async function streamDialogueResponse(prompt) {
     streamCitations: null,
     streamReferences: null,
     streamCandidates: null,
-    streamCitationVerification: null
+    streamCitationVerification: null,
+    streamEnrichedText: null
   };
 
   try {
