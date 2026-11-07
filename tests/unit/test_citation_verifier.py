@@ -489,13 +489,13 @@ async def test_verify_citations_support_local_laya_batch(sample_ranked_chunks):
 # 11. Default Model and Logging Tests
 # ---------------------------------------------------------------------------
 def test_default_citation_verification_model():
-    """Verify default citation verification model is inception/mercury-decide (Recommended tier, §5.2)."""
+    """Verify default citation verification model is typesafe/jev-1.14 (Recommended tier, §5.2)."""
     from zocrates.agents.library_search.citation_verifier import DEFAULT_OPENROUTER_MODEL
     from zocrates.config import DEFAULT_CITATION_VERIFICATION_MODEL, DEFAULT_CONFIG
 
-    assert DEFAULT_CITATION_VERIFICATION_MODEL == "inception/mercury-decide"
-    assert DEFAULT_OPENROUTER_MODEL == "inception/mercury-decide"
-    assert DEFAULT_CONFIG["citation_verification_model"] == "inception/mercury-decide"
+    assert DEFAULT_CITATION_VERIFICATION_MODEL == "typesafe/jev-1.14"
+    assert DEFAULT_OPENROUTER_MODEL == "typesafe/jev-1.14"
+    assert DEFAULT_CONFIG["citation_verification_model"] == "typesafe/jev-1.14"
 
 
 @pytest.mark.asyncio

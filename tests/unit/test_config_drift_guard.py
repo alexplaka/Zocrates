@@ -51,7 +51,7 @@ RECOMMENDED_TIER_REFERENCE: dict[str, Any] = {
     "embedding_provider": "cloud",
     "reranker_model": "qwen/qwen3-reranker-8b",
     "citation_verification_provider": "openrouter",
-    "citation_verification_model": "inception/mercury-decide",
+    "citation_verification_model": "typesafe/jev-1.14",
     "enable_predictive_ghost_input": True,
     "predictive_prompt_model": "openrouter/~deepseek/deepseek-flash-latest",
     "compaction_summarizer_model": "openrouter/~deepseek/deepseek-flash-latest",
@@ -326,7 +326,7 @@ def test_preset_slug_resolution_table(tmp_path):
     assert not DEFAULT_RERANKER_MODEL.startswith("openrouter/")
 
     # --- citation_verification_model: unprefixed slug used verbatim
-    assert DEFAULT_CITATION_VERIFICATION_MODEL == "inception/mercury-decide"
+    assert DEFAULT_CITATION_VERIFICATION_MODEL == "typesafe/jev-1.14"
 
     # --- vlm_captioning_model: "openrouter/..." used verbatim
     assert DEFAULT_VLM_CAPTIONING_MODEL == "openrouter/deepseek/deepseek-v4.1-flash"

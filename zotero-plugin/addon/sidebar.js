@@ -2632,7 +2632,7 @@ const ONBOARDING_PRESETS = {
       },
       reranker_model: "qwen/qwen3-reranker-8b",
       citation_verification_provider: "openrouter",
-      citation_verification_model: "inception/mercury-decide",
+      citation_verification_model: "typesafe/jev-1.14",
       enable_predictive_ghost_input: true,
       predictive_prompt_model: "openrouter/~deepseek/deepseek-flash-latest",
       compaction_summarizer_model: "openrouter/~deepseek/deepseek-flash-latest",
