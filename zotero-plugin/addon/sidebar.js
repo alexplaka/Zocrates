@@ -7838,6 +7838,45 @@ function buildClaimsInspectorData(meta) {
         }
       });
     }
+
+    // Cross-reference with references to backfill any demoted chunks not present in citations
+    const references = Array.isArray(meta.references) ? meta.references : [];
+    if (references.length > 0) {
+      rows.forEach(a => {
+        if (!a.item_key || !a.title) {
+          const r = references.find(ref =>
+            (a.item_key && String(ref.item_key || ref.key) === String(a.item_key)) ||
+            (a.title && ref.title && ref.title.toLowerCase() === a.title.toLowerCase())
+          );
+          if (r) {
+            if (!a.item_key && (r.item_key || r.key)) a.item_key = String(r.item_key || r.key);
+            if (!a.attachment_key && r.attachment_key) a.attachment_key = r.attachment_key;
+            if (!a.title && r.title) a.title = r.title;
+            if ((!a.authors || a.authors.length === 0) && r.authors) a.authors = r.authors;
+            if (!a.year && r.year) a.year = r.year;
+          }
+        }
+      });
+    }
+
+    // Fallback for single-source turns or active context items: reconcile any assessments with missing title/authors
+    const knownTitles = Array.from(new Set(rows.map(r => r.title).filter(Boolean)));
+    const knownAuthors = rows.find(r => Array.isArray(r.authors) && r.authors.length > 0)?.authors || null;
+    const knownYear = rows.find(r => r.year)?.year || null;
+    const knownKey = rows.find(r => r.item_key)?.item_key || null;
+    const activeItem = (meta.active_context_items && meta.active_context_items[0]) || null;
+
+    const fallbackTitle = knownTitles.length === 1 ? knownTitles[0] : (citations[0]?.title || references[0]?.title || activeItem?.title || "");
+    const fallbackAuthors = knownAuthors || citations[0]?.authors || references[0]?.authors || activeItem?.creators || activeItem?.authors || [];
+    const fallbackYear = knownYear || citations[0]?.year || references[0]?.year || activeItem?.year || "";
+    const fallbackKey = knownKey || citations[0]?.item_key || citations[0]?.key || references[0]?.item_key || references[0]?.key || activeItem?.item_key || activeItem?.key || "";
+
+    rows.forEach(a => {
+      if (!a.title && fallbackTitle) a.title = fallbackTitle;
+      if ((!a.authors || a.authors.length === 0) && fallbackAuthors && fallbackAuthors.length > 0) a.authors = fallbackAuthors;
+      if (!a.year && fallbackYear) a.year = fallbackYear;
+      if (!a.item_key && fallbackKey) a.item_key = String(fallbackKey);
+    });
   } else if (citations.length > 0) {
     // Construct rows from citation occurrences when raw assessments array is absent
     citations.forEach(c => {

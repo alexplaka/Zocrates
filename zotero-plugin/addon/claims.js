@@ -19,6 +19,98 @@
       .replace(/'/g, "&#039;");
   }
 
+  function sanitizeHTML(html) {
+    if (!html || typeof html !== "string") return "";
+    try {
+      const openerSanitize = window.opener?.sanitizeHTML || window.top?.opener?.sanitizeHTML;
+      if (typeof openerSanitize === "function") {
+        return openerSanitize(html);
+      }
+      if (typeof DOMParser !== "undefined") {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(`<!DOCTYPE html><html><body>${html}</body></html>`, "text/html");
+        const dangerous = doc.querySelectorAll("script, iframe, object, embed, link, meta, style");
+        dangerous.forEach(el => el.remove());
+        doc.querySelectorAll("*").forEach(el => {
+          for (let i = el.attributes.length - 1; i >= 0; i--) {
+            const attr = el.attributes[i].name.toLowerCase();
+            if (attr.startsWith("on") || attr === "formaction" || attr === "id") {
+              el.removeAttribute(el.attributes[i].name);
+            }
+          }
+        });
+        return doc.body.innerHTML;
+      }
+    } catch (_) {}
+    return esc(html);
+  }
+
+  function renderRichContent(rawText) {
+    if (!rawText && rawText !== 0) return "";
+    let text = String(rawText).trim();
+
+    // Strip artificial outer quotes so markdown and LaTeX formulas are not trapped
+    if ((text.startsWith('"') && text.endsWith('"') && text.length >= 2) ||
+        (text.startsWith('“') && text.endsWith('”') && text.length >= 2) ||
+        (text.startsWith("'") && text.endsWith("'") && text.length >= 2)) {
+      text = text.slice(1, -1).trim();
+    }
+
+    // 1. Extract block math $$...$$ and inline math $...$
+    const placeholders = [];
+    let processed = text.replace(/\$\$([\s\S]+?)\$\$/g, (match, math) => {
+      const ph = `@@BLOCKMATH_${placeholders.length}@@`;
+      placeholders.push({ ph, math, type: 'block' });
+      return ph;
+    });
+
+    processed = processed.replace(/(?<!\$)\$(?!\s)((?:\\\$|[^$])+?)(?<!\s)\$(?!\$)/g, (match, math) => {
+      const ph = `@@INLINEMATH_${placeholders.length}@@`;
+      placeholders.push({ ph, math, type: 'inline' });
+      return ph;
+    });
+
+    // 2. Parse Markdown if marked is available
+    let html = "";
+    const markedLib = typeof marked !== "undefined" ? marked : (window.marked || window.opener?.marked);
+    if (markedLib) {
+      try {
+        if (typeof markedLib.parseInline === "function") {
+          html = markedLib.parseInline(processed);
+        } else if (typeof markedLib.parse === "function") {
+          html = markedLib.parse(processed);
+        } else {
+          html = esc(processed);
+        }
+      } catch (_) {
+        html = esc(processed);
+      }
+    } else {
+      html = esc(processed);
+    }
+
+    // 3. Render KaTeX math if katex is available
+    const katexLib = typeof katex !== "undefined" ? katex : (window.katex || window.opener?.katex);
+    placeholders.forEach(({ ph, math, type }) => {
+      let renderedMath = "";
+      if (katexLib && typeof katexLib.renderToString === "function") {
+        try {
+          renderedMath = katexLib.renderToString(math, {
+            displayMode: type === 'block',
+            throwOnError: false
+          });
+        } catch (_) {
+          renderedMath = `<code>${esc(math)}</code>`;
+        }
+      } else {
+        renderedMath = `<code>${esc(math)}</code>`;
+      }
+      html = html.replace(ph, renderedMath);
+    });
+
+    return sanitizeHTML(html);
+  }
+
   function showToast(msg) {
     const toast = document.getElementById("toast");
     if (!toast) return;
@@ -351,7 +443,7 @@
         tr.className = "row-rejected";
       }
 
-      // 1. # Column
+      // 1. # Column (Clean sequential claim index only)
       const tdIdx = document.createElement("td");
       tdIdx.className = "col-idx";
       const idxCell = document.createElement("div");
@@ -362,25 +454,6 @@
       rowNum.textContent = `#${item._originalIndex}`;
       idxCell.appendChild(rowNum);
 
-      const badgesRow = document.createElement("div");
-      badgesRow.className = "badges-row";
-
-      if (item.chunk_index !== undefined && item.chunk_index !== null) {
-        const chunkBadge = document.createElement("span");
-        chunkBadge.className = "chunk-badge";
-        chunkBadge.textContent = `[${item.chunk_index}]`;
-        chunkBadge.title = `Evidence Chunk [${item.chunk_index}]`;
-        badgesRow.appendChild(chunkBadge);
-      }
-
-      if (item.occurrence !== undefined && item.occurrence !== null) {
-        const occBadge = document.createElement("span");
-        occBadge.className = "occ-badge";
-        occBadge.textContent = `occ ${item.occurrence}`;
-        badgesRow.appendChild(occBadge);
-      }
-
-      idxCell.appendChild(badgesRow);
       tdIdx.appendChild(idxCell);
       tr.appendChild(tdIdx);
 
@@ -391,9 +464,9 @@
       const claimCell = document.createElement("div");
       claimCell.className = "claim-cell";
 
-      const claimText = document.createElement("span");
+      const claimText = document.createElement("div");
       claimText.className = "claim-text";
-      claimText.textContent = item.claim || "No claim recorded";
+      claimText.innerHTML = renderRichContent(item.claim || "No claim recorded");
       claimCell.appendChild(claimText);
 
       const copyClaimBtn = document.createElement("button");
@@ -489,7 +562,11 @@
       const passageBox = document.createElement("div");
       passageBox.className = allPassagesExpanded ? "passage-box expanded" : "passage-box clamped";
       const textContent = (item.source_text || item.quote || item.text || "").trim();
-      passageBox.textContent = textContent ? `"${textContent}"` : "— (No passage captured) —";
+      if (textContent) {
+        passageBox.innerHTML = renderRichContent(textContent);
+      } else {
+        passageBox.innerHTML = '<span class="empty-passage" style="font-style: italic; opacity: 0.6;">— (No passage captured) —</span>';
+      }
       passageBox.title = "Click to toggle expanded view";
 
       passageBox.addEventListener("click", () => {
@@ -599,19 +676,18 @@
       `- **Rejected**: ${items.filter(i => i.verdict === "DEMOTED").length}`,
       `- **Unverified / Fail-open**: ${items.filter(i => i.verdict === "FAIL_OPEN").length}`,
       ``,
-      `| # | Chunk | Claim | Source | Section | Probability | Status |`,
-      `|---|---|---|---|---|---|---|`,
+      `| # | Claim | Source | Section | Probability | Status |`,
+      `|---|---|---|---|---|---|`,
     ];
 
     items.forEach(it => {
       const idx = `#${it._originalIndex}`;
-      const chunk = `[${it.chunk_index || '?'}] occ ${it.occurrence || 1}`;
       const claim = String(it.claim || "").replace(/\|/g, "\\|").replace(/\n/g, " ").trim();
       const source = formatSourceAuthorYear(it).replace(/\|/g, "\\|");
       const section = String(it.section || "").replace(/\|/g, "\\|");
       const prob = typeof it.support_probability === "number" ? it.support_probability.toFixed(3) : "N/A";
       const status = it.verdict === "KEPT" ? "✅ Verified" : (it.verdict === "DEMOTED" ? "❌ Rejected" : "⚠️ Unverified");
-      lines.push(`| ${idx} | ${chunk} | ${claim} | ${source} | ${section} | ${prob} | ${status} |`);
+      lines.push(`| ${idx} | ${claim} | ${source} | ${section} | ${prob} | ${status} |`);
     });
 
     return lines.join("\n");
