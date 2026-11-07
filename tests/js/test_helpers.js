@@ -1041,6 +1041,13 @@ function setupMockEnvironment() {
         winListeners.set(evt, winListeners.get(evt).filter((h) => h !== fn));
       }
     },
+    dispatchEvent: (evt) => {
+      const type = typeof evt === "string" ? evt : evt.type;
+      const handlers = winListeners.get(type) || [];
+      const eventObj = typeof evt === "string" ? { type: evt, target: mockWindow, preventDefault: () => {}, stopPropagation: () => {} } : evt;
+      if (!eventObj.target) eventObj.target = mockWindow;
+      handlers.slice().forEach((h) => h.call(mockWindow, eventObj));
+    },
     location: { href: "", search: "" },
     document: mockDoc,
     innerWidth: 1024,

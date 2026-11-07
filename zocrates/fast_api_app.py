@@ -3196,6 +3196,16 @@ async def _stream_runner_events(
                                                     p for p in payload["parts"] if p.get("text") != "" or "text" not in p
                                                 ]
 
+                                            if enriched_text:
+                                                payload["enriched_text"] = enriched_text
+                                                if "metadata" not in payload:
+                                                    payload["metadata"] = {}
+                                                payload["metadata"]["enriched_text"] = enriched_text
+                                                if hasattr(event, "custom_metadata"):
+                                                    if event.custom_metadata is None:
+                                                        event.custom_metadata = {}
+                                                    event.custom_metadata["enriched_text"] = enriched_text
+
                                             if citations or references:
                                                 payload["citations"] = citations
                                                 payload["references"] = references
@@ -3209,6 +3219,17 @@ async def _stream_runner_events(
                                                     event.custom_metadata = {}
                                                 event.custom_metadata["citations"] = citations
                                                 event.custom_metadata["references"] = references
+
+                                            citation_verification = last_audit.get("citation_verification_telemetry")
+                                            if citation_verification:
+                                                payload["citation_verification"] = citation_verification
+                                                if "metadata" not in payload:
+                                                    payload["metadata"] = {}
+                                                payload["metadata"]["citation_verification"] = citation_verification
+                                                if hasattr(event, "custom_metadata"):
+                                                    if event.custom_metadata is None:
+                                                        event.custom_metadata = {}
+                                                    event.custom_metadata["citation_verification"] = citation_verification
 
                                 # Check for discovered candidate papers in state (scoped strictly to current invocation)
                                 target_inv_id = getattr(event, "invocation_id", None) or current_invocation_id

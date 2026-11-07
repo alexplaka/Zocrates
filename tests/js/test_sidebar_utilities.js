@@ -563,6 +563,7 @@ async function runTests() {
       assert.strictEqual(st.sessionId, "session-detached-999");
       assert.strictEqual(st.contextMode, "papers");
       assert.strictEqual(st.theme, "amoled");
+      assert.strictEqual(st.fontSize, "default");
       assert.strictEqual(st.inputDraft, "Explain topological fault tolerance");
       assert.strictEqual(st.activeItemsList.length, 1);
       assert.strictEqual(st.activeItemsList[0].key, "ITEMX");
@@ -597,6 +598,45 @@ async function runTests() {
         delete global.Zotero.Zocrates._detachedNeedsRefresh;
       }
     }
+  });
+
+  test("font size management: applyFontSize, loadSavedFontSize, and syncFromDetachedState", () => {
+    // 1. applyFontSize updates body attribute and data-selected
+    sidebar.setCurrentFontSizeSetting("large");
+    sidebar.applyFontSize();
+    assert.strictEqual(global.document.body.getAttribute("data-font-size"), "large");
+    assert.strictEqual(sidebar.getCurrentFontSizeSetting(), "large");
+
+    // Invalid size falls back to default
+    sidebar.setCurrentFontSizeSetting("invalid-size");
+    sidebar.applyFontSize();
+    assert.strictEqual(global.document.body.getAttribute("data-font-size"), "default");
+    assert.strictEqual(sidebar.getCurrentFontSizeSetting(), "default");
+
+    // 2. loadSavedFontSize reads from zot.Prefs
+    global.Zotero.Prefs.set("zocrates.fontSize", "small");
+    sidebar.loadSavedFontSize();
+    assert.strictEqual(sidebar.getCurrentFontSizeSetting(), "small");
+    assert.strictEqual(global.document.body.getAttribute("data-font-size"), "small");
+
+    // Falls back to localStorage
+    global.Zotero.Prefs.set("zocrates.fontSize", null);
+    global.localStorage.setItem("zocrates_font_size", "xlarge");
+    sidebar.loadSavedFontSize();
+    assert.strictEqual(sidebar.getCurrentFontSizeSetting(), "xlarge");
+    assert.strictEqual(global.document.body.getAttribute("data-font-size"), "xlarge");
+
+    // 3. syncFromDetachedState syncs font size
+    sidebar.syncFromDetachedState({ fontSize: "large" });
+    assert.strictEqual(sidebar.getCurrentFontSizeSetting(), "large");
+    assert.strictEqual(global.document.body.getAttribute("data-font-size"), "large");
+    assert.strictEqual(global.localStorage.getItem("zocrates_font_size"), "large");
+
+    // Cleanup
+    sidebar.setCurrentFontSizeSetting("default");
+    sidebar.applyFontSize();
+    global.Zotero.Prefs.set("zocrates.fontSize", "default");
+    global.localStorage.setItem("zocrates_font_size", "default");
   });
 
   // 13. message action button ordering (Save Note immediately left of Copy)
@@ -1019,6 +1059,490 @@ async function runTests() {
       else delete global.IOUtils;
       const leftover = document.getElementById("zocrates-info-modal-overlay");
       if (leftover) leftover.remove();
+    }
+  });
+
+  // 12. openMessageInfoModal: Citation Support stats and counts
+  test("openMessageInfoModal: renders Citation Support row with mean ± std and evaluated counts", () => {
+    const meta = {
+      role: "assistant",
+      author: "Zocrates",
+      text: "Synthesis text [1, 2].",
+      citation_verification: {
+        provider: "openrouter",
+        model: "inception/mercury-decide",
+        threshold: 0.60,
+        latency_ms: 245.5,
+        summary: {
+          batch_size: 2,
+          kept: 2,
+          demoted: 0,
+          fail_open: 0,
+          mean_support: 0.852,
+          std_support: 0.041,
+          latency_ms: 245.5,
+        },
+        assessments: [
+          {
+            claim: "Claim A assertion.",
+            source_text: "Passage A from paper.",
+            title: "Paper Title A",
+            authors: ["Author A"],
+            year: 2021,
+            section: "Methods",
+            support_probability: 0.881,
+            threshold: 0.60,
+            verdict: "KEPT",
+          },
+          {
+            claim: "Claim B assertion.",
+            source_text: "Passage B from paper.",
+            title: "Paper Title B",
+            authors: ["Author B1", "Author B2"],
+            year: 2022,
+            section: "Results",
+            support_probability: 0.823,
+            threshold: 0.60,
+            verdict: "KEPT",
+          },
+        ],
+      },
+    };
+
+    try {
+      sidebar.openMessageInfoModal(meta);
+      const overlay = document.querySelector(".info-modal-overlay");
+      assert.ok(overlay, "Modal overlay must exist in DOM");
+
+      const rows = Array.from(overlay.querySelectorAll(".info-meta-row"));
+      const citRow = rows.find(r => r.querySelector(".info-meta-label")?.textContent === "Citation Support");
+      assert.ok(citRow, "Citation Support row must be rendered");
+
+      const pill = citRow.querySelector(".citation-support-pill");
+      assert.ok(pill, "Model/latency pill must exist");
+      assert.strictEqual(pill.textContent, "inception/mercury-decide · 246ms");
+
+      const meanEl = citRow.querySelector(".citation-support-mean");
+      assert.ok(meanEl, "Mean support element must exist");
+      assert.strictEqual(meanEl.textContent, "Mean p: 0.852 ± 0.041 (std)");
+
+      const countsBox = citRow.querySelector(".citation-support-counts");
+      assert.ok(countsBox, "Counts box must exist");
+      assert.ok(countsBox.textContent.includes("2 claims evaluated: 2 verified (p ≥ 0.600), 0 rejected (p < 0.600)"));
+
+      // demoted === 0 -> no toggle button or drawer
+      const toggleBtn = citRow.querySelector(".citation-support-toggle-btn");
+      assert.strictEqual(toggleBtn, null, "Toggle button must not appear when demoted === 0");
+    } finally {
+      const leftover = document.querySelector(".info-modal-overlay");
+      if (leftover) leftover.remove();
+    }
+  });
+
+  // 13. openMessageInfoModal: Citation Support Statistics Row and modal drawer cleanup
+  test("openMessageInfoModal: renders Citation Support row with stats and verifies cramped rejected drawer is removed", () => {
+    const meta = {
+      role: "assistant",
+      author: "Zocrates",
+      text: "Synthesis text citing two items [1, 2].",
+      citation_verification: {
+        provider: "openrouter",
+        model: "inception/mercury-decide",
+        threshold: 0.60,
+        latency_ms: 180,
+        summary: {
+          batch_size: 2,
+          kept: 1,
+          demoted: 1,
+          mean_support: 0.620,
+          std_support: 0.325,
+          latency_ms: 180,
+        },
+        assessments: [
+          {
+            claim: "Mutation rates rise significantly across generations.",
+            source_text: "We identified embryonic mutations per twin pair without cross-generational rise.",
+            title: "Somatic mutation rates in monozygotic twins",
+            authors: ["Jonsson, Hakon", "Stefansson, Kari"],
+            year: 2021,
+            section: "Results",
+            support_probability: 0.390,
+            threshold: 0.60,
+            verdict: "DEMOTED",
+          },
+          {
+            claim: "Self-attention computes representations across sequences.",
+            source_text: "Attention maps a query and key-value pairs to an output.",
+            title: "Attention Is All You Need",
+            authors: ["Vaswani", "Shazeer", "Parmar"],
+            year: 2017,
+            section: "Attention",
+            support_probability: 0.850,
+            threshold: 0.60,
+            verdict: "KEPT",
+          },
+        ],
+      },
+    };
+
+    try {
+      sidebar.openMessageInfoModal(meta);
+      const overlay = document.querySelector(".info-modal-overlay");
+      assert.ok(overlay, "Modal overlay must exist");
+
+      const citRow = overlay.querySelector(".citation-support-row");
+      assert.ok(citRow, "Citation Support row must exist");
+
+      const meanEl = citRow.querySelector(".citation-support-mean");
+      assert.strictEqual(meanEl.textContent, "Mean p: 0.620 ± 0.325 (std)");
+
+      const countsBox = citRow.querySelector(".citation-support-counts");
+      assert.ok(countsBox.textContent.includes("2 claims evaluated: 1 verified (p ≥ 0.600), 1 rejected (p < 0.600)"));
+
+      // Verify cramped drawer and toggle button are removed from modal
+      const toggleBtn = citRow.querySelector(".citation-support-toggle-btn");
+      assert.strictEqual(toggleBtn, null, "Toggle button must NOT exist in info modal");
+
+      const drawer = citRow.querySelector(".citation-rejected-drawer");
+      assert.strictEqual(drawer, null, "Cramped drawer must NOT exist in info modal");
+    } finally {
+      const leftover = document.querySelector(".info-modal-overlay");
+      if (leftover) leftover.remove();
+    }
+  });
+
+  // 14. openMessageInfoModal: Display formatting when N=1 and N=0
+  test("openMessageInfoModal: handles single probability (N=1) and zero probabilities (N=0)", () => {
+    // N = 1
+    const metaSingle = {
+      role: "assistant",
+      author: "Zocrates",
+      citation_verification: {
+        summary: { batch_size: 1, kept: 1, demoted: 0, mean_support: 0.850, std_support: 0.0 },
+        assessments: [{ support_probability: 0.850, verdict: "KEPT" }],
+      },
+    };
+
+    try {
+      sidebar.openMessageInfoModal(metaSingle);
+      const overlay1 = document.querySelector(".info-modal-overlay");
+      const meanEl1 = overlay1.querySelector(".citation-support-mean");
+      assert.strictEqual(meanEl1.textContent, "Mean p: 0.850 ± N/A (std)");
+    } finally {
+      document.querySelectorAll(".info-modal-overlay").forEach(el => el.remove());
+    }
+
+    // N = 0 (no non-null probabilities)
+    const metaZero = {
+      role: "assistant",
+      author: "Zocrates",
+      citation_verification: {
+        summary: { batch_size: 1, kept: 0, demoted: 0, fail_open: 1, mean_support: null, std_support: null },
+        assessments: [{ support_probability: null, verdict: "FAIL_OPEN" }],
+      },
+    };
+
+    try {
+      sidebar.openMessageInfoModal(metaZero);
+      const overlay0 = document.querySelector(".info-modal-overlay");
+      const meanEl0 = overlay0.querySelector(".citation-support-mean");
+      assert.strictEqual(meanEl0.textContent, "Mean p: N/A");
+
+      const countsBox0 = overlay0.querySelector(".citation-support-counts");
+      assert.ok(countsBox0.textContent.includes("1 unverified"));
+    } finally {
+      document.querySelectorAll(".info-modal-overlay").forEach(el => el.remove());
+    }
+  });
+
+  // 15. openMessageInfoModal: Does not render Citation Support row when verification was not run
+  test("openMessageInfoModal: does NOT render Citation Support row when verification was disabled (citations only, no probs)", () => {
+    const metaNoVerif = {
+      role: "assistant",
+      author: "Zocrates",
+      citations: [
+        {
+          index: 1,
+          token: "[1]",
+          title: "Unverified Paper",
+          support_probability: null,
+          occurrences: [{ occurrence: 1, support_probability: null, survived: true }],
+        },
+      ],
+    };
+
+    try {
+      sidebar.openMessageInfoModal(metaNoVerif);
+      const overlay = document.querySelector(".info-modal-overlay");
+      assert.ok(overlay, "Modal overlay must exist");
+      const citRow = overlay.querySelector(".citation-support-row");
+      assert.strictEqual(citRow, null, "Citation Support row must NOT be rendered when no verification was run");
+    } finally {
+      document.querySelectorAll(".info-modal-overlay").forEach(el => el.remove());
+    }
+  });
+
+  // 16. buildClaimsInspectorData: normal verification extraction
+  test("buildClaimsInspectorData: extracts assessments and summary from citation_verification", () => {
+    const meta = {
+      model: "google/gemini-2.5-flash",
+      citation_verification: {
+        model: "inception/mercury-decide:free",
+        provider: "openrouter",
+        threshold: 0.65,
+        latency_ms: 240,
+        summary: {
+          batch_size: 2,
+          kept: 1,
+          demoted: 1,
+          fail_open: 0,
+          mean_support: 0.620,
+          std_support: 0.325,
+        },
+        assessments: [
+          {
+            chunk_index: 1,
+            occurrence: 1,
+            claim: "Claim A",
+            source_text: "Passage A",
+            item_key: "ITEM1",
+            attachment_key: "ATT1",
+            support_probability: 0.95,
+            verdict: "KEPT",
+          },
+          {
+            chunk_index: 2,
+            occurrence: 1,
+            claim: "Claim B",
+            source_text: "Passage B",
+            item_key: "ITEM2",
+            attachment_key: "ATT2",
+            support_probability: 0.20,
+            verdict: "DEMOTED",
+          },
+        ],
+      },
+    };
+
+    const data = sidebar.buildClaimsInspectorData(meta);
+    assert.strictEqual(data.model, "inception/mercury-decide:free");
+    assert.strictEqual(data.provider, "openrouter");
+    assert.strictEqual(data.threshold, 0.65);
+    assert.strictEqual(data.latency_ms, 240);
+    assert.strictEqual(data.assessments.length, 2);
+    assert.strictEqual(data.summary.kept, 1);
+    assert.strictEqual(data.summary.demoted, 1);
+    assert.strictEqual(data.assessments[0].item_key, "ITEM1");
+    assert.strictEqual(data.assessments[1].item_key, "ITEM2");
+  });
+
+  // 17. buildClaimsInspectorData: cross-references citations to backfill missing keys
+  test("buildClaimsInspectorData: cross-references citations to backfill missing item_key and attachment_key", () => {
+    const metaOlderSession = {
+      citations: [
+        {
+          index: 1,
+          item_key: "BACKFILLED_KEY_1",
+          attachment_key: "BACKFILLED_ATT_1",
+          title: "Title 1",
+          authors: ["Author 1"],
+          year: "2020",
+          section: "Methods",
+        },
+        {
+          index: 2,
+          item_key: "BACKFILLED_KEY_2",
+          attachment_key: "BACKFILLED_ATT_2",
+          title: "Title 2",
+          authors: ["Author 2"],
+          year: "2021",
+          section: "Results",
+        },
+      ],
+      citation_verification: {
+        summary: { batch_size: 2, kept: 2, demoted: 0, fail_open: 0 },
+        assessments: [
+          {
+            chunk_index: 1,
+            occurrence: 1,
+            claim: "Claim 1",
+            source_text: "Source text 1",
+            // item_key missing in older session
+            support_probability: 0.90,
+            verdict: "KEPT",
+          },
+          {
+            chunk_index: 2,
+            occurrence: 1,
+            claim: "Claim 2",
+            source_text: "Source text 2",
+            // item_key missing in older session
+            support_probability: 0.85,
+            verdict: "KEPT",
+          },
+        ],
+      },
+    };
+
+    const data = sidebar.buildClaimsInspectorData(metaOlderSession);
+    assert.strictEqual(data.assessments[0].item_key, "BACKFILLED_KEY_1");
+    assert.strictEqual(data.assessments[0].attachment_key, "BACKFILLED_ATT_1");
+    assert.strictEqual(data.assessments[0].title, "Title 1");
+    assert.strictEqual(data.assessments[1].item_key, "BACKFILLED_KEY_2");
+    assert.strictEqual(data.assessments[1].attachment_key, "BACKFILLED_ATT_2");
+  });
+
+  // 18. buildClaimsInspectorData: fallback when only citations exist
+  test("buildClaimsInspectorData: constructs rows and summary from citation occurrences when assessments are absent", () => {
+    const metaCitationsOnly = {
+      citations: [
+        {
+          index: 1,
+          item_key: "KEY1",
+          attachment_key: "ATT1",
+          title: "Paper 1",
+          quote: "Quote 1",
+          authors: ["Alice"],
+          year: "2022",
+          section: "Intro",
+          occurrences: [
+            { occurrence: 1, claim: "Claim 1.1", support_probability: 0.92, survived: true },
+            { occurrence: 2, claim: "Claim 1.2", support_probability: 0.45, survived: false },
+          ],
+        },
+        {
+          index: 2,
+          item_key: "KEY2",
+          title: "Paper 2",
+          quote: "Quote 2",
+          support_probability: 0.88,
+          occurrences: [
+            { occurrence: 1, claim: "Claim 2.1", support_probability: 0.88, survived: true },
+          ],
+        },
+      ],
+    };
+
+    const data = sidebar.buildClaimsInspectorData(metaCitationsOnly);
+    assert.strictEqual(data.assessments.length, 3);
+    assert.strictEqual(data.summary.batch_size, 3);
+    assert.strictEqual(data.summary.kept, 2);
+    assert.strictEqual(data.summary.demoted, 1);
+    assert.strictEqual(data.summary.fail_open, 0);
+    assert.strictEqual(data.assessments[0].claim, "Claim 1.1");
+    assert.strictEqual(data.assessments[0].verdict, "KEPT");
+    assert.strictEqual(data.assessments[1].claim, "Claim 1.2");
+    assert.strictEqual(data.assessments[1].verdict, "DEMOTED");
+    assert.strictEqual(data.assessments[2].claim, "Claim 2.1");
+    assert.strictEqual(data.assessments[2].verdict, "KEPT");
+  });
+
+  // 19. ensureClaimsInspectorBtn: creates button in .message-actions-left next to .citation-toggle-btn
+  test("ensureClaimsInspectorBtn: creates .claims-inspector-btn directly next to .citation-toggle-btn with accurate counts", () => {
+    const wrapperDiv = document.createElement("div");
+    wrapperDiv.className = "message-wrapper assistant";
+
+    const bubble = document.createElement("div");
+    bubble.className = "message-bubble";
+    bubble.textContent = "Assistant synthesis with citations [1].";
+    wrapperDiv.appendChild(bubble);
+
+    const actionsDiv = document.createElement("div");
+    actionsDiv.className = "message-actions";
+    const actionsLeftDiv = document.createElement("div");
+    actionsLeftDiv.className = "message-actions-left";
+    actionsDiv.appendChild(actionsLeftDiv);
+    wrapperDiv.appendChild(actionsDiv);
+
+    const meta = {
+      citation_verification: {
+        summary: { batch_size: 5, kept: 3, demoted: 2, fail_open: 0 },
+        assessments: [
+          { claim: "C1", verdict: "KEPT", support_probability: 0.9 },
+          { claim: "C2", verdict: "KEPT", support_probability: 0.8 },
+          { claim: "C3", verdict: "KEPT", support_probability: 0.7 },
+          { claim: "C4", verdict: "DEMOTED", support_probability: 0.3 },
+          { claim: "C5", verdict: "DEMOTED", support_probability: 0.2 },
+        ],
+      },
+    };
+    bubble._metadata = meta;
+    wrapperDiv._metadata = meta;
+
+    // First ensure citation toggle button is created
+    sidebar.ensureCitationToggleBtn(wrapperDiv);
+    const toggleBtn = actionsLeftDiv.querySelector(".citation-toggle-btn");
+    assert.ok(toggleBtn, "Citation toggle button should exist");
+
+    // Call ensureClaimsInspectorBtn
+    sidebar.ensureClaimsInspectorBtn(wrapperDiv);
+
+    const claimsBtn = actionsLeftDiv.querySelector(".claims-inspector-btn");
+    assert.ok(claimsBtn, "Claims Inspector button must be created in .message-actions-left");
+    assert.strictEqual(claimsBtn.textContent, "🛡️ Claim Verification Inspector");
+    assert.strictEqual(
+      claimsBtn.getAttribute("title"),
+      "Inspect claim verification table (3 verified, 2 rejected of 5 total)"
+    );
+
+    // Verify ordering: toggleBtn comes first, claimsBtn is directly next to it
+    assert.strictEqual(actionsLeftDiv.children[0], toggleBtn);
+    assert.strictEqual(actionsLeftDiv.children[1], claimsBtn);
+
+    // Verify idempotency: calling ensureClaimsInspectorBtn again does not duplicate
+    sidebar.ensureClaimsInspectorBtn(wrapperDiv);
+    const allClaimsBtns = actionsLeftDiv.querySelectorAll(".claims-inspector-btn");
+    assert.strictEqual(allClaimsBtns.length, 1, "Must not duplicate Claims Inspector button");
+
+    // Removal test: when metadata has no verification/citations
+    bubble._metadata = { citation_verification: null, citations: [] };
+    wrapperDiv._metadata = { citation_verification: null, citations: [] };
+    sidebar.ensureClaimsInspectorBtn(wrapperDiv);
+    assert.strictEqual(actionsLeftDiv.querySelector(".claims-inspector-btn"), null, "Must remove button when no assessments exist");
+  });
+
+  // 20. openClaimsInspectorWindow: opens dialog window with structured payload
+  test("openClaimsInspectorWindow: invokes openDialog with claims.html and structured payload", () => {
+    let openedDialogUrl = null;
+    let openedDialogName = null;
+    let openedDialogFeatures = null;
+    let openedDialogPayload = null;
+
+    const mockWin = {
+      openDialog: (url, name, features, payload) => {
+        openedDialogUrl = url;
+        openedDialogName = name;
+        openedDialogFeatures = features;
+        openedDialogPayload = payload;
+        return {
+          updateClaimsData: () => {},
+          focus: () => {},
+        };
+      },
+    };
+
+    const origTop = window.top;
+    try {
+      window.top = mockWin;
+      const sampleMeta = {
+        model: "test-model",
+        citation_verification: {
+          summary: { batch_size: 1, kept: 1, demoted: 0 },
+          assessments: [{ claim: "Test Claim", verdict: "KEPT", support_probability: 0.95 }],
+        },
+      };
+
+      sidebar.openClaimsInspectorWindow(sampleMeta);
+
+      assert.strictEqual(openedDialogUrl, "chrome://zocrates/content/claims.html");
+      assert.strictEqual(openedDialogName, "zocrates-claims-window");
+      assert.ok(openedDialogFeatures.includes("width=1180"));
+      assert.ok(openedDialogFeatures.includes("height=760"));
+      assert.ok(openedDialogPayload, "Payload must be passed to openDialog");
+      assert.strictEqual(openedDialogPayload.assessments.length, 1);
+      assert.strictEqual(openedDialogPayload.assessments[0].claim, "Test Claim");
+    } finally {
+      window.top = origTop;
     }
   });
 }

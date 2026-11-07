@@ -270,14 +270,18 @@ Standard AI search tools often silently discard papers they retrieved if they di
 To catch subtle misattributions and over-claiming:
 
 * Fast, calibrated decision models evaluate claims on a **per-occurrence** basis, ensuring that each individual sentence is backed by its cited passage.
-* If a compound citation like `[1, 2]` contains one claim that is supported and one that is not, the failing citation is pruned while the valid one is kept.
+* **Compound Citation Support**: Evaluates multi-source citations (`[1, 2]`) with conditional prompts, ensuring that composite claims supported by complementary papers are fairly verified without artificial demotions.
+* If a compound citation contains one claim that is supported and one that is not, the failing citation is pruned while the valid one is kept.
 * If verification cannot confirm an assertion, the document is moved to Considered Sources rather than falsely presented as confirmed evidence.
-* Can run using zero-cost cloud decision models or entirely offline using a local verification daemon.
+* **Claim Verification Inspector**: Click the **🛡️ Claim Verification Inspector** button to open an interactive tabular audit window detailing every extracted claim sentence, supporting quote, and calibrated probability score ($p$) side-by-side with full KaTeX math and Markdown formatting.
+* Can run using fast cloud decision models (defaulting to auto-updating TypeSafe Jev Latest) or entirely offline using a local Laya verification daemon.
 
 ### Distraction-Free Reading & Clean Manuscript Export
 
-* **Citation Toggle**: A quick switch lets you hide citation pills when you want to read uninterrupted prose.
+* **Citation Toggle**: A quick switch toggles between **`Citations: Visible`** and **`Citations: Hidden`** whenever you want to read uninterrupted prose.
 * **Clean Text Copying**: When citations are hidden, copying text produces clean prose; when visible, copying automatically formats proper academic citations (e.g. `(Vaswani et al., 2017)`) with a complete Markdown bibliography ready to paste into your draft.
+* **Customizable Text Sizing**: Choose between Small (13px), Medium (14px - Default), or Large (15.5px) font sizes via the More Options (`⋯`) menu to fit your display setup.
+* **Evidence Peek Popover & Reader Navigation**: Click any citation pill to view an interactive popover with 8-directional resizing, 1-click maximize/restore, exact section breadcrumbs, and a highlight-free **"Open in Reader"** button that jumps to the cited section in Zotero's PDF reader without persistent database annotations or yellow search highlights.
 
 ---
 

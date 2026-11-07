@@ -365,9 +365,17 @@ def format_session_for_ui(
 
         final_evt = None
         final_text = ""
+        SYNTHESIZER_AUTHORS = (
+            "library_synthesizer_agent",
+            "library_synthesizer",
+            "online_synthesizer_agent",
+            "online_synthesizer",
+            "synthesizer_agent",
+            "synthesizer",
+        )
         for evt, txt in text_events:
             auth = getattr(evt, "author", "") or ""
-            if auth in ("synthesizer_agent", "synthesizer"):
+            if auth in SYNTHESIZER_AUTHORS:
                 final_evt = evt
                 final_text = txt
                 break
@@ -458,15 +466,28 @@ def format_session_for_ui(
         citations = ev_meta.get("citations")
         references = ev_meta.get("references")
         candidates = ev_meta.get("candidates")
+        citation_verification = ev_meta.get("citation_verification")
+        enriched_text = ev_meta.get("enriched_text")
 
-        if not citations and getattr(session, "state", None):
+        if getattr(session, "state", None):
             audit_history = session.state.get("retrieved_evidence") or []
             inv_id = getattr(final_evt or asst_evts[-1], "invocation_id", None)
             for entry in reversed(audit_history):
-                if entry.get("invocation_id") == inv_id or not inv_id:
-                    citations = entry.get("citations")
-                    references = entry.get("references")
+                # Strictly scope to matching invocation_id to prevent leaking across turns
+                entry_inv = entry.get("invocation_id")
+                if (inv_id and entry_inv == inv_id) or (not inv_id and not entry_inv):
+                    if not citations:
+                        citations = entry.get("citations")
+                    if not references:
+                        references = entry.get("references")
+                    if not enriched_text:
+                        enriched_text = entry.get("enriched_text")
+                    if not citation_verification:
+                        citation_verification = entry.get("citation_verification_telemetry")
                     break
+
+        if enriched_text:
+            final_text = enriched_text
 
         if not candidates and getattr(session, "state", None):
             inv_id = getattr(final_evt or asst_evts[-1], "invocation_id", None)
@@ -493,6 +514,7 @@ def format_session_for_ui(
             "citations": citations,
             "references": references,
             "candidates": candidates,
+            "citation_verification": citation_verification,
         })
 
     title = session.state.get("session_title", "New Chat") if getattr(session, "state", None) else "New Chat"

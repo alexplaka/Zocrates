@@ -166,9 +166,10 @@ sequenceDiagram
 The verification system supports both cloud-based execution and local, privacy-first inference:
 
 1. **Remote OpenRouter Decision Models**:
-   - Queries OpenRouter's decisions endpoint (`POST https://openrouter.ai/api/alpha/decisions`) using structured dictionary states `{"source_text": ..., "claim": ...}` and `noul` question primitives (`Does the source_text support the claim?`).
-   - **`inception/mercury-decide` (Default)**: Zero monetary cost (also available via free endpoint tier), high precision, 32k context window, sub-second latency.
-   - **`typesafe/jev-1.13`**: High calibration accuracy ($p \in [0.0, 1.0]$), 32k context window.
+   - Queries OpenRouter's decisions endpoint (`POST https://openrouter.ai/api/alpha/decisions`) using structured dictionary states `{"source_text": ..., "claim": ...}` and `noul` question primitives.
+   - **`~typesafe/jev-latest` (Default)**: TypeSafe Jev Latest auto-updating checkpoint ($p \in [0.0, 1.0]$, $\tau = 0.60$), 32k context window, sub-second latency (~250–320ms). Recommended for its high calibration accuracy, smooth monotonic handling of partial/hedged claims, and zero-parameter setup. In an independent double-blind benchmark on 18 audited rejected claims from *Ordyan et al. (2020)*, TypeSafe Jev demonstrated statistically significant rank correlation with human ground truth ($\rho = 0.541, p = 0.020$) and successfully recovered over 80% of false rejections caused by strict binary thresholding.
+   - **`typesafe/jev-1.14` & `typesafe/jev-1.13`**: Pinned releases of TypeSafe Jev for reproducibility.
+   - **`inception/mercury-decide`**: Zero monetary cost (also available via free endpoint tier), high precision, 32k context window, sub-second latency.
    - **`upstage/solar-decide`**: 524k context window, handling lengthy methodological sections.
    - **Fallback & Resilience**: Automatic single-retry with 250ms backoff on HTTP 429 rate limits, and seamless fallback to OpenRouter chat completions (`POST /api/v1/chat/completions`) with JSON schema extraction on HTTP 404 from the alpha endpoint. Timeouts, HTTP 5xx, or network failures fail open cleanly (`support_probability = None`), preserving citation tokens.
 2. **Local Laya Engine (`zocrates/rag/decision_service.py`)**:
@@ -206,20 +207,31 @@ Accurate verification requires extracting the exact semantic assertion correspon
      - Paragraph break: `\n\s*\n`
      - Bullet list item: `\n\s*[-*+]\s+`
      - Numbered list item: `\n\s*\d+\.\s+`
-     - Markdown header: `\n\s*#{1,6}\s+`
+     - Markdown header line: `(?:^|\n)\s*#{1,6}\s+[^\n]*\n+` (consumes the full heading line, guaranteeing that section titles like `### 4. Holoenzyme is a better noise filter` never contaminate the extracted claim sentence).
    - **Window Clamping**: Caps backward claim length to `MAX_CLAIM_CHARS = 800`. If exceeded, advances past the first forward sentence boundary to avoid chopping sentences in half.
    - **Leading Syntax Stripping**: Regex `^(?:[\.\,\;\:\!\?\*\-\#\>\s]|\d+\.\s*)+` strips bullet dashes, list numbers, blockquotes, and punctuation while retaining lead-in text.
    - **Bold Lead-in Retention**: Headings like `- **Lead-in.** Claim text [1]` preserve the lead-in heading as clean, readable text (`Lead-in. Claim text.`) without Markdown syntax markers.
-2. **Abbreviation Guard (`_ABBREVIATION_RE`)**:
+2. **Conditional Compound-Citation Prompt Dispatch**:
+   - In scholarly writing, compound citations like `[1, 2]` frequently attribute composite statements where each cited work supports distinct, complementary clauses.
+   - Single citation (`len(bracket) == 1`): Dispatches the canonical prompt:
+     ```text
+     Does the `source_text` support the `claim`?
+     ```
+   - Multi-citation bracket (`len(bracket) > 1`): Automatically dispatches the conditional compound prompt:
+     ```text
+     This claim cites multiple sources. Does the `source_text` support a substantive part of the `claim`?
+     ```
+   - This conditional prompt eliminates spurious demotions on compound brackets without requiring complex multi-threshold or sibling-aggregation configuration bloat.
+3. **Abbreviation Guard (`_ABBREVIATION_RE`)**:
    Prevents candidate periods from splitting sentences when preceded by academic abbreviations or initials: `et al.`, `e.g.`, `i.e.`, `etc.`, `vs.`, `cf.`, `fig.`, `eq.`, `no.`, `sec.`, `approx.`, `ca.`, `dr.`, `prof.`, `mr.`, `mrs.`, `jr.`, `sr.`, or single capital initials.
-3. **Forward Scan Check (`_find_forward_sentence_boundary`)**:
+4. **Forward Scan Check (`_find_forward_sentence_boundary`)**:
    If the backward span is shorter than `MIN_CLAIM_CHARS = 30` or matches `_AUTHOR_ONLY_RE` (e.g. *"According to Smith et al. [1]..."*), the extractor performs a forward scan through the suffix to capture the complete predicated claim until the next sentence termination or citation.
-4. **Clean Markdown & Symbol Normalization (`_clean_and_join_spans`)**:
+5. **Clean Markdown & Symbol Normalization (`_clean_and_join_spans`)**:
    - Strips Markdown formatting syntax (`**`, `__`, backticks `` ` ``).
    - Normalizes mathematical and punctuation symbols into plain text:  
      `≈` → `"about"`, `≥` → `"at least"`, `≤` → `"at most"`, `→` → `"to"`, `—` (em-dash) → `" - "`.
    - Collapses irregular whitespace, strips remaining citation tokens, and ensures proper terminal punctuation (`.`, `!`, `?`).
-5. **Masking Shields (`mask_text_for_extraction`)**:
+6. **Masking Shields (`mask_text_for_extraction`)**:
    Masks fenced code blocks (```` ```...``` ````), inline code spans (`` `...` ``), Markdown images (`![alt](url)`), and Markdown link reference definitions (`[1]: http...`) using sentinel tokens (`@@ZOCRATES_VERIFY_MASK_N@@`) before boundary detection.
 
 ### 4.4 Partial Compound Bracket Pruning & Two-Tier Invariants
@@ -264,6 +276,23 @@ Surviving citations carry calibrated probabilities into the Zotero desktop UI:
    Support probability: 0.98
    ```
    For compound citations, each pill within `.citation-pill-group` maintains its own distinct tooltip and occurrence tracking.
+3. **Claim Verification Inspector Window (`claims.html`, `claims.js`)**:
+   Accessed via the `.claims-inspector-btn` (`"🛡️ Claim Verification Inspector"`) button in `.message-actions-left` directly adjacent to the Citations toggle button. It opens a dedicated, interactive standalone window providing an exhaustive tabular audit of every citation claim evaluated during the turn:
+   - **Tabular Architecture**:
+     - *Claim Number*: Sequential `#1`, `#2`, ..., `#N` claim identifier.
+     - *Claim Text*: Complete extracted claim sentence with rendered KaTeX formulas and Markdown formatting. Quotation marks surrounding math formulas are stripped to prevent syntax escaping traps.
+     - *Source & Section*: Unified source paper title, author/year metadata, and clickable section breadcrumb.
+     - *Supporting Evidence*: Exact passage evaluated by the decision model, with rendered KaTeX math, Markdown styling, and syntax highlighting.
+     - *Probability & Verdict*: Exact calibrated support probability formatted to 3 decimal places ($p = 0.852$) alongside distinct `VERIFIED` (green) or `REJECTED` (red) status badges.
+   - **Custom Dropdown Filter (`#claims-source-dropdown-wrap`)**: High-contrast, Gecko/GTK-immune custom DOM dropdown menu (`#claims-source-btn` + `#claims-source-menu`) allowing researchers to filter claims by specific cited paper without theme rendering glitches.
+   - **Reader & Library Navigation**: Direct action buttons on each claim row enabling "Jump to Section in Reader" and "Select in Library".
+4. **Message Information Modal Telemetry (`openMessageInfoModal`)**:
+   In the Message Information modal (`⋯` → `Message Information`), the Citation Support section provides aggregated statistical diagnostics:
+   - **Probability Diagnostics**: Computes the mean support probability and sample standard deviation formatted to 3 decimal places:  
+     `Mean p: 0.852 ± 0.041 (std)`
+   - **Single-Line Evaluated Breakdown**: Presents a streamlined, single-line evaluation summary with uniform 500 typography and theme colors:  
+     `${total} claims evaluated: ${kept} verified (p ≥ ${threshFmt}), ${demoted} rejected (p < ${threshFmt})${failOpen > 0 ? `, ${failOpen} unverified` : ""}`
+   - Eliminates cramped, nested drawers and saturated red/green accent badges to maintain clean academic typography.
 
 ### 4.6 Configuration Persistence & Preferences UI
 
@@ -272,7 +301,7 @@ All verification parameters follow Zocrates' Single Source of Truth architecture
 1. **Configuration Schema (`zocrates_config.json`)**:
    - `citation_verification_enabled`: `false` (default)
    - `citation_verification_provider`: `"openrouter"` | `"local_laya"`
-   - `citation_verification_model`: `"inception/mercury-decide"` (default)
+   - `citation_verification_model`: `"~typesafe/jev-latest"` (default)
    - `citation_verification_threshold`: `0.60` (range $0.50$–$0.95$)
    - `citation_verification_local_url`: `"http://127.0.0.1:8005/v1/systemone"`
    - `citation_verification_local_port`: `8005`
@@ -356,18 +385,19 @@ The popover is constructed using native DOM APIs (`document.createElementNS("htt
 
 - **Header**: Document Title in bold, followed by `Authors (Year) • Publication Venue`.
 - **Badges Row (`.evidence-popover-badges-row`)**:
-  - Section Badge: `§ Section Title` breadcrumb indicating the exact section containing the passage.
+  - Section Badge: `§ Section Title` breadcrumb indicating the exact section containing the passage. Long section titles wrap cleanly (`white-space: normal`), with KaTeX mathematical formulas rendered inside section badges.
   - Decision Support Badge (`.evidence-support-badge`): Calibrated attribution confidence badge (`high`, `moderate`, `low`) displaying `✓ Support Probability: 0.XX` or `ⓘ Support Probability: 0.XX`.
 - **Quote Box**: Extractive quote rendered via `formatMarkdown(quote)` without quotes, supporting full markdown formatting (bolding, lists, code blocks).
 - **Action Buttons (`flex-shrink: 0`)**:
   - `Open in Reader`: Resolves attachment IDs, opens or focuses the reader tab via `window.top.Zotero.Reader.open(attachmentID)`, and executes a **best-effort section navigation** (`openItemInReader(attachmentKey, section)`):
-    - **PDF Documents**: Traverses the embedded PDF Document Outline (`PDFViewerApplication.pdfDocument.getOutline()` or Zotero's internal cached outline `internalReader._state.outline`) via scored pre-order DFS matching, jumping directly to the section heading destination (`internalReader.navigate({ dest })` or `pdfLinkService.goToDestination(dest)`).
+    - **PDF Documents**: Traverses the embedded PDF Document Outline (`PDFViewerApplication.pdfDocument.getOutline2()` / `getOutline()` or Zotero's internal cached outline `internalReader._state.outline`, supporting both native `{ dest }` and synthesized `location.position` schemas) via scored pre-order DFS matching, jumping directly to the section heading destination (`internalReader.navigate(targetLocation)` or `pdfLinkService.goToDestination(dest)`), with hierarchical parent breadcrumb fallback if a sub-section is missing in a shallow outline.
     - **HTML Web Snapshots**: Traverses the snapshot document DOM (`internalReader._primaryView._iframeWindow.document`), locating the matching semantic heading element (`<h1>`–`<h6>`, `[role="heading"]`) and smoothly scrolling it into view via `headingEl.scrollIntoView({ behavior: 'smooth', block: 'start' })`.
     - **Highlight-Free Invariant**: Operates completely highlight-free with zero persistent database annotations in `zotero.sqlite`, zero yellow canvas highlights, and zero find-bar clutter.
     - **Best-Effort & Fail-Open Resilience**: If an outline or heading element is absent or unindexed, it cleanly leaves the document open at its standard/last-viewed position without throwing errors or stalling reader interactions.
   - `Select in Library`: Resolves items (including traversing parent items for attachments) and calls `ZoteroPane.selectItem(itemID, false, true)`.
-- **Dynamic Viewport Clamping**: Evaluates `spaceBelow` vs `spaceAbove` relative to `window.innerHeight`, automatically anchoring above or below the pill and capping `maxHeight` so footer buttons are never cut off.
-- **Corner Resizing Grip**: Features a dedicated `.evidence-popover-resize-handle` draggable corner grip in the bottom-right allowing researchers to smoothly expand both width and height simultaneously while dynamically lifting initial viewport max-height clamps.
+- **Dynamic Viewport Clamping & Smart Narrow Placement**: Evaluates `spaceBelow` vs `spaceAbove` relative to `window.innerHeight`, automatically anchoring above or below the pill and capping `maxHeight` so footer buttons are never cut off. In narrow sidebars ($< 420\text{px}$), the popover automatically pins to `left: 8px` and spans `calc(100vw - 16px)`, preventing horizontal clipping.
+- **8-Directional Resizing**: Features 8 edge and corner drag resizers (`nw`, `n`, `ne`, `e`, `se`, `s`, `sw`, `w`) allowing researchers to smoothly expand both width and height in any direction while dynamically lifting initial viewport max-height clamps.
+- **1-Click Maximize / Restore Toggle**: A dedicated button (`.evidence-popover-maximize-btn`) in the header toggles the popover between compact docked state and expanded state ($92\text{vw} \times 88\text{vh}$).
 - **Scroll Isolation**: The `window.scroll` listener ignores scroll events originating inside `activeEvidencePopover`, allowing researchers to scroll through long quotes smoothly.
 
 ### 6.3 Clickable Source Entries
@@ -383,9 +413,22 @@ To allow researchers to seamlessly toggle between deep scholarly verification an
 - **Toggle Button Placement (`.message-actions-left`)**: Positioned in the lower-left corner of the assistant response message bubble within `.message-actions`, cleanly partitioned from right-aligned utility actions in `.message-actions-right`.
 - **Presence Gating (`hasMessageCitations`)**: Only displayed on assistant messages that actively contain citations or references (checking `metadata.citations`, `metadata.references`, the `# Cited Sources` header, or bracketed citation tokens, with code blocks masked).
 - **Interactive Toggle States**:
-  - **Visible (Default / ON)**: Displayed as an active subtle pill button with an eye icon, `'Citations'` label, and `'Hide citations'` tooltip. In-text pills (`.citation-pill`, `.citation-pill-group`) and bibliographic sources (`.zocrates-sources-section`) remain visible. Clicking 'Copy' formats the text with parenthetical author-year citations (e.g. `(Watson & Crick, 1953)`) and appends the full bibliography.
+  - **Visible (Default / ON)**: Displayed as an active subtle pill button with an eye icon, `'Citations: Visible'` label, and `'Hide citations'` tooltip. In-text pills (`.citation-pill`, `.citation-pill-group`) and bibliographic sources (`.zocrates-sources-section`) remain visible. Clicking 'Copy' formats the text with parenthetical author-year citations (e.g. `(Watson & Crick, 1953)`) and appends the full bibliography.
   - **Hidden (OFF)**: Adds `.citations-hidden` to `.message-wrapper`, updating the button to a muted dashed style with a slashed-eye icon, `'Citations: Hidden'` label, and `'Show citations'` tooltip. In-text citation pills and the entire sources section are hidden via CSS (`display: none !important;`). Clicking 'Copy' automatically invokes `stripCitationsFromText()`, copying clean academic prose with bracket tokens and bibliographic sections removed while preserving code blocks and punctuation.
+- **Claim Verification Inspector Action (`.claims-inspector-btn`)**: Positioned directly adjacent to the Citations toggle button in `.message-actions-left`. Labeled `'🛡️ Claim Verification Inspector'` with hover counts (`Inspect claim verification table (x verified, y rejected of z total)`), launching the standalone Claim Verification Inspector window.
 - **Dynamic Stream & Rehydration Lifecycle**: Evaluated and attached during initial message rendering (`appendMessageDOM`), continuously maintained during streaming updates (`scheduleRender`), and dynamically injected upon final response stream completion (`finalizeChatStream`) as well as historical session reloads.
+
+### 6.5 Sidebar Font Size Adjustment
+
+To accommodate diverse display resolutions and reading preferences, the sidebar features a dedicated text size adjustment control:
+
+- **Submenu Placement**: Located in the header More Options (`⋯`) flyout menu under `Text Size`.
+- **Three Discrete Presets**:
+  - `Small`: `13px` base font size.
+  - `Medium (Default)`: `14px` base font size.
+  - `Large`: `15.5px` base font size.
+- **Scope of Impact**: Sets `--base-font-size` on the document root, proportionally scaling message bubbles, the chat input textarea, code blocks, and Evidence Peek popovers.
+- **Docked & Detached Parity**: Selected font size is persisted to Zotero preferences (`extensions.zocrates.fontSize`) and synchronized across docked iframes and detached standalone windows.
 
 ---
 

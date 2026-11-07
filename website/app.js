@@ -282,6 +282,94 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  /* Citations Visibility Toggle & Claim Verification Inspector Modal */
+  const toggleCitationsBtn = document.getElementById('btn-toggle-citations');
+  const heroAssistantBubble = document.querySelector('.chat-bubble-assistant');
+  if (toggleCitationsBtn && heroAssistantBubble) {
+    let citationsVisible = true;
+    toggleCitationsBtn.addEventListener('click', () => {
+      citationsVisible = !citationsVisible;
+      heroAssistantBubble.classList.toggle('citations-hidden', !citationsVisible);
+      if (citationsVisible) {
+        toggleCitationsBtn.innerHTML = '👁️ Citations: Visible';
+        toggleCitationsBtn.classList.add('active-pill');
+        toggleCitationsBtn.classList.remove('muted-pill');
+      } else {
+        toggleCitationsBtn.innerHTML = '👁️ Citations: Hidden';
+        toggleCitationsBtn.classList.remove('active-pill');
+        toggleCitationsBtn.classList.add('muted-pill');
+      }
+    });
+  }
+
+  const claimsModal = document.getElementById('claims-inspector-modal');
+  const openClaimsBtn = document.getElementById('btn-open-claims-inspector');
+  const closeClaimsBtn = document.getElementById('claims-modal-close-btn');
+  const claimsFilterSelect = document.getElementById('claims-filter-select');
+  const claimsTableBody = document.getElementById('claims-table-body');
+
+  function openClaimsInspector() {
+    if (claimsModal) {
+      claimsModal.classList.add('open');
+      claimsModal.setAttribute('aria-hidden', 'false');
+      document.body.style.overflow = 'hidden';
+    }
+  }
+
+  function closeClaimsInspector() {
+    if (claimsModal) {
+      claimsModal.classList.remove('open');
+      claimsModal.setAttribute('aria-hidden', 'true');
+      document.body.style.overflow = '';
+    }
+  }
+
+  if (openClaimsBtn) {
+    openClaimsBtn.addEventListener('click', openClaimsInspector);
+  }
+  if (closeClaimsBtn) {
+    closeClaimsBtn.addEventListener('click', closeClaimsInspector);
+  }
+  if (claimsModal) {
+    claimsModal.addEventListener('click', (e) => {
+      if (e.target === claimsModal) {
+        closeClaimsInspector();
+      }
+    });
+  }
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && claimsModal && claimsModal.classList.contains('open')) {
+      closeClaimsInspector();
+    }
+  });
+
+  if (claimsFilterSelect && claimsTableBody) {
+    claimsFilterSelect.addEventListener('change', () => {
+      const selectedSource = claimsFilterSelect.value;
+      const rows = claimsTableBody.querySelectorAll('tr');
+      rows.forEach((row) => {
+        if (selectedSource === 'all' || row.dataset.source === selectedSource) {
+          row.style.display = '';
+        } else {
+          row.style.display = 'none';
+        }
+      });
+    });
+  }
+
+  const msgInfoBtn = document.getElementById('btn-msg-info');
+  if (msgInfoBtn) {
+    msgInfoBtn.addEventListener('click', () => {
+      const orig = msgInfoBtn.innerHTML;
+      msgInfoBtn.innerHTML = '✓ 3 verified (p ≥ 0.600)';
+      msgInfoBtn.style.color = 'var(--success)';
+      setTimeout(() => {
+        msgInfoBtn.innerHTML = orig;
+        msgInfoBtn.style.color = '';
+      }, 2600);
+    });
+  }
+
   /* ------------------------------------------------------------------------
      3. Hero Predictive Ghost Text Input Demo ([Tab ⇥] Acceptance)
      ------------------------------------------------------------------------ */
@@ -404,6 +492,51 @@ Instead of performing a single attention function with d_model-dimensional keys.
         <span>• If a paper does not support a claim, the unsupported citation is automatically pruned</span>
       </div>
     `,
+    'inspector': `
+      <div style="display:flex; flex-direction:column; gap:0.6rem;">
+        <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.5rem;">
+          <span style="font-size:0.78rem; font-weight:700; color:var(--text-main);">
+            🛡️ Claim Verification Inspector Preview (2/2 Claims Verified)
+          </span>
+          <button type="button" class="btn btn-primary btn-sm open-full-inspector-btn" style="padding:0.25rem 0.55rem; font-size:0.74rem;">
+            🔍 Open Full Inspector Window
+          </button>
+        </div>
+        <div class="claims-table-wrap" style="max-height:220px; overflow-y:auto;">
+          <table class="claims-table" style="font-size:0.77rem;">
+            <thead>
+              <tr>
+                <th style="width:28px;">#</th>
+                <th>Claim Sentence</th>
+                <th>Source &amp; Section</th>
+                <th style="text-align:center;">Prob (p)</th>
+                <th style="text-align:center;">Verdict</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="claim-idx-badge">#1</span></td>
+                <td>Exact tiling algorithms eliminate redundant memory reads and writes during attention passes.</td>
+                <td>Dao et al. (2022)<br/><span class="claim-section-tag">§ 2 FlashAttention</span></td>
+                <td style="text-align:center;"><span class="claim-prob-val">0.938</span></td>
+                <td style="text-align:center;"><span class="claim-verdict-badge verified">✓ VERIFIED</span></td>
+              </tr>
+              <tr>
+                <td><span class="claim-idx-badge">#2</span></td>
+                <td>Achieving a 3.2× speedup over standard attention baselines on A100 GPUs.</td>
+                <td>Dao (2023)<br/><span class="claim-section-tag">§ 4 Empirical Evaluation</span></td>
+                <td style="text-align:center;"><span class="claim-prob-val">0.912</span></td>
+                <td style="text-align:center;"><span class="claim-verdict-badge verified">✓ VERIFIED</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div style="font-size:0.73rem; color:var(--text-muted); display:flex; justify-content:space-between; flex-wrap:wrap;">
+          <span>Model: ~typesafe/jev-latest (Threshold τ = 0.600)</span>
+          <span style="color:var(--success); font-weight:600;">Mean p: 0.925 ± 0.018</span>
+        </div>
+      </div>
+    `,
     'manuscript': `
       <p style="font-size:0.86rem; color:var(--text-main);">
         Exact tiling algorithms eliminate redundant memory reads and writes during attention forward and backward passes (Dao et al., 2022), achieving a 3.2× speedup over standard baselines (Dao, 2023).
@@ -433,6 +566,14 @@ Instead of performing a single attention function with d_model-dimensional keys.
       }
     });
   });
+
+  if (citeModeDisplay) {
+    citeModeDisplay.addEventListener('click', (e) => {
+      if (e.target && e.target.closest('.open-full-inspector-btn')) {
+        openClaimsInspector();
+      }
+    });
+  }
 
   /* ------------------------------------------------------------------------
      6. Bento Widget 2: Online Discovery & 1-Click Import Simulator

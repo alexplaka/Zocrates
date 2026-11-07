@@ -154,6 +154,9 @@ let currentResolvedView = null; // { type: "collection", collections: [...] } or
 const themeMenuOption = document.getElementById("theme-menu-option");
 const themeMenuContainer = document.getElementById("theme-menu-container");
 const themeOptionsDropdown = document.getElementById("theme-options-dropdown");
+const fontSizeMenuOption = document.getElementById("font-size-menu-option");
+const fontSizeMenuContainer = document.getElementById("font-size-menu-container");
+const fontSizeOptionsDropdown = document.getElementById("font-size-options-dropdown");
 const aboutMenuContainer = document.getElementById("about-menu-container");
 const aboutMenuOption = document.getElementById("about-menu-option");
 const aboutOptionsDropdown = document.getElementById("about-options-dropdown");
@@ -2629,7 +2632,7 @@ const ONBOARDING_PRESETS = {
       },
       reranker_model: "qwen/qwen3-reranker-8b",
       citation_verification_provider: "openrouter",
-      citation_verification_model: "inception/mercury-decide",
+      citation_verification_model: "~typesafe/jev-latest",
       enable_predictive_ghost_input: true,
       predictive_prompt_model: "openrouter/~deepseek/deepseek-flash-latest",
       compaction_summarizer_model: "openrouter/~deepseek/deepseek-flash-latest",
@@ -4243,11 +4246,30 @@ function selectItemInZotero(itemKey) {
 // Module-level in-flight tracker to coalesce duplicate clicks and avoid race conditions
 const _activeReaderNavigations = new Map();
 
+function isSyntheticOrTitle(heading, documentTitle = "") {
+  if (!heading || typeof heading !== "string") return true;
+  const clean = heading.trim().replace(/^§\s*/, "").replace(/[*`_]/g, "").replace(/\$([^$]*)\$/g, "$1").trim();
+  if (!clean) return true;
+  const lower = clean.toLowerCase();
+  if (
+    lower === "frontmatter" ||
+    lower === "full document" ||
+    lower === "abstract" ||
+    /^(?:figure|table)\s+\d/i.test(clean)
+  ) {
+    return true;
+  }
+  if (documentTitle && normalizeForComparison(clean) === normalizeForComparison(documentTitle)) {
+    return true;
+  }
+  return false;
+}
+
 function extractLeafHeading(rawSection, documentTitle = "") {
   if (!rawSection || typeof rawSection !== "string") return { leaf: "", parents: [] };
   let clean = rawSection.trim();
   // Strip leading section symbols and Markdown formatting
-  clean = clean.replace(/^§\s*/, "").replace(/[*`_]/g, "").replace(/\$[^$]*\$/g, "");
+  clean = clean.replace(/^§\s*/, "").replace(/[*`_]/g, "").replace(/\$([^$]*)\$/g, "$1");
 
   // Take the last component of a hierarchy breadcrumb
   let parents = [];
@@ -4258,20 +4280,8 @@ function extractLeafHeading(rawSection, documentTitle = "") {
   }
   clean = clean.replace(/^§\s*/, "").trim();
 
-  // Ignore synthetic or document-level labels
-  const lower = clean.toLowerCase();
-  if (
-    !clean ||
-    lower === "frontmatter" ||
-    lower === "full document" ||
-    lower === "abstract" ||
-    /^(?:figure|table)\s+\d/i.test(clean)
-  ) {
-    return { leaf: "", parents: [] };
-  }
-
-  // If the leaf heading simply equals the document title, skip it
-  if (documentTitle && normalizeForComparison(clean) === normalizeForComparison(documentTitle)) {
+  // Ignore synthetic labels or headings equal to document title
+  if (isSyntheticOrTitle(clean, documentTitle)) {
     return { leaf: "", parents: [] };
   }
 
@@ -4283,6 +4293,7 @@ function normalizeForComparison(str) {
   return str
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "") // strip combining diacritics
+    .replace(/[\^\{\}\[\]\+_\\]/g, "") // strip LaTeX punctuation and formatting characters
     .replace(/[^\p{L}\p{N}\s]/gu, " ") // Unicode-aware letter/number filtering
     .toLowerCase()
     .replace(/\s+/g, " ")
@@ -4337,9 +4348,9 @@ function findOutlineDestination(outlineNodes, targetHeading, parentHeadings = []
     for (const node of nodes) {
       if (!node) continue;
       const rawTitle = node.title || "";
-      const dest = node.dest || node.location?.dest || null;
+      const targetLocation = node.location || (node.dest ? { dest: node.dest } : (node.pageIndex !== undefined ? { pageIndex: node.pageIndex } : null));
 
-      if (rawTitle && dest) {
+      if (rawTitle && targetLocation) {
         const nodeParts = parseHeadingParts(rawTitle);
         let score = 0;
 
@@ -4386,7 +4397,7 @@ function findOutlineDestination(outlineNodes, targetHeading, parentHeadings = []
         }
 
         if (score >= 40) {
-          candidates.push({ node, dest, score, title: rawTitle });
+          candidates.push({ node, targetLocation, score, title: rawTitle });
         }
       }
 
@@ -4405,12 +4416,12 @@ function findOutlineDestination(outlineNodes, targetHeading, parentHeadings = []
 
   // If the top score is tied between two distinct destinations, reject to prevent jumping to wrong section
   if (candidates.length > 1 && candidates[0].score === candidates[1].score) {
-    if (JSON.stringify(candidates[0].dest) !== JSON.stringify(candidates[1].dest)) {
+    if (JSON.stringify(candidates[0].targetLocation) !== JSON.stringify(candidates[1].targetLocation)) {
       return null;
     }
   }
 
-  return candidates[0].dest;
+  return candidates[0].targetLocation;
 }
 
 function findHtmlSnapshotHeading(doc, targetHeading) {
@@ -4588,19 +4599,30 @@ function openItemInReader(attachmentKey, rawSection) {
             break;
           }
 
-          // Attempt 2: PDFViewerApplication.pdfDocument.getOutline()
+          // Attempt 2: PDFViewerApplication.pdfDocument.getOutline2() then getOutline()
           const iframeWin = internalReader?._primaryView?._iframeWindow;
           const pdfViewerApp = iframeWin?.wrappedJSObject?.PDFViewerApplication || iframeWin?.PDFViewerApplication;
           const pdfDoc = pdfViewerApp?.pdfDocument;
 
-          if (pdfDoc && typeof pdfDoc.getOutline === "function") {
-            try {
-              const docOutline = await pdfDoc.getOutline();
-              if (Array.isArray(docOutline) && docOutline.length > 0) {
-                outline = docOutline;
-                break;
-              }
-            } catch (_) {}
+          if (pdfDoc) {
+            if (typeof pdfDoc.getOutline2 === "function") {
+              try {
+                const docOutline2 = await pdfDoc.getOutline2();
+                if (Array.isArray(docOutline2) && docOutline2.length > 0) {
+                  outline = docOutline2;
+                  break;
+                }
+              } catch (_) {}
+            }
+            if (typeof pdfDoc.getOutline === "function") {
+              try {
+                const docOutline = await pdfDoc.getOutline();
+                if (Array.isArray(docOutline) && docOutline.length > 0) {
+                  outline = docOutline;
+                  break;
+                }
+              } catch (_) {}
+            }
           }
 
           await new Promise(resolve => setTimeout(resolve, 120));
@@ -4608,21 +4630,48 @@ function openItemInReader(attachmentKey, rawSection) {
 
         if (!outline || !Array.isArray(outline) || outline.length === 0) return;
 
-        const dest = findOutlineDestination(outline, leaf, parents);
-        if (!dest) return;
+        let targetLocation = findOutlineDestination(outline, leaf, parents);
+        if (!targetLocation && parents && parents.length > 0) {
+          for (let i = parents.length - 1; i >= 0; i--) {
+            const parentHeading = parents[i];
+            if (isSyntheticOrTitle(parentHeading, docTitle)) continue;
+            const ancestorParents = parents.slice(0, i);
+            targetLocation = findOutlineDestination(outline, parentHeading, ancestorParents);
+            if (targetLocation) break;
+          }
+        }
+        if (!targetLocation) return;
 
         const internalReader = readerInstance._internalReader || readerInstance;
-        // Execute destination jump (Zero highlighting)
-        if (typeof internalReader.navigate === "function") {
-          internalReader.navigate({ dest });
-        } else {
-          const iframeWin = internalReader?._primaryView?._iframeWindow;
-          const pdfViewerApp = iframeWin?.wrappedJSObject?.PDFViewerApplication || iframeWin?.PDFViewerApplication;
-          const linkService = pdfViewerApp?.pdfLinkService;
+        // Execute destination jump with a bounded timeout race to prevent stuck promises
+        let navTimer = null;
+        const navRemainingMs = Math.max(1000, deadlineMs - (Date.now() - startTime));
+        const navTimeoutPromise = new Promise(resolve => {
+          navTimer = setTimeout(resolve, navRemainingMs);
+        });
 
-          if (linkService && typeof linkService.goToDestination === "function") {
-            await linkService.goToDestination(dest);
+        const jumpPromise = (async () => {
+          if (typeof internalReader.navigate === "function") {
+            return await internalReader.navigate(targetLocation);
+          } else if (typeof readerInstance.navigate === "function") {
+            return await readerInstance.navigate(targetLocation);
+          } else {
+            const iframeWin = internalReader?._primaryView?._iframeWindow;
+            const pdfViewerApp = iframeWin?.wrappedJSObject?.PDFViewerApplication || iframeWin?.PDFViewerApplication;
+            const linkService = pdfViewerApp?.pdfLinkService;
+
+            if (linkService && typeof linkService.goToDestination === "function" && targetLocation?.dest) {
+              return await linkService.goToDestination(targetLocation.dest);
+            }
           }
+        })();
+        // Guard against late rejection if timeout wins
+        jumpPromise.catch(() => {});
+
+        try {
+          await Promise.race([jumpPromise, navTimeoutPromise]);
+        } finally {
+          if (navTimer) clearTimeout(navTimer);
         }
       }
 
@@ -5479,26 +5528,58 @@ function formatMessageContent(text, metadata = null, isUser = false) {
   const citationRegex = /\[(?:E\s?|Chunk\s?)?(\d{1,2}(?:\s*[,;]\s*\d{1,2})*)\]|【(\d{1,2}(?:\s*[,;]\s*\d{1,2})*)】/g;
 
   if (citations && citations.length > 0) {
+    const totalOccurrencesInText = {};
+    const countRegex = new RegExp(citationRegex.source, citationRegex.flags);
+    let countMatch;
+    while ((countMatch = countRegex.exec(processed)) !== null) {
+      const raw = countMatch[1] || countMatch[2] || "";
+      const parts = raw.split(/[,;]/).map(s => s.trim()).filter(Boolean);
+      const seenInCountToken = new Set();
+      for (const part of parts) {
+        const idx = parseInt(part, 10);
+        if (isNaN(idx) || seenInCountToken.has(idx)) continue;
+        seenInCountToken.add(idx);
+        totalOccurrencesInText[idx] = (totalOccurrencesInText[idx] || 0) + 1;
+      }
+    }
+
     const occCounters = {};
     // 2. Scan and replace citation tokens: [1], [1, 2], [1; 2], [Chunk 1], [E 1], 【1】
     processed = processed.replace(citationRegex, (match, p1, p2) => {
       const raw = p1 || p2 || "";
       const parts = raw.split(/[,;]/).map(s => s.trim()).filter(Boolean);
       const pills = [];
+      const seenInToken = new Set();
 
       for (const part of parts) {
         const idx = parseInt(part, 10);
-        if (isNaN(idx)) continue;
+        if (isNaN(idx) || seenInToken.has(idx)) continue;
+        seenInToken.add(idx);
+
         const c = citations.find(item => item.index === idx);
         if (c) {
-          const occ = (occCounters[idx] || 0) + 1;
-          occCounters[idx] = occ;
+          const seenCount = (occCounters[idx] || 0) + 1;
+          occCounters[idx] = seenCount;
 
-          const occRecords = (c.occurrences || []).filter(o => o.survived !== false);
-          const occRec = occRecords[occ - 1];
+          const allOccs = Array.isArray(c.occurrences) ? c.occurrences : [];
+          const survivingOccs = allOccs.filter(o => o.survived !== false);
+          const hasRejectedOccs = allOccs.some(o => o.survived === false);
+
+          let occRec = null;
+          if (hasRejectedOccs && (totalOccurrencesInText[idx] || 0) > survivingOccs.length) {
+            occRec = allOccs.find(o => o.occurrence === seenCount) || allOccs[seenCount - 1] || null;
+            if (!occRec || occRec.survived === false) continue;
+          } else {
+            if (allOccs.length > 0 && seenCount > survivingOccs.length) continue;
+            occRec = allOccs.length > 0 ? (survivingOccs[seenCount - 1] || null) : null;
+          }
+
+          const canonicalOcc = (occRec && typeof occRec.occurrence === "number")
+            ? occRec.occurrence
+            : seenCount;
           const occProb = (occRec && occRec.support_probability !== undefined && occRec.support_probability !== null)
             ? occRec.support_probability
-            : c.support_probability;
+            : (allOccs.length === 0 ? c.support_probability : null);
 
           const auth = c.authors ? c.authors.trim() : "";
           const yr = c.year ? String(c.year).trim() : "";
@@ -5531,7 +5612,7 @@ function formatMessageContent(text, metadata = null, isUser = false) {
 
           const tooltip = `Title: ${cleanTitle}\nSection: ${sec}\nSupport probability: ${probStr}`;
           const escapedTooltip = escapeHTML(tooltip).replace(/\r?\n/g, "&#10;");
-          pills.push(`<span class="citation-pill" data-citation-idx="${idx}" data-citation-occ="${occ}" title="${escapedTooltip}">${escapeHTML(label)}</span>`);
+          pills.push(`<span class="citation-pill" data-citation-idx="${idx}" data-citation-occ="${canonicalOcc}" title="${escapedTooltip}">${escapeHTML(label)}</span>`);
         }
       }
 
@@ -5543,9 +5624,9 @@ function formatMessageContent(text, metadata = null, isUser = false) {
       citationPlaceholders.push(pillGroup);
       return ph;
     });
-  } else if (metadata && Array.isArray(metadata.references) && metadata.references.length > 0) {
+  } else if ((metadata && Array.isArray(metadata.references) && metadata.references.length > 0) || (metadata && metadata.citation_verification)) {
     // Defense-in-depth: scrub any lingering bracket citation tokens if no citations were kept
-    processed = processed.replace(citationRegex, "");
+    processed = processed.replace(new RegExp(`[ \\t]*${citationRegex.source}[ \\t]*([.,;!?])?`, "g"), (m, p1, p2, punct) => punct || "");
   }
 
   // Ensure Cited Sources and the considered-sources drawer are rendered if references metadata exists
@@ -5666,11 +5747,70 @@ function showEvidencePopover(pill, citation) {
   const attKey = citation.attachment_key || citation.item_key || "";
   const itemKey = citation.item_key || "";
 
-  // 1. Header Title
+  // 1. Header Row (Title + Maximize Button)
+  const headerDiv = document.createElementNS(XHTMLNS, "div");
+  headerDiv.className = "evidence-popover-header";
+
   const titleDiv = document.createElementNS(XHTMLNS, "div");
   titleDiv.className = "evidence-popover-title";
   titleDiv.textContent = title;
-  popover.appendChild(titleDiv);
+  headerDiv.appendChild(titleDiv);
+
+  const maximizeBtn = document.createElementNS(XHTMLNS, "button");
+  maximizeBtn.className = "evidence-popover-maximize-btn";
+  maximizeBtn.setAttribute("type", "button");
+  maximizeBtn.setAttribute("title", "Maximize in sidebar");
+  maximizeBtn.textContent = "⤢";
+
+  function toggleMaximize() {
+    const isMax = popover.classList.contains("is-maximized");
+    if (!isMax) {
+      popover._prevGeometry = {
+        left: popover.style.left,
+        top: popover.style.top,
+        width: popover.style.width,
+        height: popover.style.height,
+        maxHeight: popover.style.maxHeight,
+      };
+      popover.classList.add("is-maximized");
+      maximizeBtn.textContent = "⤡";
+      maximizeBtn.setAttribute("title", "Restore size");
+      const bodyEl = popover.querySelector(".evidence-popover-body");
+      if (bodyEl) {
+        bodyEl.style.maxHeight = "none";
+      }
+    } else {
+      popover.classList.remove("is-maximized");
+      maximizeBtn.textContent = "⤢";
+      maximizeBtn.setAttribute("title", "Maximize in sidebar");
+      if (popover._prevGeometry) {
+        popover.style.left = popover._prevGeometry.left;
+        popover.style.top = popover._prevGeometry.top;
+        popover.style.width = popover._prevGeometry.width;
+        popover.style.height = popover._prevGeometry.height;
+        popover.style.maxHeight = popover._prevGeometry.maxHeight;
+      }
+    }
+  }
+
+  maximizeBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleMaximize();
+  });
+
+  maximizeBtn.addEventListener("dblclick", (e) => {
+    e.stopPropagation();
+  });
+
+  headerDiv.addEventListener("dblclick", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleMaximize();
+  });
+
+  headerDiv.appendChild(maximizeBtn);
+  popover.appendChild(headerDiv);
 
   // 2. Metadata (Authors, Year, Pub)
   if (authYear || pub) {
@@ -5696,9 +5836,16 @@ function showEvidencePopover(pill, citation) {
   const occ = parseInt(pill.getAttribute("data-citation-occ"), 10);
   let targetProb = citation.support_probability;
   if (Number.isFinite(occ) && Array.isArray(citation.occurrences)) {
-    const occRecords = citation.occurrences.filter(o => o.survived !== false);
-    if (occRecords[occ - 1] && occRecords[occ - 1].support_probability !== undefined && occRecords[occ - 1].support_probability !== null) {
-      targetProb = occRecords[occ - 1].support_probability;
+    const occRecord = citation.occurrences.find(o => o.occurrence === occ);
+    if (occRecord) {
+      targetProb = (occRecord.support_probability !== undefined && occRecord.support_probability !== null)
+        ? occRecord.support_probability
+        : null;
+    } else {
+      const occRecords = citation.occurrences.filter(o => o.survived !== false);
+      if (occRecords[occ - 1] && occRecords[occ - 1].support_probability !== undefined && occRecords[occ - 1].support_probability !== null) {
+        targetProb = occRecords[occ - 1].support_probability;
+      }
     }
   }
 
@@ -5728,7 +5875,8 @@ function showEvidencePopover(pill, citation) {
     if (sec) {
       const secDiv = document.createElementNS(XHTMLNS, "div");
       secDiv.className = "evidence-popover-section-badge";
-      secDiv.textContent = `§ ${sec}`;
+      const formattedSec = formatMarkdown(`§ ${sec}`).trim().replace(/^<p>([\s\S]*?)<\/p>$/i, "$1").trim();
+      secDiv.innerHTML = formattedSec;
       badgesRow.appendChild(secDiv);
     }
     if (supportBadge) {
@@ -5775,52 +5923,111 @@ function showEvidencePopover(pill, citation) {
 
   popover.appendChild(footerDiv);
 
-  // 6. Corner resize handle
-  const resizeHandle = document.createElementNS(XHTMLNS, "div");
-  resizeHandle.className = "evidence-popover-resize-handle";
-  resizeHandle.setAttribute("title", "Drag to resize");
+  // 6. Multi-directional resizers
+  const resizerDirections = ["n", "s", "e", "w", "nw", "ne", "sw", "se"];
+  for (const dir of resizerDirections) {
+    const resizer = document.createElementNS(XHTMLNS, "div");
+    resizer.className = `evidence-popover-resizer resizer-${dir}`;
+    resizer.setAttribute("data-direction", dir);
+    resizer.setAttribute("title", "Drag to resize");
 
-  resizeHandle.addEventListener("mousedown", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const startX = e.clientX;
-    const startY = e.clientY;
-    const startWidth = popover.offsetWidth;
-    const startHeight = popover.offsetHeight;
+    resizer.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
 
-    const onMouseMove = (moveEvt) => {
-      const newWidth = Math.max(260, Math.min(window.innerWidth - popover.offsetLeft - 10, startWidth + (moveEvt.clientX - startX)));
-      const newHeight = Math.max(160, Math.min(window.innerHeight - popover.offsetTop - 10, startHeight + (moveEvt.clientY - startY)));
-      popover.style.width = newWidth + "px";
-      popover.style.height = newHeight + "px";
-      popover.style.maxHeight = newHeight + "px";
-      const bodyEl = popover.querySelector(".evidence-popover-body");
-      if (bodyEl) {
-        bodyEl.style.maxHeight = "none";
-      }
-    };
+      popover._isResizing = true;
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const rect = popover.getBoundingClientRect();
+      const startLeft = parseFloat(popover.style.left) || rect.left || popover.offsetLeft || 0;
+      const startTop = parseFloat(popover.style.top) || rect.top || popover.offsetTop || 0;
+      const startWidth = parseFloat(popover.style.width) || popover.offsetWidth || rect.width || 320;
+      const startHeight = parseFloat(popover.style.height) || popover.offsetHeight || rect.height || 220;
 
-    const onMouseUp = () => {
-      window.removeEventListener("mousemove", onMouseMove, true);
-      window.removeEventListener("mouseup", onMouseUp, true);
-    };
+      const minWidth = 260;
+      const minHeight = 180;
+      const margin = 10;
 
-    window.addEventListener("mousemove", onMouseMove, true);
-    window.addEventListener("mouseup", onMouseUp, true);
-  });
+      const onMouseMove = (moveEvt) => {
+        if (popover.classList.contains("is-maximized")) {
+          popover.classList.remove("is-maximized");
+          maximizeBtn.textContent = "⤢";
+          maximizeBtn.setAttribute("title", "Maximize in sidebar");
+        }
 
-  popover.appendChild(resizeHandle);
+        const deltaX = moveEvt.clientX - startX;
+        const deltaY = moveEvt.clientY - startY;
+
+        let newWidth = startWidth;
+        let newLeft = startLeft;
+        let newHeight = startHeight;
+        let newTop = startTop;
+
+        if (dir.includes("e")) {
+          const maxW = Math.max(minWidth, window.innerWidth - startLeft - margin);
+          newWidth = Math.min(maxW, Math.max(minWidth, startWidth + deltaX));
+          popover.style.width = newWidth + "px";
+        } else if (dir.includes("w")) {
+          newLeft = Math.max(margin, Math.min(startLeft + startWidth - minWidth, startLeft + deltaX));
+          newWidth = startWidth + (startLeft - newLeft);
+          popover.style.left = newLeft + "px";
+          popover.style.width = newWidth + "px";
+        }
+
+        if (dir.includes("s")) {
+          const maxH = Math.max(minHeight, window.innerHeight - startTop - margin);
+          newHeight = Math.min(maxH, Math.max(minHeight, startHeight + deltaY));
+          popover.style.height = newHeight + "px";
+          popover.style.maxHeight = newHeight + "px";
+        } else if (dir.includes("n")) {
+          newTop = Math.max(margin, Math.min(startTop + startHeight - minHeight, startTop + deltaY));
+          newHeight = startHeight + (startTop - newTop);
+          popover.style.top = newTop + "px";
+          popover.style.height = newHeight + "px";
+          popover.style.maxHeight = newHeight + "px";
+        }
+
+        const bodyEl = popover.querySelector(".evidence-popover-body");
+        if (bodyEl) {
+          bodyEl.style.maxHeight = "none";
+        }
+      };
+
+      const onMouseUp = () => {
+        popover._isResizing = false;
+        popover._justResized = true;
+        setTimeout(() => {
+          if (popover) popover._justResized = false;
+        }, 100);
+        window.removeEventListener("mousemove", onMouseMove, true);
+        window.removeEventListener("mouseup", onMouseUp, true);
+      };
+
+      window.addEventListener("mousemove", onMouseMove, true);
+      window.addEventListener("mouseup", onMouseUp, true);
+    });
+
+    popover.appendChild(resizer);
+  }
+
   document.body.appendChild(popover);
 
   // Position calculation and viewport clamping
   const margin = 10;
   const pillRect = pill.getBoundingClientRect();
-  const popoverWidth = 320;
   let left = pillRect.left;
-  if (left + popoverWidth > window.innerWidth - margin) {
-    left = Math.max(margin, window.innerWidth - popoverWidth - margin);
+
+  if (window.innerWidth < 420) {
+    const popoverWidth = Math.max(260, window.innerWidth - 2 * margin);
+    popover.style.width = popoverWidth + "px";
+    left = margin;
+  } else {
+    const popoverWidth = 320;
+    if (left + popoverWidth > window.innerWidth - margin) {
+      left = Math.max(margin, window.innerWidth - popoverWidth - margin);
+    }
+    if (left < margin) left = margin;
   }
-  if (left < margin) left = margin;
 
   const spaceBelow = window.innerHeight - pillRect.bottom - margin - 6;
   const spaceAbove = pillRect.top - margin - 6;
@@ -6596,6 +6803,141 @@ function openMessageInfoModal(meta) {
       }
     }
 
+    const verif = currentMeta.citation_verification && typeof currentMeta.citation_verification === "object" ? currentMeta.citation_verification : null;
+    const rawCitations = Array.isArray(currentMeta.citations) ? currentMeta.citations : [];
+    const hasVerificationTelemetry = Boolean(verif && (verif.summary || (Array.isArray(verif.assessments) && verif.assessments.length > 0)));
+    const hasNumericCitationProbs = rawCitations.some(c =>
+      typeof c?.support_probability === "number" ||
+      (Array.isArray(c?.occurrences) && c.occurrences.some(o => typeof o?.support_probability === "number"))
+    );
+
+    if (hasVerificationTelemetry || hasNumericCitationProbs) {
+      const citations = rawCitations;
+      const summary = verif?.summary || {};
+      const assessments = Array.isArray(verif?.assessments) ? verif.assessments : [];
+
+      const provider = verif?.provider || "openrouter";
+      const model = verif?.model || (provider === "local_laya" ? "laya" : null) || currentMeta.model || "Decision Model";
+      const latency = typeof summary.latency_ms === "number" ? summary.latency_ms : (typeof verif?.latency_ms === "number" ? verif.latency_ms : null);
+      const threshold = typeof verif?.threshold === "number"
+        ? verif.threshold
+        : (typeof summary.threshold === "number" ? summary.threshold : 0.60);
+
+      let probs = assessments
+        .map(a => a.support_probability)
+        .filter(p => typeof p === "number" && !isNaN(p));
+      if (probs.length === 0 && citations.length > 0) {
+        probs = citations
+          .flatMap(c => (c.occurrences && c.occurrences.length > 0 ? c.occurrences : [{ support_probability: c.support_probability }]))
+          .map(o => o?.support_probability)
+          .filter(p => typeof p === "number" && !isNaN(p));
+      }
+
+      const total = summary.batch_size !== undefined
+        ? summary.batch_size
+        : (assessments.length > 0 ? assessments.length : (probs.length > 0 ? probs.length : citations.length));
+
+      let kept = summary.kept;
+      if (kept === undefined) {
+        if (assessments.length > 0) {
+          kept = assessments.filter(a => a.verdict === "KEPT" || (typeof a.support_probability === "number" && a.support_probability >= threshold)).length;
+        } else if (citations.length > 0) {
+          const occs = citations.flatMap(c => c.occurrences || (c.support_probability !== undefined ? [{ support_probability: c.support_probability, survived: c.support_probability >= threshold }] : []));
+          kept = occs.filter(o => o.survived || (typeof o.support_probability === "number" && o.support_probability >= threshold)).length;
+        } else {
+          kept = 0;
+        }
+      }
+
+      let demoted = summary.demoted;
+      if (demoted === undefined) {
+        if (assessments.length > 0) {
+          demoted = assessments.filter(a => a.verdict === "DEMOTED" || (typeof a.support_probability === "number" && a.support_probability < threshold)).length;
+        } else if (citations.length > 0) {
+          const occs = citations.flatMap(c => c.occurrences || (c.support_probability !== undefined ? [{ support_probability: c.support_probability, survived: c.support_probability >= threshold }] : []));
+          demoted = occs.filter(o => o.survived === false || (typeof o.support_probability === "number" && o.support_probability < threshold)).length;
+        } else {
+          demoted = 0;
+        }
+      }
+
+      let failOpen = summary.fail_open;
+      if (failOpen === undefined) {
+        if (assessments.length > 0) {
+          failOpen = assessments.filter(a => a.verdict === "FAIL_OPEN" || a.support_probability === null || a.support_probability === undefined).length;
+        } else {
+          failOpen = 0;
+        }
+      }
+
+      let meanVal = summary.mean_support !== undefined && summary.mean_support !== null
+        ? summary.mean_support
+        : (probs.length > 0 ? probs.reduce((a, b) => a + b, 0) / probs.length : null);
+
+      let stdVal = summary.std_support !== undefined && summary.std_support !== null
+        ? summary.std_support
+        : (probs.length >= 2
+            ? Math.sqrt(probs.reduce((sum, p) => sum + Math.pow(p - meanVal, 2), 0) / (probs.length - 1))
+            : (probs.length === 1 ? 0 : null));
+
+      let meanPText = "Mean p: N/A";
+      const numProbs = probs.length;
+      if (numProbs > 0 && meanVal !== null && meanVal !== undefined) {
+        const mClamped = Math.max(0, Math.min(1, Number(meanVal))).toFixed(3);
+        if (numProbs === 1) {
+          meanPText = `Mean p: ${mClamped} ± N/A (std)`;
+        } else if (numProbs >= 2 && stdVal !== null && stdVal !== undefined) {
+          const sClamped = Math.max(0, Math.min(1, Number(stdVal))).toFixed(3);
+          meanPText = `Mean p: ${mClamped} ± ${sClamped} (std)`;
+        } else {
+          meanPText = `Mean p: ${mClamped} ± N/A (std)`;
+        }
+      }
+
+      const row = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+      row.className = "info-meta-row citation-support-row";
+
+      const titleRow = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+      titleRow.className = "citation-support-title-row";
+
+      const labelEl = document.createElementNS("http://www.w3.org/1999/xhtml", "span");
+      labelEl.className = "info-meta-label";
+      labelEl.textContent = "Citation Support";
+
+      const pill = document.createElementNS("http://www.w3.org/1999/xhtml", "span");
+      pill.className = "info-meta-pill citation-support-pill";
+      const latencyStr = typeof latency === "number" ? `${Math.round(latency)}ms` : "";
+      pill.textContent = latencyStr ? `${model} · ${latencyStr}` : model;
+      pill.title = `${model}${latencyStr ? ` (${latencyStr})` : ""}`;
+
+      titleRow.appendChild(labelEl);
+      titleRow.appendChild(pill);
+      row.appendChild(titleRow);
+
+      const valEl = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+      valEl.className = "info-meta-value citation-support-value";
+
+      const threshFmt = Number(threshold).toFixed(3);
+
+      const statsBox = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+      statsBox.className = "citation-support-stats";
+
+      const meanEl = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+      meanEl.className = "citation-support-mean";
+      meanEl.textContent = meanPText;
+      statsBox.appendChild(meanEl);
+
+      const countsBox = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+      countsBox.className = "citation-support-counts";
+      countsBox.textContent = `${total} claims evaluated: ${kept} verified (p ≥ ${threshFmt}), ${demoted} rejected (p < ${threshFmt})${failOpen > 0 ? `, ${failOpen} unverified` : ""}`;
+      statsBox.appendChild(countsBox);
+
+      valEl.appendChild(statsBox);
+
+      row.appendChild(valEl);
+      table.appendChild(row);
+    }
+
     if (currentMeta.active_context_items && Array.isArray(currentMeta.active_context_items) && currentMeta.active_context_items.length > 0) {
       const list = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
       list.className = "info-meta-chips-list";
@@ -6724,6 +7066,8 @@ function openMessageInfoModal(meta) {
           if (matchingMsg.intermediate_steps) meta.intermediate_steps = matchingMsg.intermediate_steps;
           if (matchingMsg.id) meta.event_id = matchingMsg.id;
           if (matchingMsg.invocation_id) meta.invocation_id = matchingMsg.invocation_id;
+          if (matchingMsg.citation_verification) meta.citation_verification = matchingMsg.citation_verification;
+          if (matchingMsg.citations) meta.citations = matchingMsg.citations;
           renderRows(meta);
         }
       })
@@ -7365,7 +7709,7 @@ function createCitationToggleBtn(wrapperDiv) {
   toggleBtn.innerHTML = `
     <svg class="citation-toggle-icon icon-visible ${isCurrentlyHidden ? 'hidden' : ''}" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="currentColor" d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
     <svg class="citation-toggle-icon icon-hidden ${isCurrentlyHidden ? '' : 'hidden'}" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="currentColor" d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.44-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z"/></svg>
-    <span class="citation-toggle-label">${isCurrentlyHidden ? "Citations: Hidden" : "Citations"}</span>
+    <span class="citation-toggle-label">${isCurrentlyHidden ? "Citations: Hidden" : "Citations: Visible"}</span>
   `;
 
   toggleBtn.addEventListener("click", (e) => {
@@ -7384,7 +7728,7 @@ function createCitationToggleBtn(wrapperDiv) {
     } else {
       toggleBtn.classList.remove("muted");
       toggleBtn.setAttribute("title", "Hide citations");
-      if (label) label.textContent = "Citations";
+      if (label) label.textContent = "Citations: Visible";
       if (iconVis) iconVis.classList.remove("hidden");
       if (iconHid) iconHid.classList.add("hidden");
     }
@@ -7416,7 +7760,305 @@ function ensureCitationToggleBtn(wrapperDiv) {
   }
   if (leftContainer.querySelector(".citation-toggle-btn")) return;
   const toggleBtn = createCitationToggleBtn(wrapperDiv);
-  leftContainer.appendChild(toggleBtn);
+  const existingClaimsBtn = leftContainer.querySelector(".claims-inspector-btn");
+  if (existingClaimsBtn) {
+    leftContainer.insertBefore(toggleBtn, existingClaimsBtn);
+  } else {
+    leftContainer.appendChild(toggleBtn);
+  }
+}
+
+/**
+ * Resolves an item selection in the Zotero library tree.
+ */
+function selectItemInLibrary(itemKey) {
+  return selectItemInZotero(itemKey);
+}
+
+/**
+ * Builds normalized data payload for the dedicated Claim Verification Inspector window.
+ * Reconciles verification assessments, summaries, and citations metadata.
+ */
+function buildClaimsInspectorData(meta) {
+  if (!meta) {
+    return {
+      assessments: [],
+      summary: { batch_size: 0, kept: 0, demoted: 0, fail_open: 0, mean_support: null, std_support: null, threshold: 0.60, latency_ms: null },
+      model: "decision-model",
+      provider: "openrouter",
+      threshold: 0.60,
+      latency_ms: null,
+      theme: (typeof document !== "undefined" && document.body?.getAttribute?.("data-theme")) || "slate"
+    };
+  }
+
+  const ver = meta.citation_verification || meta.citation_verification_telemetry || null;
+  const citations = Array.isArray(meta.citations) ? meta.citations : [];
+  let rows = [];
+
+  if (ver && Array.isArray(ver.assessments) && ver.assessments.length > 0) {
+    // Clone assessments to prevent mutating caller metadata
+    rows = ver.assessments.map(a => Object.assign({}, a));
+
+    // Cross-reference with citations to backfill any missing item_key, attachment_key, or citation metadata
+    if (citations.length > 0) {
+      rows.forEach(a => {
+        const c = citations.find(item =>
+          (item.index !== undefined && item.index === a.chunk_index) ||
+          (item.chunk_index !== undefined && item.chunk_index === a.chunk_index)
+        );
+        if (c) {
+          if (!a.item_key && c.item_key) a.item_key = String(c.item_key);
+          if (!a.attachment_key && c.attachment_key) a.attachment_key = c.attachment_key;
+          if (!a.title && c.title) a.title = c.title;
+          if ((!a.authors || a.authors.length === 0) && c.authors) a.authors = c.authors;
+          if (!a.year && c.year) a.year = c.year;
+          if (!a.section && c.section) a.section = c.section;
+          if (!a.source_text && (c.quote || c.text)) a.source_text = c.quote || c.text;
+        }
+      });
+    }
+
+    // Cross-reference with references to backfill any demoted chunks not present in citations
+    const references = Array.isArray(meta.references) ? meta.references : [];
+    if (references.length > 0) {
+      rows.forEach(a => {
+        if (!a.item_key || !a.title) {
+          const r = references.find(ref =>
+            (a.item_key && String(ref.item_key || ref.key) === String(a.item_key)) ||
+            (a.title && ref.title && ref.title.toLowerCase() === a.title.toLowerCase())
+          );
+          if (r) {
+            if (!a.item_key && (r.item_key || r.key)) a.item_key = String(r.item_key || r.key);
+            if (!a.attachment_key && r.attachment_key) a.attachment_key = r.attachment_key;
+            if (!a.title && r.title) a.title = r.title;
+            if ((!a.authors || a.authors.length === 0) && r.authors) a.authors = r.authors;
+            if (!a.year && r.year) a.year = r.year;
+          }
+        }
+      });
+    }
+
+    // Fallback for single-source turns or active context items: reconcile any assessments with missing title/authors
+    const knownTitles = Array.from(new Set(rows.map(r => r.title).filter(Boolean)));
+    const knownAuthors = rows.find(r => Array.isArray(r.authors) && r.authors.length > 0)?.authors || null;
+    const knownYear = rows.find(r => r.year)?.year || null;
+    const knownKey = rows.find(r => r.item_key)?.item_key || null;
+    const activeItem = (meta.active_context_items && meta.active_context_items[0]) || null;
+
+    const fallbackTitle = knownTitles.length === 1 ? knownTitles[0] : (citations[0]?.title || references[0]?.title || activeItem?.title || "");
+    const fallbackAuthors = knownAuthors || citations[0]?.authors || references[0]?.authors || activeItem?.creators || activeItem?.authors || [];
+    const fallbackYear = knownYear || citations[0]?.year || references[0]?.year || activeItem?.year || "";
+    const fallbackKey = knownKey || citations[0]?.item_key || citations[0]?.key || references[0]?.item_key || references[0]?.key || activeItem?.item_key || activeItem?.key || "";
+
+    rows.forEach(a => {
+      if (!a.title && fallbackTitle) a.title = fallbackTitle;
+      if ((!a.authors || a.authors.length === 0) && fallbackAuthors && fallbackAuthors.length > 0) a.authors = fallbackAuthors;
+      if (!a.year && fallbackYear) a.year = fallbackYear;
+      if (!a.item_key && fallbackKey) a.item_key = String(fallbackKey);
+    });
+  } else if (citations.length > 0) {
+    // Construct rows from citation occurrences when raw assessments array is absent
+    citations.forEach(c => {
+      const cIdx = c.index !== undefined ? c.index : (c.chunk_index !== undefined ? c.chunk_index : 1);
+      const occurrences = (Array.isArray(c.occurrences) && c.occurrences.length > 0)
+        ? c.occurrences
+        : (c.support_probability !== undefined
+            ? [{ occurrence: 1, support_probability: c.support_probability, survived: c.support_probability >= (c.threshold !== undefined ? c.threshold : 0.60) }]
+            : []);
+
+      if (occurrences.length > 0) {
+        occurrences.forEach(occ => {
+          const prob = occ.support_probability !== undefined ? occ.support_probability : (c.support_probability !== undefined ? c.support_probability : null);
+          const thresh = occ.threshold !== undefined ? occ.threshold : (c.threshold !== undefined ? c.threshold : 0.60);
+          let verdict = occ.verdict;
+          if (!verdict) {
+            if (prob === null || prob === undefined) verdict = "FAIL_OPEN";
+            else if (occ.survived === true || prob >= thresh) verdict = "KEPT";
+            else verdict = "DEMOTED";
+          }
+          rows.push({
+            chunk_index: cIdx,
+            occurrence: occ.occurrence || 1,
+            claim: occ.claim || c.claim || "Citation claim",
+            source_text: occ.source_text || c.quote || c.text || "",
+            title: c.title || "",
+            authors: c.authors || [],
+            year: c.year || "",
+            section: c.section || "",
+            item_key: c.item_key ? String(c.item_key) : "",
+            attachment_key: c.attachment_key || null,
+            support_probability: prob,
+            threshold: thresh,
+            verdict: verdict,
+            latency_ms: occ.latency_ms || null
+          });
+        });
+      }
+    });
+  }
+
+  // Determine or compute summary stats
+  let summary = (ver && ver.summary) ? Object.assign({}, ver.summary) : null;
+  const threshold = (ver && ver.threshold !== undefined)
+    ? ver.threshold
+    : (summary?.threshold !== undefined ? summary.threshold : (rows[0]?.threshold ?? 0.60));
+
+  if (!summary || summary.batch_size === undefined) {
+    const kept = rows.filter(r => r.verdict === "KEPT").length;
+    const demoted = rows.filter(r => r.verdict === "DEMOTED").length;
+    const failOpen = rows.filter(r => r.verdict === "FAIL_OPEN" || r.support_probability === null || r.support_probability === undefined).length;
+    const validProbs = rows.map(r => r.support_probability).filter(p => typeof p === "number");
+    const mean = validProbs.length > 0 ? Number((validProbs.reduce((a, b) => a + b, 0) / validProbs.length).toFixed(3)) : null;
+    let std = null;
+    if (validProbs.length >= 2) {
+      const vMean = validProbs.reduce((a, b) => a + b, 0) / validProbs.length;
+      std = Number(Math.sqrt(validProbs.reduce((acc, p) => acc + Math.pow(p - vMean, 2), 0) / (validProbs.length - 1)).toFixed(3));
+    } else if (validProbs.length === 1) {
+      std = 0.0;
+    }
+
+    summary = {
+      batch_size: rows.length,
+      kept,
+      demoted,
+      fail_open: failOpen,
+      mean_support: mean,
+      std_support: std,
+      threshold,
+      latency_ms: ver?.latency_ms ?? null
+    };
+  }
+
+  return {
+    assessments: rows,
+    summary,
+    model: ver?.model || meta.model || "decision-model",
+    provider: ver?.provider || "openrouter",
+    threshold,
+    latency_ms: (ver && ver.latency_ms !== undefined) ? ver.latency_ms : (summary?.latency_ms ?? null),
+    theme: meta.theme || (typeof document !== "undefined" && document.body?.getAttribute?.("data-theme")) || "slate"
+  };
+}
+
+/**
+ * Opens the standalone Claim Verification Inspector dialog window.
+ */
+function openClaimsInspectorWindow(meta = {}) {
+  const payload = buildClaimsInspectorData(meta);
+  payload.theme = (typeof document !== "undefined" && document.body?.getAttribute?.("data-theme")) || payload.theme || "slate";
+
+  try {
+    if (window.top) window.top._zocratesCurrentClaimsData = payload;
+    window._zocratesCurrentClaimsData = payload;
+    const Zotero = window.Zotero || window.top?.Zotero;
+    if (Zotero?.Zocrates) Zotero.Zocrates._currentClaimsData = payload;
+  } catch (e) {}
+
+  try {
+    const mainWin = window.top || window.parent || window;
+    if (mainWin && typeof mainWin.openDialog === "function") {
+      const win = mainWin.openDialog(
+        "chrome://zocrates/content/claims.html",
+        "zocrates-claims-window",
+        "chrome,centerscreen,resizable=yes,width=1180,height=760",
+        payload
+      );
+      if (win) {
+        win.updateClaimsData?.(payload);
+        win.focus?.();
+        return;
+      }
+      throw new Error("Dialog window could not be opened");
+    }
+    throw new Error("openDialog is not available on parent window");
+  } catch (err) {
+    console.error("Zocrates: Failed to open claim verification inspector window:", err);
+    if (typeof addNotification === "function") {
+      addNotification("Could not open claim verification inspector: " + (err?.message || err));
+    }
+  }
+}
+
+/**
+ * Creates the Claims Inspector action button for an assistant message.
+ */
+function createClaimsInspectorBtn(wrapperDiv) {
+  const bubble = wrapperDiv ? wrapperDiv.querySelector(".message-bubble") : null;
+  const meta = (bubble && bubble._metadata) || (wrapperDiv && wrapperDiv._metadata) || (wrapperDiv?.querySelector(".info-btn")?._metadata) || {};
+  const data = buildClaimsInspectorData(meta);
+  const summary = data.summary || {};
+  const total = summary.batch_size !== undefined ? summary.batch_size : data.assessments.length;
+  const verified = summary.kept !== undefined ? summary.kept : data.assessments.filter(a => a.verdict === "KEPT").length;
+  const demoted = summary.demoted !== undefined ? summary.demoted : data.assessments.filter(a => a.verdict === "DEMOTED").length;
+
+  const btn = document.createElementNS("http://www.w3.org/1999/xhtml", "button");
+  btn.className = "claims-inspector-btn";
+  btn.setAttribute("type", "button");
+  btn.textContent = "🛡️ Claim Verification Inspector";
+  btn.setAttribute(
+    "title",
+    total > 0
+      ? `Inspect claim verification table (${verified} verified, ${demoted} rejected of ${total} total)`
+      : "Inspect claim verification table"
+  );
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const currentMeta = (bubble && bubble._metadata) || (wrapperDiv && wrapperDiv._metadata) || (wrapperDiv?.querySelector(".info-btn")?._metadata) || meta;
+    openClaimsInspectorWindow(currentMeta);
+  });
+
+  return btn;
+}
+
+/**
+ * Ensures the Claims Inspector action button exists in .message-actions-left next to .citation-toggle-btn.
+ */
+function ensureClaimsInspectorBtn(wrapperDiv) {
+  if (!wrapperDiv) return;
+  const bubble = wrapperDiv.querySelector(".message-bubble");
+  const meta = (bubble && bubble._metadata) || wrapperDiv._metadata || (wrapperDiv.querySelector(".info-btn")?._metadata) || null;
+
+  const data = buildClaimsInspectorData(meta);
+  if (!data || !data.assessments || data.assessments.length === 0) {
+    const existing = wrapperDiv.querySelector(".claims-inspector-btn");
+    if (existing) existing.remove();
+    return;
+  }
+
+  let leftContainer = wrapperDiv.querySelector(".message-actions-left");
+  if (!leftContainer) {
+    const actionsDiv = wrapperDiv.querySelector(".message-actions");
+    if (!actionsDiv) return;
+    leftContainer = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+    leftContainer.className = "message-actions-left";
+    actionsDiv.insertBefore(leftContainer, actionsDiv.firstChild);
+  }
+
+  const summary = data.summary || {};
+  const total = summary.batch_size !== undefined ? summary.batch_size : data.assessments.length;
+  const verified = summary.kept !== undefined ? summary.kept : data.assessments.filter(a => a.verdict === "KEPT").length;
+  const demoted = summary.demoted !== undefined ? summary.demoted : data.assessments.filter(a => a.verdict === "DEMOTED").length;
+  const btnLabel = "🛡️ Claim Verification Inspector";
+  const btnTitle = total > 0
+    ? `Inspect claim verification table (${verified} verified, ${demoted} rejected of ${total} total)`
+    : "Inspect claim verification table";
+
+  const existingBtn = leftContainer.querySelector(".claims-inspector-btn");
+  if (existingBtn) {
+    existingBtn.textContent = btnLabel;
+    existingBtn.setAttribute("title", btnTitle);
+    return;
+  }
+
+  const btn = createClaimsInspectorBtn(wrapperDiv);
+  const citationToggle = leftContainer.querySelector(".citation-toggle-btn");
+  if (citationToggle && citationToggle.nextSibling) {
+    leftContainer.insertBefore(btn, citationToggle.nextSibling);
+  } else {
+    leftContainer.appendChild(btn);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -8513,9 +9155,12 @@ function appendMessageDOM(role, text, isMarkdown = true, timestamp = null, autho
     text: text,
     citations: metadata?.citations || null,
     references: metadata?.references || null,
-    candidates: metadata?.candidates || null
+    candidates: metadata?.candidates || null,
+    citation_verification: metadata?.citation_verification || metadata?.citation_verification_telemetry || null
   };
   infoBtn._metadata = messageMeta;
+  wrapperDiv._metadata = messageMeta;
+  msgDiv._metadata = messageMeta;
 
   infoBtn.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -8534,6 +9179,10 @@ function appendMessageDOM(role, text, isMarkdown = true, timestamp = null, autho
     renderCandidatePapersGroup(wrapperDiv, metadata.candidates, metadata.invocation_id);
   }
   wrapperDiv.appendChild(actionsDiv);
+
+  if (role === "assistant") {
+    ensureClaimsInspectorBtn(wrapperDiv);
+  }
 
   chatMessages.appendChild(wrapperDiv);
   chatMessages.scrollTop = chatMessages.scrollHeight;
@@ -9082,9 +9731,33 @@ function finalizeChatStream(streamCtx, isAborted = false) {
     agent_models: turnAgentModels
   });
 
+  if (!isAborted && streamCtx.streamEnrichedText) {
+    streamCtx.currentResponseText = streamCtx.streamEnrichedText;
+  }
+
   const responseTextToRender = isAborted && streamCtx.currentResponseText
     ? streamCtx.currentResponseText + "\n\n*[Generation stopped by user]*"
     : streamCtx.currentResponseText;
+
+  if (!streamCtx.assistantBubble && streamCtx.currentResponseText) {
+    const initialModel = streamCtx.streamModel || streamCtx.usedModel;
+    streamCtx.assistantBubble = appendMessageDOM("assistant", responseTextToRender, true, null, streamCtx.authorName, initialModel, null, {
+      author: streamCtx.authorName,
+      model: initialModel,
+      active_context_items: streamCtx.payloadItems,
+      usage: streamCtx.streamUsage,
+      finish_reason: streamCtx.streamFinishReason,
+      event_id: streamCtx.streamEventId,
+      intermediate_steps: streamCtx.liveSteps,
+      citations: streamCtx.streamCitations,
+      references: streamCtx.streamReferences,
+      candidates: streamCtx.streamCandidates,
+      citation_verification: streamCtx.streamCitationVerification,
+    });
+    if (streamCtx.stepsBubble && streamCtx.assistantBubble && streamCtx.assistantBubble.parentElement) {
+      streamCtx.assistantBubble.parentElement.insertBefore(streamCtx.stepsBubble, streamCtx.assistantBubble);
+    }
+  }
 
   // Final render with full content (ensures last chunk is displayed)
   if (streamCtx.assistantBubble && streamCtx.currentResponseText) {
@@ -9092,7 +9765,8 @@ function finalizeChatStream(streamCtx, isAborted = false) {
     const finalMeta = {
       citations: streamCtx.streamCitations,
       references: streamCtx.streamReferences,
-      candidates: streamCtx.streamCandidates
+      candidates: streamCtx.streamCandidates,
+      citation_verification: streamCtx.streamCitationVerification
     };
     if (streamCtx.streamCitations) {
       streamCtx.assistantBubble._citations = streamCtx.streamCitations;
@@ -9115,6 +9789,7 @@ function finalizeChatStream(streamCtx, isAborted = false) {
         const existingToggle = wrapperDiv.querySelector(".citation-toggle-btn");
         if (existingToggle) existingToggle.remove();
       }
+      ensureClaimsInspectorBtn(wrapperDiv);
       if (finalMeta.candidates && Array.isArray(finalMeta.candidates) && finalMeta.candidates.length > 0) {
         renderCandidatePapersGroup(wrapperDiv, finalMeta.candidates, streamCtx.streamInvocationId);
       }
@@ -9139,6 +9814,7 @@ function finalizeChatStream(streamCtx, isAborted = false) {
           infoBtn._metadata.citations = streamCtx.streamCitations;
           infoBtn._metadata.references = streamCtx.streamReferences;
           infoBtn._metadata.candidates = streamCtx.streamCandidates;
+          infoBtn._metadata.citation_verification = streamCtx.streamCitationVerification;
         }
       }
     }
@@ -9175,6 +9851,7 @@ function finalizeChatStream(streamCtx, isAborted = false) {
       existingMsg.citations = streamCtx.streamCitations;
       existingMsg.references = streamCtx.streamReferences;
       existingMsg.candidates = streamCtx.streamCandidates;
+      existingMsg.citation_verification = streamCtx.streamCitationVerification;
     } else {
       streamCtx.session.messages.push({
         role: "assistant",
@@ -9195,7 +9872,8 @@ function finalizeChatStream(streamCtx, isAborted = false) {
         intermediate_steps: streamCtx.liveSteps,
         citations: streamCtx.streamCitations,
         references: streamCtx.streamReferences,
-        candidates: streamCtx.streamCandidates
+        candidates: streamCtx.streamCandidates,
+        citation_verification: streamCtx.streamCitationVerification
       });
     }
   }
@@ -9254,8 +9932,11 @@ async function runChatStreamReader(res, streamCtx) {
         streamCtx.assistantBubble.innerHTML = formatMessageContent(streamCtx.currentResponseText, streamMeta);
         fixCodeBlockCopyButtons(streamCtx.assistantBubble);
         decorateAssetImages(streamCtx.assistantBubble);
-        if (streamCtx.assistantBubble.parentElement && hasMessageCitations(streamCtx.currentResponseText, streamMeta)) {
-          ensureCitationToggleBtn(streamCtx.assistantBubble.parentElement);
+        if (streamCtx.assistantBubble.parentElement) {
+          if (hasMessageCitations(streamCtx.currentResponseText, streamMeta)) {
+            ensureCitationToggleBtn(streamCtx.assistantBubble.parentElement);
+          }
+          ensureClaimsInspectorBtn(streamCtx.assistantBubble.parentElement);
         }
         if (chatMessages) chatMessages.scrollTop = chatMessages.scrollHeight;
       }
@@ -9395,6 +10076,10 @@ async function runChatStreamReader(res, streamCtx) {
           if (data.metadata?.references) streamCtx.streamReferences = data.metadata.references;
           if (data.metadata?.candidates) streamCtx.streamCandidates = data.metadata.candidates;
           if (data.candidates) streamCtx.streamCandidates = data.candidates;
+          if (data.citation_verification) streamCtx.streamCitationVerification = data.citation_verification;
+          if (data.metadata?.citation_verification) streamCtx.streamCitationVerification = data.metadata.citation_verification;
+          if (data.enriched_text) streamCtx.streamEnrichedText = data.enriched_text;
+          if (data.metadata?.enriched_text) streamCtx.streamEnrichedText = data.metadata.enriched_text;
 
           if (data.parts && data.parts.length > 0) {
             for (let partIdx = 0; partIdx < data.parts.length; partIdx++) {
@@ -9615,6 +10300,10 @@ async function runChatStreamReader(res, streamCtx) {
           if (data.metadata?.references) streamCtx.streamReferences = data.metadata.references;
           if (data.metadata?.candidates) streamCtx.streamCandidates = data.metadata.candidates;
           if (data.candidates) streamCtx.streamCandidates = data.candidates;
+          if (data.citation_verification) streamCtx.streamCitationVerification = data.citation_verification;
+          if (data.metadata?.citation_verification) streamCtx.streamCitationVerification = data.metadata.citation_verification;
+          if (data.enriched_text) streamCtx.streamEnrichedText = data.enriched_text;
+          if (data.metadata?.enriched_text) streamCtx.streamEnrichedText = data.metadata.enriched_text;
           if (data.error) {
             if (streamCtx.stepsBubble && !streamCtx.assistantBubble) {
               streamCtx.stepsBubble.remove();
@@ -9849,7 +10538,9 @@ async function streamDialogueResponse(prompt) {
     isInterrupted: false,
     streamCitations: null,
     streamReferences: null,
-    streamCandidates: null
+    streamCandidates: null,
+    streamCitationVerification: null,
+    streamEnrichedText: null
   };
 
   try {
@@ -10066,9 +10757,56 @@ function loadSavedTheme() {
   }
 }
 
+// Font size management
+let currentFontSizeSetting = "default"; // "small", "default", "large", "xlarge"
+
+function applyFontSize() {
+  const allowedSizes = ["small", "default", "large", "xlarge"];
+  if (!allowedSizes.includes(currentFontSizeSetting)) {
+    currentFontSizeSetting = "default";
+  }
+
+  if (document.body) {
+    document.body.setAttribute("data-font-size", currentFontSizeSetting);
+  }
+
+  const fontSizeOptionBtns = document.querySelectorAll(".font-size-option-btn");
+  fontSizeOptionBtns.forEach(btn => {
+    btn.setAttribute("data-selected", btn.getAttribute("data-font-size") === currentFontSizeSetting ? "true" : "false");
+  });
+
+  if (chatInput) {
+    chatInput.dispatchEvent(new Event("input"));
+  }
+}
+
+function loadSavedFontSize() {
+  let changed = false;
+  try {
+    let savedSize = null;
+    const zot = resolveZotero() || (typeof Zotero !== "undefined" ? Zotero : null);
+    if (zot && zot.Prefs) {
+      savedSize = zot.Prefs.get("zocrates.fontSize") || zot.Prefs.get("extensions.zotero.zocrates.fontSize");
+    }
+    if (!savedSize) {
+      savedSize = localStorage.getItem("zocrates_font_size");
+    }
+    if (savedSize && ["small", "default", "large", "xlarge"].includes(savedSize)) {
+      if (savedSize !== currentFontSizeSetting) {
+        currentFontSizeSetting = savedSize;
+        changed = true;
+      }
+    }
+  } catch (e) {}
+  if (changed || !document.body || !document.body.getAttribute("data-font-size")) {
+    applyFontSize();
+  }
+}
+
 // H5: Capture observer ID for cleanup on unload
 let themePrefsObserverId = null;
 let zocratesThemeObserverId = null;
+let zocratesFontSizeObserverId = null;
 let llmPrefsObserverId = null;
 let llmTimestampObserverId = null;
 let autoRenderMermaidObserverId = null;
@@ -10128,6 +10866,9 @@ try {
     });
     zocratesThemeObserverId = zot.Prefs.registerObserver("zocrates.theme", () => {
       loadSavedTheme();
+    });
+    zocratesFontSizeObserverId = zot.Prefs.registerObserver("zocrates.fontSize", () => {
+      loadSavedFontSize();
     });
     llmPrefsObserverId = zot.Prefs.registerObserver("zocrates.llm_model", () => {
       const savedModel = zot.Prefs.get("zocrates.llm_model");
@@ -10204,17 +10945,26 @@ function positionThemeSubmenu() {
   positionFlyoutSubmenu(themeOptionsDropdown, themeMenuContainer);
 }
 
+function positionFontSizeSubmenu() {
+  positionFlyoutSubmenu(fontSizeOptionsDropdown, fontSizeMenuContainer);
+}
+
 function positionAboutSubmenu() {
   positionFlyoutSubmenu(aboutOptionsDropdown, aboutMenuContainer);
 }
 
 let hideThemeSubmenuTimeout = null;
+let hideFontSizeSubmenuTimeout = null;
 let hideAboutSubmenuTimeout = null;
 
 function clearFlyoutTimeouts() {
   if (hideThemeSubmenuTimeout) {
     clearTimeout(hideThemeSubmenuTimeout);
     hideThemeSubmenuTimeout = null;
+  }
+  if (hideFontSizeSubmenuTimeout) {
+    clearTimeout(hideFontSizeSubmenuTimeout);
+    hideFontSizeSubmenuTimeout = null;
   }
   if (hideAboutSubmenuTimeout) {
     clearTimeout(hideAboutSubmenuTimeout);
@@ -10225,6 +10975,7 @@ function clearFlyoutTimeouts() {
 function hideAllFlyoutSubmenus() {
   clearFlyoutTimeouts();
   if (themeOptionsDropdown) themeOptionsDropdown.classList.add("hidden");
+  if (fontSizeOptionsDropdown) fontSizeOptionsDropdown.classList.add("hidden");
   if (aboutOptionsDropdown) aboutOptionsDropdown.classList.add("hidden");
 }
 
@@ -10232,6 +10983,7 @@ if (themeMenuOption) {
   themeMenuOption.addEventListener("mouseenter", () => {
     clearFlyoutTimeouts();
     if (aboutOptionsDropdown) aboutOptionsDropdown.classList.add("hidden");
+    if (fontSizeOptionsDropdown) fontSizeOptionsDropdown.classList.add("hidden");
     if (themeOptionsDropdown) {
       themeOptionsDropdown.classList.remove("hidden");
       positionThemeSubmenu();
@@ -10242,6 +10994,7 @@ if (themeMenuOption) {
     e.stopPropagation();
     clearFlyoutTimeouts();
     if (aboutOptionsDropdown) aboutOptionsDropdown.classList.add("hidden");
+    if (fontSizeOptionsDropdown) fontSizeOptionsDropdown.classList.add("hidden");
     if (themeOptionsDropdown) {
       const isHidden = themeOptionsDropdown.classList.toggle("hidden");
       if (!isHidden) {
@@ -10280,6 +11033,7 @@ if (aboutMenuOption) {
   aboutMenuOption.addEventListener("mouseenter", () => {
     clearFlyoutTimeouts();
     if (themeOptionsDropdown) themeOptionsDropdown.classList.add("hidden");
+    if (fontSizeOptionsDropdown) fontSizeOptionsDropdown.classList.add("hidden");
     if (aboutOptionsDropdown) {
       aboutOptionsDropdown.classList.remove("hidden");
       positionAboutSubmenu();
@@ -10290,6 +11044,7 @@ if (aboutMenuOption) {
     e.stopPropagation();
     clearFlyoutTimeouts();
     if (themeOptionsDropdown) themeOptionsDropdown.classList.add("hidden");
+    if (fontSizeOptionsDropdown) fontSizeOptionsDropdown.classList.add("hidden");
     if (aboutOptionsDropdown) {
       const isHidden = aboutOptionsDropdown.classList.toggle("hidden");
       if (!isHidden) {
@@ -10338,6 +11093,56 @@ moreActionsSiblingBtns.forEach(btn => {
   }
 });
 
+if (fontSizeMenuOption) {
+  fontSizeMenuOption.addEventListener("mouseenter", () => {
+    clearFlyoutTimeouts();
+    if (themeOptionsDropdown) themeOptionsDropdown.classList.add("hidden");
+    if (aboutOptionsDropdown) aboutOptionsDropdown.classList.add("hidden");
+    if (fontSizeOptionsDropdown) {
+      fontSizeOptionsDropdown.classList.remove("hidden");
+      positionFontSizeSubmenu();
+    }
+  });
+
+  fontSizeMenuOption.addEventListener("click", (e) => {
+    e.stopPropagation();
+    clearFlyoutTimeouts();
+    if (themeOptionsDropdown) themeOptionsDropdown.classList.add("hidden");
+    if (aboutOptionsDropdown) aboutOptionsDropdown.classList.add("hidden");
+    if (fontSizeOptionsDropdown) {
+      const isHidden = fontSizeOptionsDropdown.classList.toggle("hidden");
+      if (!isHidden) {
+        positionFontSizeSubmenu();
+      }
+    }
+  });
+}
+
+if (fontSizeMenuContainer) {
+  fontSizeMenuContainer.addEventListener("mouseleave", () => {
+    if (hideFontSizeSubmenuTimeout) clearTimeout(hideFontSizeSubmenuTimeout);
+    hideFontSizeSubmenuTimeout = setTimeout(() => {
+      if (fontSizeOptionsDropdown) fontSizeOptionsDropdown.classList.add("hidden");
+    }, 400);
+  });
+
+  fontSizeMenuContainer.addEventListener("mouseenter", () => {
+    if (hideFontSizeSubmenuTimeout) {
+      clearTimeout(hideFontSizeSubmenuTimeout);
+      hideFontSizeSubmenuTimeout = null;
+    }
+  });
+}
+
+if (fontSizeOptionsDropdown) {
+  fontSizeOptionsDropdown.addEventListener("mouseenter", () => {
+    if (hideFontSizeSubmenuTimeout) {
+      clearTimeout(hideFontSizeSubmenuTimeout);
+      hideFontSizeSubmenuTimeout = null;
+    }
+  });
+}
+
 const themeOptionBtns = document.querySelectorAll(".theme-option-btn");
 themeOptionBtns.forEach(btn => {
   btn.addEventListener("click", (e) => {
@@ -10355,6 +11160,31 @@ themeOptionBtns.forEach(btn => {
         }
       } catch (err) {}
       applyTheme();
+    }
+    hideAllFlyoutSubmenus();
+    if (moreActionsDropdown) {
+      moreActionsDropdown.classList.add("hidden");
+    }
+  });
+});
+
+const fontSizeOptionBtns = document.querySelectorAll(".font-size-option-btn");
+fontSizeOptionBtns.forEach(btn => {
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const newFontSize = btn.getAttribute("data-font-size");
+    if (newFontSize) {
+      currentFontSizeSetting = newFontSize;
+      try {
+        localStorage.setItem("zocrates_font_size", currentFontSizeSetting);
+      } catch (err) {}
+      try {
+        const zot = resolveZotero() || (typeof Zotero !== "undefined" ? Zotero : null);
+        if (zot && zot.Prefs) {
+          zot.Prefs.set("zocrates.fontSize", currentFontSizeSetting);
+        }
+      } catch (err) {}
+      applyFontSize();
     }
     hideAllFlyoutSubmenus();
     if (moreActionsDropdown) {
@@ -12302,6 +13132,7 @@ async function loadActiveSessionMessages() {
         citations: msg.citations,
         references: msg.references,
         candidates: msg.candidates || msg.metadata?.candidates || null,
+        citation_verification: msg.citation_verification || msg.metadata?.citation_verification || null,
         isError: Boolean(msg.isError || msg.metadata?.isError),
         errorMessage: msg.errorMessage || msg.metadata?.errorMessage || null,
         invocationId: msg.invocationId || msg.invocation_id || msg.metadata?.invocationId || msg.metadata?.invocation_id || null
@@ -13465,6 +14296,7 @@ if (networkGraphMenuBtn) {
   networkGraphMenuBtn.addEventListener("click", () => {
     if (moreActionsDropdown) moreActionsDropdown.classList.add("hidden");
     if (themeOptionsDropdown) themeOptionsDropdown.classList.add("hidden");
+    if (fontSizeOptionsDropdown) fontSizeOptionsDropdown.classList.add("hidden");
     if (aboutOptionsDropdown) aboutOptionsDropdown.classList.add("hidden");
     openNetworkGraphTab();
   });
@@ -13476,6 +14308,7 @@ function snapshotDetachedState() {
     contextMode,
     isStickyMode,
     theme: currentThemeSetting,
+    fontSize: currentFontSizeSetting,
     activeItemsList: activeItemsList ? [...activeItemsList] : [],
     activeSnippetsList: activeSnippetsList ? [...activeSnippetsList] : [],
     inputDraft: chatInput ? chatInput.value : ""
@@ -13620,6 +14453,18 @@ function syncFromDetachedState(state) {
   } else {
     loadSavedTheme();
   }
+  const VALID_FONT_SIZES = ["small", "default", "large", "xlarge"];
+  if (state.fontSize && VALID_FONT_SIZES.includes(state.fontSize)) {
+    if (state.fontSize !== currentFontSizeSetting || !document.body || !document.body.getAttribute("data-font-size")) {
+      currentFontSizeSetting = state.fontSize;
+      try {
+        localStorage.setItem("zocrates_font_size", currentFontSizeSetting);
+      } catch (e) {}
+      applyFontSize();
+    }
+  } else {
+    loadSavedFontSize();
+  }
   if (state.sessionId) {
     setActiveSessionId(state.sessionId);
     renderSessionsList();
@@ -13662,6 +14507,7 @@ window.syncFromDetachedState = syncFromDetachedState;
 
 window.addEventListener("focus", () => {
   loadSavedTheme();
+  loadSavedFontSize();
   if (!isDetached) {
     try {
       const zot = resolveZotero();
@@ -13797,6 +14643,14 @@ window.addEventListener("unload", () => {
         console.error("Zocrates: Failed to unregister zocrates theme observer:", e);
       }
     }
+    if (zocratesFontSizeObserverId) {
+      try {
+        zot.Prefs.unregisterObserver(zocratesFontSizeObserverId);
+        console.log("Zocrates: Unregistered zocrates font size observer successfully");
+      } catch(e) {
+        console.error("Zocrates: Failed to unregister zocrates font size observer:", e);
+      }
+    }
     if (llmPrefsObserverId) {
       try {
         zot.Prefs.unregisterObserver(llmPrefsObserverId);
@@ -13860,6 +14714,13 @@ function restoreDetachedInitialState() {
           localStorage.setItem("zocrates_theme", currentThemeSetting);
         } catch (e) {}
         applyTheme();
+      }
+      if (st.fontSize) {
+        currentFontSizeSetting = st.fontSize;
+        try {
+          localStorage.setItem("zocrates_font_size", currentFontSizeSetting);
+        } catch (e) {}
+        applyFontSize();
       }
       if (st.contextMode) contextMode = st.contextMode;
       if (st.isStickyMode !== undefined) {
@@ -14078,6 +14939,9 @@ document.addEventListener("click", (e) => {
   }
 
   if (activeEvidencePopover && !e.target.closest(".evidence-popover")) {
+    if (activeEvidencePopover._isResizing || activeEvidencePopover._justResized) {
+      return;
+    }
     closeEvidencePopover();
   }
 });
@@ -14093,6 +14957,7 @@ window.addEventListener("scroll", (e) => {
 // Load theme and mode on startup
 if (typeof module === "undefined") {
   loadSavedTheme();
+  loadSavedFontSize();
   loadSavedMode();
 
   // Set up activity-gated selection checker polling at 400ms
@@ -14103,8 +14968,22 @@ if (typeof module === "undefined") {
   }
 }
 
+if (typeof window !== "undefined") {
+  window.buildClaimsInspectorData = buildClaimsInspectorData;
+  window.openClaimsInspectorWindow = openClaimsInspectorWindow;
+  window.createClaimsInspectorBtn = createClaimsInspectorBtn;
+  window.ensureClaimsInspectorBtn = ensureClaimsInspectorBtn;
+  window.selectItemInLibrary = selectItemInLibrary;
+  window.openItemInReader = openItemInReader;
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
+    buildClaimsInspectorData,
+    openClaimsInspectorWindow,
+    createClaimsInspectorBtn,
+    ensureClaimsInspectorBtn,
+    selectItemInLibrary,
     sanitizeHTML,
     isSafeUrl,
     isSafeLinkUrl,
@@ -14131,6 +15010,7 @@ if (typeof module !== "undefined" && module.exports) {
     showEvidencePopover,
     closeEvidencePopover,
     extractLeafHeading,
+    isSyntheticOrTitle,
     normalizeForComparison,
     parseHeadingParts,
     findOutlineDestination,
@@ -14249,6 +15129,10 @@ if (typeof module !== "undefined" && module.exports) {
     applyTheme,
     getCurrentThemeSetting: () => currentThemeSetting,
     setCurrentThemeSetting: (t) => { currentThemeSetting = t; },
+    loadSavedFontSize,
+    applyFontSize,
+    getCurrentFontSizeSetting: () => currentFontSizeSetting,
+    setCurrentFontSizeSetting: (s) => { currentFontSizeSetting = s; },
     syncFromDetachedState,
     restoreDetachedInitialState,
     getAutoRenderMermaidPref,

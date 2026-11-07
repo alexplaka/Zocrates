@@ -48,6 +48,8 @@ graph TD
 | :--- | :--- | :--- | :--- | :--- |
 | **OpenRouter (Remote LLM)** | `openrouter_llm` | `https://openrouter.ai/api/v1` | Yes (`OPENROUTER_API_KEY`) | `google/gemini-flash`, `qwen/qwen`, `deepseek/deepseek-flash` |
 | **OpenRouter (Cloud Embeddings)** | `cloud` | `https://openrouter.ai/api/v1` | Yes (`OPENROUTER_API_KEY`) | `openrouter/nvidia/nemotron-3-embed-1b:free`, `openrouter/openai/text-embedding-3-small` |
+| **OpenRouter (Decision Models)** | `openrouter` (Verification) | `https://openrouter.ai/api/alpha/decisions` | Yes (`OPENROUTER_API_KEY`) | `~typesafe/jev-latest` (Default), `typesafe/jev-1.14`, `inception/mercury-decide` |
+| **Laya (Local Decision Model)** | `local_laya` | `http://127.0.0.1:8005/v1/systemone` | No | `laya` (native tensor batching via `laya-serve`) |
 | **Ollama (Local LLM)** | `ollama` | `http://localhost:11434` | No | `llama3`, `mistral`, `qwen` (routed internally via `ollama_chat/`) |
 | **vLLM (Local LLM)** | `vllm` | `http://localhost:8000/v1` | Optional (`"dummy"`) | `Qwen/Qwen-Coder`, `meta-llama/Llama-3` |
 | **Custom OpenAI API** | `openai_compatible` | User-configured | Optional | `custom-model-id` |

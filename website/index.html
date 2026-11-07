@@ -61,7 +61,7 @@
           "Native Zotero 10 Split-Pane Sidebar",
           "Combined Semantic Search and Vectorless Table of Contents Reading",
           "Evidence-Gated Strictly Local Paper Relations Graph",
-          "Per-Occurrence Citation Verification",
+          "Per-Occurrence Citation Verification & Claim Verification Inspector",
           "Open Knowledge Format (OKF v0.2) Markdown Bundles",
           "Local Model Context Protocol (MCP) Server Bridge",
           "Adaptive Context Compaction for Long Sessions",
@@ -160,7 +160,7 @@
 
           <div class="hero-trust-pills">
             <span class="trust-pill">🎯 Combined Semantic &amp; Whole-Section Reading</span>
-            <span class="trust-pill">⚖️ Verifiable Citations &amp; Live Evidence Peeks</span>
+            <span class="trust-pill">⚖️ Verifiable Citations &amp; Claim Inspector</span>
             <span class="trust-pill">📑 Native Zotero PDF Reader Excerpts &amp; Area Crops</span>
             <span class="trust-pill">🌐 Agentic Online Discovery &amp; 1-Click Import</span>
             <span class="trust-pill">📝 Searchable Memory via Native Zotero Notes</span>
@@ -313,6 +313,14 @@
 
                   <!-- Message Actions Bar (Actions on the Entire Response) -->
                   <div class="message-action-bar">
+                    <div class="message-action-left">
+                      <button type="button" id="btn-toggle-citations" class="message-action-btn active-pill" title="Toggle citation visibility (Citations: Visible / Citations: Hidden)">
+                        👁️ Citations: Visible
+                      </button>
+                      <button type="button" id="btn-open-claims-inspector" class="message-action-btn" title="Open Claim Verification Inspector">
+                        🛡️ Claim Verification Inspector
+                      </button>
+                    </div>
                     <div class="message-action-buttons">
                       <button type="button" id="btn-save-as-note" class="message-action-btn" title="Save this response as a native Zotero rich-text note">
                         📝 Save as Note
@@ -320,7 +328,7 @@
                       <button type="button" id="btn-copy-msg" class="message-action-btn" title="Copy response to clipboard">
                         📋 Copy
                       </button>
-                      <button type="button" class="message-action-btn" title="View turn provenance & token details">
+                      <button type="button" id="btn-msg-info" class="message-action-btn" title="View turn provenance & token details">
                         ℹ️ Info
                       </button>
                     </div>
@@ -491,9 +499,10 @@
    • Follows thematic links and connected literature across your library
    • Extracts key methodology, evidence, and substantive arguments
 
-3. Rigorous Claim Verification
-   • Evaluates every assertion against cited source passages
-   • Only attaches citation pills to claims backed by source text
+3. Rigorous Claim Verification &amp; Audit Table
+   • Evaluates every assertion against cited source passages with calibrated decision models
+   • Only attaches citation pills to claims backed by source text (with compound prompt support)
+   • Explore every claim, probability score, and quote in the Claim Verification Inspector
    • Accounts for all consulted papers with complete transparency
 
 4. Scholar-Ready Synthesis
@@ -629,21 +638,22 @@
         </div>
 
         <div class="bento-grid">
-          <!-- Bento 1: Verifiable Citations & Clean Manuscript Export (Span 7) -->
+          <!-- Bento 1: Verifiable Citations, Claim Inspector & Clean Manuscript Export (Span 7) -->
           <article class="bento-card span-7">
             <div>
-              <span class="bento-tag">Epistemic Honesty • Per-Occurrence Claim Verification</span>
-              <h3>Citations You Can Trust &amp; Distraction-Free Manuscript Export</h3>
+              <span class="bento-tag">Epistemic Honesty • Claim Verification Inspector</span>
+              <h3>Citations You Can Trust &amp; Claim Verification Inspector</h3>
               <p style="margin-top:0.5rem;">
-                Calibrated AI verification models check each claim against the source text. If an in-text citation references multiple papers and one does not support the claim, the unsupported citation is automatically pruned while preserving the verified one. Toggle between interactive author-year pills, manuscript copy format, and distraction-free reading below:
+                Calibrated AI decision models evaluate each claim sentence individually against source passages. If a paper does not support an assertion, it is automatically pruned. Explore interactive citation pills, the standalone Claim Verification Inspector audit table, manuscript export, or distraction-free reading below:
               </p>
             </div>
 
             <div class="interactive-widget">
               <div class="widget-toolbar">
-                <span style="font-size:0.78rem; font-weight:700; color:var(--text-secondary);">Live Citation Mode Switcher:</span>
+                <span style="font-size:0.78rem; font-weight:700; color:var(--text-secondary);">Interactive Verification Modes:</span>
                 <div class="toggle-btn-group">
                   <button type="button" class="toggle-pill-btn cite-mode-btn active" data-citemode="pills">Interactive Citation Pills</button>
+                  <button type="button" class="toggle-pill-btn cite-mode-btn" data-citemode="inspector">🛡️ Claim Inspector</button>
                   <button type="button" class="toggle-pill-btn cite-mode-btn" data-citemode="manuscript">Manuscript Copy (APA)</button>
                   <button type="button" class="toggle-pill-btn cite-mode-btn" data-citemode="clean">Distraction-Free Prose</button>
                 </div>
@@ -1223,7 +1233,7 @@
               <tr>
                 <td class="dim-cell">Evidence &amp; Attribution</td>
                 <td class="native-cell">Manually searching open PDFs to verify assertions.</td>
-                <td class="zocrates-cell"><strong>Verified citations &amp; Evidence Peek popovers:</strong> Per-occurrence AI decision verification, compound bracket pruning, exact section breadcrumbs, verbatim quotes, confidence badges, and 1-click reader jump.</td>
+                <td class="zocrates-cell"><strong>Verified citations &amp; Claim Verification Inspector:</strong> Per-occurrence AI decision verification, compound bracket pruning, standalone Claim Verification Inspector window with probability scores and verbatim source evidence, exact section breadcrumbs, and 1-click reader jump.</td>
               </tr>
               <tr>
                 <td class="dim-cell">Attribution Completeness</td>
@@ -1330,6 +1340,120 @@
       </div>
     </div>
   </footer>
+
+  <!-- Claim Verification Inspector Modal Overlay (Interactive Standalone Demo) -->
+  <div id="claims-inspector-modal" class="claims-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="claims-modal-title-text" aria-hidden="true">
+    <div class="claims-modal-card">
+      <div class="claims-modal-header">
+        <div class="claims-modal-title">
+          <span>🛡️</span>
+          <span id="claims-modal-title-text">Claim Verification Inspector — Turn #3</span>
+          <span class="claim-modal-tag">3 Claims Evaluated • 3 Verified</span>
+        </div>
+        <button type="button" id="claims-modal-close-btn" class="claims-modal-close-btn" aria-label="Close Inspector">✕</button>
+      </div>
+
+      <div class="claims-modal-toolbar">
+        <div class="claims-source-filter-wrap">
+          <label for="claims-filter-select">Filter by Source Paper:</label>
+          <select id="claims-filter-select" class="claims-source-dropdown">
+            <option value="all">All Sources (3 Papers, 3 Claims)</option>
+            <option value="vaswani">Vaswani et al. (2017) — Attention Is All You Need</option>
+            <option value="dao">Dao et al. (2022) — FlashAttention</option>
+            <option value="beltagy">Beltagy et al. (2020) — Longformer</option>
+          </select>
+        </div>
+        <div style="font-size:0.75rem; color:var(--text-muted); font-family:'JetBrains Mono', monospace;">
+          Model: ~typesafe/jev-latest (Threshold τ = 0.600)
+        </div>
+      </div>
+
+      <div class="claims-modal-body">
+        <div class="claims-table-wrap">
+          <table class="claims-table">
+            <thead>
+              <tr>
+                <th style="width:36px;">#</th>
+                <th style="width:32%;">Extracted Claim Assertion</th>
+                <th style="width:24%;">Source Paper &amp; Section</th>
+                <th>Evaluated Supporting Passage</th>
+                <th style="width:90px; text-align:center;">Probability</th>
+                <th style="width:85px; text-align:center;">Verdict</th>
+              </tr>
+            </thead>
+            <tbody id="claims-table-body">
+              <tr data-source="vaswani">
+                <td><span class="claim-idx-badge">#1</span></td>
+                <td>
+                  Projecting queries, keys, and values into <i>h</i> = 8 lower-dimensional subspaces allows the model to jointly attend to distinct representation subspaces at different positions without averaging inhibition.
+                </td>
+                <td>
+                  <strong>Vaswani et al. (2017)</strong><br/>
+                  <em>Attention Is All You Need</em><br/>
+                  <span class="claim-section-tag">§ 3.2.2 Multi-Head Attention</span>
+                </td>
+                <td>
+                  <blockquote class="claim-passage-quote">
+                    "Multi-head attention allows the model to jointly attend to information from different representation subspaces at different positions. With a single attention head, averaging inhibits this."
+                  </blockquote>
+                </td>
+                <td style="text-align:center;">
+                  <span class="claim-prob-val">0.942</span>
+                </td>
+                <td style="text-align:center;">
+                  <span class="claim-verdict-badge verified">✓ VERIFIED</span>
+                </td>
+              </tr>
+              <tr data-source="dao">
+                <td><span class="claim-idx-badge">#2</span></td>
+                <td>
+                  IO-aware tiling partitions inputs into fast on-chip SRAM blocks, avoiding the need to materialize the full <i>N</i> × <i>N</i> intermediate attention matrix in GPU HBM.
+                </td>
+                <td>
+                  <strong>Dao et al. (2022)</strong><br/>
+                  <em>FlashAttention: Fast and Memory-Efficient Exact Attention</em><br/>
+                  <span class="claim-section-tag">§ 2 FlashAttention: Algorithm</span>
+                </td>
+                <td>
+                  <blockquote class="claim-passage-quote">
+                    "FlashAttention computes exact attention with fewer memory accesses by tiling inputs across fast SRAM blocks and restructuring the backward pass without materializing the large N × N matrix."
+                  </blockquote>
+                </td>
+                <td style="text-align:center;">
+                  <span class="claim-prob-val">0.915</span>
+                </td>
+                <td style="text-align:center;">
+                  <span class="claim-verdict-badge verified">✓ VERIFIED</span>
+                </td>
+              </tr>
+              <tr data-source="beltagy">
+                <td><span class="claim-idx-badge">#3</span></td>
+                <td>
+                  Sparse attention combines local sliding windows with task-motivated global tokens to drop computational complexity to linear 𝒪(<i>N</i>) sequence scaling.
+                </td>
+                <td>
+                  <strong>Beltagy et al. (2020)</strong><br/>
+                  <em>Longformer: The Long-Document Transformer</em><br/>
+                  <span class="claim-section-tag">§ 3 Longformer Architecture</span>
+                </td>
+                <td>
+                  <blockquote class="claim-passage-quote">
+                    "The Longformer attention mechanism combines a localized sliding window with selected task-motivated global tokens, dropping time and memory complexity from 𝒪(N²) down to 𝒪(N)."
+                  </blockquote>
+                </td>
+                <td style="text-align:center;">
+                  <span class="claim-prob-val">0.887</span>
+                </td>
+                <td style="text-align:center;">
+                  <span class="claim-verdict-badge verified">✓ VERIFIED</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- Floating Theme Switcher Dock (Custom Polished Popover) -->
   <aside class="floating-theme-dock" id="floating-theme-dock" aria-label="Theme Switcher">

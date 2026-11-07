@@ -122,8 +122,44 @@ async function runTests() {
     const popover = env.document.body.querySelector(".evidence-popover");
     assert.ok(popover, "Popover should be appended to document.body");
 
-    // Header title
+    // Header row and title
+    const headerRow = popover.querySelector(".evidence-popover-header");
+    assert.ok(headerRow, "Header row should exist");
     assert.strictEqual(popover.querySelector(".evidence-popover-title").textContent, "FlashAttention-2");
+
+    const maxBtn = headerRow.querySelector(".evidence-popover-maximize-btn");
+    assert.ok(maxBtn, "Maximize button should exist");
+    assert.strictEqual(maxBtn.textContent, "⤢");
+    assert.strictEqual(maxBtn.getAttribute("title"), "Maximize in sidebar");
+
+    // 8 Resizer elements
+    const resizers = popover.querySelectorAll(".evidence-popover-resizer");
+    assert.strictEqual(resizers.length, 8, "Should create 8 resizers");
+    const directions = ["n", "s", "e", "w", "nw", "ne", "sw", "se"];
+    directions.forEach((dir) => {
+      const resizerEl = popover.querySelector(`.evidence-popover-resizer.resizer-${dir}`);
+      assert.ok(resizerEl, `Resizer for direction ${dir} should exist`);
+      assert.strictEqual(resizerEl.getAttribute("data-direction"), dir);
+    });
+
+    // Maximize button click toggles is-maximized
+    maxBtn.dispatchEvent("click");
+    assert.ok(popover.classList.contains("is-maximized"), "Clicking maximize button should add is-maximized");
+    assert.strictEqual(maxBtn.textContent, "⤡");
+    assert.strictEqual(maxBtn.getAttribute("title"), "Restore size");
+    assert.ok(popover._prevGeometry, "Should store previous geometry");
+
+    // Restore via maximize button click
+    maxBtn.dispatchEvent("click");
+    assert.strictEqual(popover.classList.contains("is-maximized"), false, "Clicking restore button should remove is-maximized");
+    assert.strictEqual(maxBtn.textContent, "⤢");
+    assert.strictEqual(maxBtn.getAttribute("title"), "Maximize in sidebar");
+
+    // Header double-click toggles is-maximized
+    headerRow.dispatchEvent("dblclick");
+    assert.ok(popover.classList.contains("is-maximized"), "Double-clicking header should maximize");
+    headerRow.dispatchEvent("dblclick");
+    assert.strictEqual(popover.classList.contains("is-maximized"), false, "Double-clicking header again should restore");
 
     // Meta
     assert.strictEqual(popover.querySelector(".evidence-popover-author-year").textContent, "Dao (2023)");
@@ -175,6 +211,217 @@ async function runTests() {
     const popoverLow = env.document.body.querySelector(".evidence-popover");
     assert.ok(popoverLow.querySelector(".evidence-support-badge.low"));
     assert.strictEqual(popoverLow.querySelector(".evidence-support-badge.low").textContent, "Support Probability: 0.35");
+    sidebar.closeEvidencePopover();
+
+    // Case D: Markdown and LaTeX math in section badge renders formatted HTML in innerHTML
+    const prevKatex = env.window.katex;
+    env.window.katex = {
+      renderToString: (math) => `<span class="katex">${math}</span>`,
+    };
+    try {
+      const citationMath = {
+        title: "Complexity Analysis",
+        section: "Analysis of **$O(N)$** Bounds",
+        support_probability: 0.85,
+      };
+      sidebar.showEvidencePopover(pill, citationMath);
+      const popoverMath = env.document.body.querySelector(".evidence-popover");
+      const secBadge = popoverMath.querySelector(".evidence-popover-section-badge");
+      assert.ok(secBadge, "Section badge should exist");
+      assert.strictEqual(
+        secBadge.innerHTML,
+        "§ Analysis of <strong><span class=\"katex\">O(N)</span></strong> Bounds",
+        "Section badge should render formatted markdown and math in secDiv.innerHTML"
+      );
+      assert.strictEqual(secBadge.textContent, "§ Analysis of O(N) Bounds");
+      sidebar.closeEvidencePopover();
+
+      // Case E: Plain section, script tags, and XSS sanitization
+      const citationXss = {
+        title: "Security Test",
+        section: "Methods <script>alert(1)</script> <img src=x onerror=alert(1)> > Implementation",
+      };
+      sidebar.showEvidencePopover(pill, citationXss);
+      const popoverXss = env.document.body.querySelector(".evidence-popover");
+      const secBadgeXss = popoverXss.querySelector(".evidence-popover-section-badge");
+      assert.ok(secBadgeXss, "Section badge should exist");
+      assert.ok(!secBadgeXss.innerHTML.includes("<script"), "Script tags must be stripped");
+      assert.ok(!secBadgeXss.innerHTML.includes("onerror"), "Event handlers must be sanitized");
+      assert.ok(secBadgeXss.textContent.startsWith("§ Methods"), "Prefix § must be present");
+      assert.ok(secBadgeXss.textContent.includes("Implementation"), "Section title text must be preserved");
+      sidebar.closeEvidencePopover();
+    } finally {
+      env.window.katex = prevKatex;
+    }
+  });
+
+  // 6. Smart placement in narrow sidebars (< 420px)
+  test("showEvidencePopover: smart placement in narrow sidebars (< 420px)", () => {
+    sidebar.closeEvidencePopover();
+    const pill = createMockElement("span");
+    pill.offsetLeft = 50;
+    pill.offsetWidth = 20;
+    const citation = { title: "Narrow Sidebar Test" };
+
+    const origInnerWidth = env.window.innerWidth;
+    try {
+      // 1. Sidebar width 360px (< 420): width = Math.max(260, 360 - 20) = 340px, left = 10px
+      env.window.innerWidth = 360;
+      sidebar.showEvidencePopover(pill, citation);
+      let popover = env.document.body.querySelector(".evidence-popover");
+      assert.ok(popover);
+      assert.strictEqual(popover.style.width, "340px");
+      assert.strictEqual(popover.style.left, "10px");
+      sidebar.closeEvidencePopover();
+
+      // 2. Very narrow sidebar 270px: width = Math.max(260, 270 - 20) = 260px (minWidth clamp)
+      env.window.innerWidth = 270;
+      sidebar.showEvidencePopover(pill, citation);
+      popover = env.document.body.querySelector(".evidence-popover");
+      assert.ok(popover);
+      assert.strictEqual(popover.style.width, "260px");
+      assert.strictEqual(popover.style.left, "10px");
+      sidebar.closeEvidencePopover();
+
+      // 3. Normal sidebar width 800px (>= 420): standard clamped positioning
+      env.window.innerWidth = 800;
+      sidebar.showEvidencePopover(pill, citation);
+      popover = env.document.body.querySelector(".evidence-popover");
+      assert.ok(popover);
+      assert.strictEqual(popover.style.left, "50px");
+      sidebar.closeEvidencePopover();
+    } finally {
+      env.window.innerWidth = origInnerWidth;
+      sidebar.closeEvidencePopover();
+    }
+  });
+
+  // 7. Multi-directional resizers and dragging
+  test("showEvidencePopover: multi-directional resizers resize popover and clear maximized state on drag", () => {
+    sidebar.closeEvidencePopover();
+    const pill = createMockElement("span");
+    pill.offsetLeft = 40;
+    const citation = { title: "Resize Test", quote: "Testing multi-directional resize." };
+
+    sidebar.showEvidencePopover(pill, citation);
+    const popover = env.document.body.querySelector(".evidence-popover");
+    assert.ok(popover);
+
+    const maxBtn = popover.querySelector(".evidence-popover-maximize-btn");
+    const origLeft = popover.style.left;
+    const origTop = popover.style.top;
+    const origWidth = popover.style.width;
+    const origHeight = popover.style.height;
+
+    // Maximize first
+    maxBtn.dispatchEvent("click");
+    assert.ok(popover.classList.contains("is-maximized"));
+
+    // Toggle back (restore)
+    maxBtn.dispatchEvent("click");
+    assert.strictEqual(popover.classList.contains("is-maximized"), false);
+    assert.strictEqual(popover.style.left, origLeft, "Restored left must match pre-maximize left");
+    assert.strictEqual(popover.style.top, origTop, "Restored top must match pre-maximize top");
+    assert.strictEqual(popover.style.width, origWidth, "Restored width must match pre-maximize width");
+
+    // Maximize again for the drag test
+    maxBtn.dispatchEvent("click");
+    assert.ok(popover.classList.contains("is-maximized"));
+
+    // 1. Start drag on resizer-se: should clear maximized state and update width/height
+    const seResizer = popover.querySelector(".evidence-popover-resizer.resizer-se");
+    assert.ok(seResizer);
+    seResizer.dispatchEvent({
+      type: "mousedown",
+      clientX: 100,
+      clientY: 100,
+      preventDefault() {},
+      stopPropagation() {},
+    });
+
+    env.window.dispatchEvent({
+      type: "mousemove",
+      clientX: 150,
+      clientY: 160,
+    });
+
+    assert.strictEqual(popover.classList.contains("is-maximized"), false, "Manual drag should clear is-maximized");
+    assert.strictEqual(maxBtn.textContent, "⤢", "Maximize button icon should reset to unmaximized");
+    assert.strictEqual(maxBtn.getAttribute("title"), "Maximize in sidebar");
+    assert.strictEqual(popover.style.width, "350px"); // startWidth (300) + 50
+    assert.strictEqual(popover.style.height, "260px"); // startHeight (200) + 60
+    assert.strictEqual(popover.style.maxHeight, "260px");
+
+    env.window.dispatchEvent({ type: "mouseup" });
+
+    // 2. Drag west resizer (resizer-w): shrinks left and grows width
+    const wResizer = popover.querySelector(".evidence-popover-resizer.resizer-w");
+    assert.ok(wResizer);
+    wResizer.dispatchEvent({
+      type: "mousedown",
+      clientX: 100,
+      clientY: 100,
+      preventDefault() {},
+      stopPropagation() {},
+    });
+
+    // Move left by 20px -> left should become startLeft (40) - 20 = 20px, width grows by 20px (from 350 to 370)
+    env.window.dispatchEvent({
+      type: "mousemove",
+      clientX: 80,
+      clientY: 100,
+    });
+
+    assert.strictEqual(popover.style.left, "20px");
+    assert.strictEqual(popover.style.width, "370px");
+
+    env.window.dispatchEvent({ type: "mouseup" });
+
+    // 3. Drag north resizer (resizer-n): shrinks top and grows height
+    const nResizer = popover.querySelector(".evidence-popover-resizer.resizer-n");
+    assert.ok(nResizer);
+    nResizer.dispatchEvent({
+      type: "mousedown",
+      clientX: 100,
+      clientY: 100,
+      preventDefault() {},
+      stopPropagation() {},
+    });
+
+    const currTop = parseFloat(popover.style.top);
+    // Move up by 30px
+    env.window.dispatchEvent({
+      type: "mousemove",
+      clientX: 100,
+      clientY: 70,
+    });
+
+    assert.strictEqual(popover.style.top, `${Math.max(10, currTop - 30)}px`);
+    assert.strictEqual(popover.style.height, "290px"); // startHeight (260) + 30
+    assert.strictEqual(popover.style.maxHeight, "290px");
+
+    env.window.dispatchEvent({ type: "mouseup" });
+
+    // 4. Enforce minWidth (260) and minHeight (180) clamps
+    seResizer.dispatchEvent({
+      type: "mousedown",
+      clientX: 100,
+      clientY: 100,
+      preventDefault() {},
+      stopPropagation() {},
+    });
+
+    // Try to shrink width and height by 500px (beyond minWidth 260 and minHeight 180)
+    env.window.dispatchEvent({
+      type: "mousemove",
+      clientX: -400,
+      clientY: -400,
+    });
+
+    assert.strictEqual(popover.style.width, "260px", "Width must not shrink below minWidth 260");
+    assert.strictEqual(popover.style.height, "180px", "Height must not shrink below minHeight 180");
+
+    env.window.dispatchEvent({ type: "mouseup" });
     sidebar.closeEvidencePopover();
   });
 
@@ -277,7 +524,10 @@ async function runTests() {
 
     // Markdown symbols and math formatting
     const formatted = sidebar.extractLeafHeading("§ *4.2* `$W_i^Q$` `Projections`");
-    assert.strictEqual(formatted.leaf, "4.2  Projections");
+    assert.strictEqual(formatted.leaf, "4.2 Wi^Q Projections");
+
+    const mathHeading = sidebar.extractLeafHeading("A leaky integrator of $[Ca^{2+}]$ signals");
+    assert.strictEqual(mathHeading.leaf, "A leaky integrator of [Ca^{2+}] signals");
 
     // Real sections starting with Table / Figure should NOT be rejected
     assert.strictEqual(sidebar.extractLeafHeading("Table Detection Methods").leaf, "Table Detection Methods");
@@ -296,9 +546,37 @@ async function runTests() {
     const docTitleMatch = sidebar.extractLeafHeading("Deep Residual Learning for Image Recognition", "Deep Residual Learning for Image Recognition");
     assert.deepStrictEqual(docTitleMatch, { leaf: "", parents: [] });
 
+    // isSyntheticOrTitle
+    assert.strictEqual(sidebar.isSyntheticOrTitle("Frontmatter"), true);
+    assert.strictEqual(sidebar.isSyntheticOrTitle("Full Document"), true);
+    assert.strictEqual(sidebar.isSyntheticOrTitle("Abstract"), true);
+    assert.strictEqual(sidebar.isSyntheticOrTitle("Figure 1: Attention diagram"), true);
+    assert.strictEqual(sidebar.isSyntheticOrTitle("Table 2: BLEU score comparison"), true);
+    assert.strictEqual(sidebar.isSyntheticOrTitle("Attention Is All You Need", "Attention Is All You Need"), true);
+    assert.strictEqual(sidebar.isSyntheticOrTitle("attention is all you need", "Attention Is All You Need"), true);
+    assert.strictEqual(sidebar.isSyntheticOrTitle("§ 3.2.2 Multi-Head Attention", "Attention Is All You Need"), false);
+    assert.strictEqual(sidebar.isSyntheticOrTitle("Table Detection Methods"), false);
+    assert.strictEqual(sidebar.isSyntheticOrTitle("Figure Generation Algorithms"), false);
+    assert.strictEqual(sidebar.isSyntheticOrTitle(""), true);
+    assert.strictEqual(sidebar.isSyntheticOrTitle(null), true);
+
     // normalizeForComparison
     assert.strictEqual(sidebar.normalizeForComparison("Café naïve résumé"), "cafe naive resume");
     assert.strictEqual(sidebar.normalizeForComparison("Multi-Head  Attention: [2023]"), "multi head attention 2023");
+    assert.strictEqual(sidebar.normalizeForComparison("Multi-Head Attention"), "multi head attention");
+    assert.strictEqual(sidebar.normalizeForComparison("Multi Head Attention"), "multi head attention");
+    assert.strictEqual(sidebar.normalizeForComparison("Self-Attention"), "self attention");
+    assert.strictEqual(sidebar.normalizeForComparison("Self Attention"), "self attention");
+    assert.strictEqual(
+      sidebar.normalizeForComparison("Self-Attention"),
+      sidebar.normalizeForComparison("Self Attention")
+    );
+    assert.strictEqual(sidebar.normalizeForComparison("A leaky integrator of [Ca^{2+}] signals"), "a leaky integrator of ca2 signals");
+    assert.strictEqual(sidebar.normalizeForComparison("A leaky integrator of Ca2+ signals"), "a leaky integrator of ca2 signals");
+    assert.strictEqual(
+      sidebar.normalizeForComparison("A leaky integrator of [Ca^{2+}] signals"),
+      sidebar.normalizeForComparison("A leaky integrator of Ca2+ signals")
+    );
     assert.strictEqual(sidebar.normalizeForComparison(""), "");
     assert.strictEqual(sidebar.normalizeForComparison(null), "");
   });
@@ -398,38 +676,106 @@ async function runTests() {
     ];
 
     // Flat and nested outline exact match
-    assert.strictEqual(sidebar.findOutlineDestination(mockOutline, "1. Introduction"), "dest-intro");
-    assert.strictEqual(sidebar.findOutlineDestination(mockOutline, "3.2 Multi-Head Attention"), "dest-mha");
-    assert.strictEqual(sidebar.findOutlineDestination(mockOutline, "3.1.1 Problem Formulation"), "dest-formulation");
+    assert.deepStrictEqual(sidebar.findOutlineDestination(mockOutline, "1. Introduction"), { dest: "dest-intro" });
+    assert.deepStrictEqual(sidebar.findOutlineDestination(mockOutline, "3.2 Multi-Head Attention"), { dest: "dest-mha" });
+    assert.deepStrictEqual(sidebar.findOutlineDestination(mockOutline, "3.1.1 Problem Formulation"), { dest: "dest-formulation" });
 
     // Numbered prefix match
-    assert.strictEqual(sidebar.findOutlineDestination(mockOutline, "3.2"), "dest-mha");
-    assert.strictEqual(sidebar.findOutlineDestination(mockOutline, "2.1"), "dest-traditional");
+    assert.deepStrictEqual(sidebar.findOutlineDestination(mockOutline, "3.2"), { dest: "dest-mha" });
+    assert.deepStrictEqual(sidebar.findOutlineDestination(mockOutline, "2.1"), { dest: "dest-traditional" });
 
     // Numbering conflict rejection (3.2 Results vs 4.2 Results rejected)
     assert.strictEqual(sidebar.findOutlineDestination(mockOutline, "3.2 Results"), null);
 
     // Parent chain disambiguation: duplicate "Data Processing" disambiguated by parent
     const methodDp = sidebar.findOutlineDestination(mockOutline, "Data Processing", ["3. Methodology"]);
-    assert.strictEqual(methodDp, "dest-method-dp");
+    assert.deepStrictEqual(methodDp, { dest: "dest-method-dp" });
 
     const expDp = sidebar.findOutlineDestination(mockOutline, "Data Processing", ["4. Experiments"]);
-    assert.strictEqual(expDp, "dest-exp-dp");
+    assert.deepStrictEqual(expDp, { dest: "dest-exp-dp" });
 
     // Tied scores across distinct destinations returns null (safe fail-open)
     const tiedDp = sidebar.findOutlineDestination(mockOutline, "Data Processing", []);
     assert.strictEqual(tiedDp, null);
 
     // Named destination string preserved intact
-    assert.strictEqual(sidebar.findOutlineDestination(mockOutline, "Appendix A. Proofs"), "named.dest.appendix");
+    assert.deepStrictEqual(sidebar.findOutlineDestination(mockOutline, "Appendix A. Proofs"), { dest: "named.dest.appendix" });
 
     // Token-boundary core containment (min 8 chars)
-    assert.strictEqual(sidebar.findOutlineDestination(mockOutline, "Discussion and Future"), "dest-discussion");
+    assert.deepStrictEqual(sidebar.findOutlineDestination(mockOutline, "Discussion and Future"), { dest: "dest-discussion" });
 
     // Unmatched returns null
     assert.strictEqual(sidebar.findOutlineDestination(mockOutline, "Nonexistent Section"), null);
     assert.strictEqual(sidebar.findOutlineDestination([], "1. Introduction"), null);
     assert.strictEqual(sidebar.findOutlineDestination(null, "1. Introduction"), null);
+  });
+
+  // 9b. findOutlineDestination: synthesized outline schema
+  test("findOutlineDestination: accepts Zotero synthesized outline schema with location and no dest", () => {
+    const synthOutline = [
+      {
+        title: "1 Introduction",
+        location: { position: { pageIndex: 0, rects: [[10, 20, 30, 40]] } },
+      },
+      {
+        title: "2 Methodology",
+        location: { position: { pageIndex: 2, rects: [[15, 25, 35, 45]] } },
+        items: [
+          {
+            title: "2.1 Signal Integration",
+            location: { position: { pageIndex: 3, rects: [[5, 10, 50, 60]] } },
+          },
+        ],
+      },
+      {
+        title: "3 Direct Page Index",
+        pageIndex: 7,
+      },
+    ];
+
+    assert.deepStrictEqual(
+      sidebar.findOutlineDestination(synthOutline, "1 Introduction"),
+      { position: { pageIndex: 0, rects: [[10, 20, 30, 40]] } }
+    );
+    assert.deepStrictEqual(
+      sidebar.findOutlineDestination(synthOutline, "2.1 Signal Integration"),
+      { position: { pageIndex: 3, rects: [[5, 10, 50, 60]] } }
+    );
+    assert.deepStrictEqual(
+      sidebar.findOutlineDestination(synthOutline, "3 Direct Page Index"),
+      { pageIndex: 7 }
+    );
+  });
+
+  // 9d. findOutlineDestination: location with dest schema
+  test("findOutlineDestination: correctly handles location with dest object schema", () => {
+    const outlineWithLocationDest = [
+      {
+        title: "4. Experimental Setup",
+        location: { dest: "named.dest.exp" },
+      },
+    ];
+
+    assert.deepStrictEqual(
+      sidebar.findOutlineDestination(outlineWithLocationDest, "4. Experimental Setup"),
+      { dest: "named.dest.exp" }
+    );
+  });
+
+  // 9c. findOutlineDestination: math heading unwrap and normalization
+  test("findOutlineDestination: matches unwrapped LaTeX math heading against outline node", () => {
+    const outlineWithCa2 = [
+      {
+        title: "A leaky integrator of Ca2+ signals",
+        location: { position: { pageIndex: 4, rects: [[20, 40, 60, 80]] } },
+      },
+    ];
+
+    const { leaf } = sidebar.extractLeafHeading("A leaky integrator of $[Ca^{2+}]$ signals");
+    assert.strictEqual(leaf, "A leaky integrator of [Ca^{2+}] signals");
+
+    const match = sidebar.findOutlineDestination(outlineWithCa2, leaf);
+    assert.deepStrictEqual(match, { position: { pageIndex: 4, rects: [[20, 40, 60, 80]] } });
   });
 
   // 10. findHtmlSnapshotHeading
@@ -556,6 +902,530 @@ async function runTests() {
         delete env.window.Zotero.Items.getByLibraryAndKey;
       }
     }
+  });
+
+  // 12. openItemInReader: hierarchical parent breadcrumb fallback
+  await testAsync("openItemInReader: falls back to parent breadcrumb hierarchy when leaf heading is absent in shallow outline", async () => {
+    const origReader = env.window.Zotero?.Reader;
+    const origGetByLib = env.window.Zotero?.Items?.getByLibraryAndKey;
+    let navigatedWith = null;
+
+    try {
+      const shallowOutline = [
+        {
+          title: "Introduction",
+          location: { position: { pageIndex: 0, rects: [[0, 0, 100, 100]] } },
+        },
+        {
+          title: "Results",
+          location: { position: { pageIndex: 5, rects: [[100, 200, 300, 400]] } },
+        },
+      ];
+
+      const mockInternalReader = {
+        _state: { outline: shallowOutline },
+        navigate: async (targetLoc) => {
+          navigatedWith = targetLoc;
+        },
+      };
+
+      const mockItem = {
+        id: 995,
+        isAttachment: () => true,
+        attachmentReaderType: "pdf",
+        attachmentContentType: "application/pdf",
+      };
+
+      if (!env.window.Zotero) env.window.Zotero = {};
+      env.window.Zotero.Reader = { open: async () => mockInternalReader };
+      if (!env.window.Zotero.Items) env.window.Zotero.Items = {};
+      env.window.Zotero.Items.getByLibraryAndKey = () => mockItem;
+
+      // Query "Results > Leaky Integrator" against outline containing only "Results"
+      await sidebar.openItemInReader("ATT_SHALLOW", "Results > Leaky Integrator");
+
+      assert.deepStrictEqual(
+        navigatedWith,
+        { position: { pageIndex: 5, rects: [[100, 200, 300, 400]] } },
+        "Should navigate to parent 'Results' location when child 'Leaky Integrator' is missing in outline"
+      );
+    } finally {
+      if (origReader !== undefined) {
+        env.window.Zotero.Reader = origReader;
+      } else {
+        delete env.window.Zotero.Reader;
+      }
+      if (origGetByLib !== undefined) {
+        env.window.Zotero.Items.getByLibraryAndKey = origGetByLib;
+      } else if (env.window.Zotero?.Items) {
+        delete env.window.Zotero.Items.getByLibraryAndKey;
+      }
+    }
+  });
+
+  // 13. openItemInReader: outline polling checks pdfDoc.getOutline2() before getOutline()
+  await testAsync("openItemInReader: queries pdfDoc.getOutline2() before getOutline() when internal state is empty", async () => {
+    const origReader = env.window.Zotero?.Reader;
+    const origGetByLib = env.window.Zotero?.Items?.getByLibraryAndKey;
+    let navigatedWith = null;
+    let getOutline2Called = false;
+    let getOutlineCalled = false;
+
+    try {
+      const synthOutline = [
+        {
+          title: "Synthesized Section",
+          location: { position: { pageIndex: 2, rects: [[1, 2, 3, 4]] } },
+        },
+      ];
+
+      const mockInternalReader = {
+        _state: { outline: null },
+        _primaryView: {
+          _iframeWindow: {
+            PDFViewerApplication: {
+              pdfDocument: {
+                getOutline2: async () => {
+                  getOutline2Called = true;
+                  return synthOutline;
+                },
+                getOutline: async () => {
+                  getOutlineCalled = true;
+                  return [{ title: "Legacy Section", dest: "legacy-dest" }];
+                },
+              },
+            },
+          },
+        },
+        navigate: async (loc) => {
+          navigatedWith = loc;
+        },
+      };
+
+      const mockItem = {
+        id: 996,
+        isAttachment: () => true,
+        attachmentReaderType: "pdf",
+        attachmentContentType: "application/pdf",
+      };
+
+      if (!env.window.Zotero) env.window.Zotero = {};
+      env.window.Zotero.Reader = { open: async () => mockInternalReader };
+      if (!env.window.Zotero.Items) env.window.Zotero.Items = {};
+      env.window.Zotero.Items.getByLibraryAndKey = () => mockItem;
+
+      await sidebar.openItemInReader("ATT_SYNTH", "Synthesized Section");
+
+      assert.strictEqual(getOutline2Called, true, "pdfDoc.getOutline2() must be checked first");
+      assert.strictEqual(getOutlineCalled, false, "pdfDoc.getOutline() must not be called when getOutline2() succeeds");
+      assert.deepStrictEqual(navigatedWith, { position: { pageIndex: 2, rects: [[1, 2, 3, 4]] } });
+    } finally {
+      if (origReader !== undefined) {
+        env.window.Zotero.Reader = origReader;
+      } else {
+        delete env.window.Zotero.Reader;
+      }
+      if (origGetByLib !== undefined) {
+        env.window.Zotero.Items.getByLibraryAndKey = origGetByLib;
+      } else if (env.window.Zotero?.Items) {
+        delete env.window.Zotero.Items.getByLibraryAndKey;
+      }
+    }
+  });
+
+  // 12b. openItemInReader: parent fallback skips synthetic labels and documentTitle
+  await testAsync("openItemInReader: parent fallback skips synthetic labels and headings equal to documentTitle", async () => {
+    const origReader = env.window.Zotero?.Reader;
+    const origGetByLib = env.window.Zotero?.Items?.getByLibraryAndKey;
+    let navigatedWith = null;
+
+    try {
+      const mockOutline = [
+        {
+          title: "Attention Is All You Need",
+          location: { position: { pageIndex: 0, rects: [[0, 0, 100, 100]] } },
+        },
+        {
+          title: "Frontmatter",
+          location: { position: { pageIndex: 0, rects: [[0, 0, 100, 100]] } },
+        },
+        {
+          title: "Abstract",
+          location: { position: { pageIndex: 1, rects: [[0, 0, 100, 100]] } },
+        },
+        {
+          title: "Figure 1: Architecture",
+          location: { position: { pageIndex: 2, rects: [[0, 0, 100, 100]] } },
+        },
+        {
+          title: "3 Model Architecture",
+          location: { position: { pageIndex: 3, rects: [[10, 20, 30, 40]] } },
+        },
+      ];
+
+      const mockInternalReader = {
+        _state: { outline: mockOutline },
+        navigate: async (targetLoc) => {
+          navigatedWith = targetLoc;
+        },
+      };
+
+      const mockItem = {
+        id: 998,
+        isAttachment: () => true,
+        attachmentReaderType: "pdf",
+        attachmentContentType: "application/pdf",
+        getField: (field) => (field === "title" ? "Attention Is All You Need" : ""),
+      };
+
+      if (!env.window.Zotero) env.window.Zotero = {};
+      env.window.Zotero.Reader = { open: async () => mockInternalReader };
+      if (!env.window.Zotero.Items) env.window.Zotero.Items = {};
+      env.window.Zotero.Items.getByLibraryAndKey = () => mockItem;
+
+      // Case 1: Breadcrumb contains Title > Frontmatter > Abstract > Missing Section
+      // All parents are synthetic or equal to docTitle, so none should be matched.
+      await sidebar.openItemInReader("ATT_SYNTH_PARENTS", "Attention Is All You Need > Frontmatter > Abstract > Missing Subheading");
+      assert.strictEqual(navigatedWith, null, "Parent fallback must skip Frontmatter, Abstract, and document title");
+
+      // Case 2: Breadcrumb contains Title > 3 Model Architecture > Missing Subheading
+      // Parent "3 Model Architecture" is valid and should be matched, skipping Title.
+      navigatedWith = null;
+      await sidebar.openItemInReader("ATT_SYNTH_PARENTS", "Attention Is All You Need > 3 Model Architecture > Missing Subheading");
+      assert.deepStrictEqual(
+        navigatedWith,
+        { position: { pageIndex: 3, rects: [[10, 20, 30, 40]] } },
+        "Parent fallback should navigate to '3 Model Architecture' while skipping document title"
+      );
+    } finally {
+      if (origReader !== undefined) {
+        env.window.Zotero.Reader = origReader;
+      } else {
+        delete env.window.Zotero.Reader;
+      }
+      if (origGetByLib !== undefined) {
+        env.window.Zotero.Items.getByLibraryAndKey = origGetByLib;
+      } else if (env.window.Zotero?.Items) {
+        delete env.window.Zotero.Items.getByLibraryAndKey;
+      }
+    }
+  });
+
+  // 13b. openItemInReader: getOutline2 returning empty or null gracefully falls back to getOutline()
+  await testAsync("openItemInReader: getOutline2 returning empty or null gracefully falls back to getOutline()", async () => {
+    const origReader = env.window.Zotero?.Reader;
+    const origGetByLib = env.window.Zotero?.Items?.getByLibraryAndKey;
+    let navigatedWith = null;
+    let getOutline2CallCount = 0;
+    let getOutlineCallCount = 0;
+
+    try {
+      const legacyOutline = [
+        {
+          title: "Legacy Section",
+          location: { position: { pageIndex: 1, rects: [[5, 6, 7, 8]] } },
+        },
+      ];
+
+      const mockInternalReader = {
+        _state: { outline: null },
+        _primaryView: {
+          _iframeWindow: {
+            PDFViewerApplication: {
+              pdfDocument: {
+                getOutline2: async () => {
+                  getOutline2CallCount++;
+                  return null; // Empty or null returned by getOutline2
+                },
+                getOutline: async () => {
+                  getOutlineCallCount++;
+                  return legacyOutline;
+                },
+              },
+            },
+          },
+        },
+        navigate: async (loc) => {
+          navigatedWith = loc;
+        },
+      };
+
+      const mockItem = {
+        id: 997,
+        isAttachment: () => true,
+        attachmentReaderType: "pdf",
+        attachmentContentType: "application/pdf",
+      };
+
+      if (!env.window.Zotero) env.window.Zotero = {};
+      env.window.Zotero.Reader = { open: async () => mockInternalReader };
+      if (!env.window.Zotero.Items) env.window.Zotero.Items = {};
+      env.window.Zotero.Items.getByLibraryAndKey = () => mockItem;
+
+      await sidebar.openItemInReader("ATT_FALLBACK_OUTLINE", "Legacy Section");
+
+      assert.strictEqual(getOutline2CallCount, 1, "getOutline2() should be attempted first");
+      assert.strictEqual(getOutlineCallCount, 1, "getOutline() should be called when getOutline2() returns null/empty");
+      assert.deepStrictEqual(navigatedWith, { position: { pageIndex: 1, rects: [[5, 6, 7, 8]] } });
+    } finally {
+      if (origReader !== undefined) {
+        env.window.Zotero.Reader = origReader;
+      } else {
+        delete env.window.Zotero.Reader;
+      }
+      if (origGetByLib !== undefined) {
+        env.window.Zotero.Items.getByLibraryAndKey = origGetByLib;
+      } else if (env.window.Zotero?.Items) {
+        delete env.window.Zotero.Items.getByLibraryAndKey;
+      }
+    }
+  });
+
+  // 14. openItemInReader: bounded timeout race prevents hanging host navigate from permanently blocking
+  await testAsync("openItemInReader: bounded timeout race prevents hanging host navigate from permanently blocking", async () => {
+    const origReader = env.window.Zotero?.Reader;
+    const origGetByLib = env.window.Zotero?.Items?.getByLibraryAndKey;
+
+    try {
+      const mockOutline = [
+        { title: "Hanging Section", dest: "dest-hang" },
+      ];
+
+      let navigateCalled = false;
+      const mockInternalReader = {
+        _state: { outline: mockOutline },
+        navigate: () => {
+          navigateCalled = true;
+          return new Promise(() => {}); // never resolves
+        },
+      };
+
+      const mockItem = {
+        id: 999,
+        isAttachment: () => true,
+        attachmentReaderType: "pdf",
+        attachmentContentType: "application/pdf",
+      };
+
+      if (!env.window.Zotero) env.window.Zotero = {};
+      env.window.Zotero.Reader = { open: async () => mockInternalReader };
+      if (!env.window.Zotero.Items) env.window.Zotero.Items = {};
+      env.window.Zotero.Items.getByLibraryAndKey = () => mockItem;
+
+      // First call: navigate hangs, but openItemInReader resolves due to timeout race
+      await sidebar.openItemInReader("ATT_HANG", "Hanging Section");
+      assert.strictEqual(navigateCalled, true);
+
+      // Now verify that after timeout, coalescing map has cleared and subsequent call is not stuck
+      let secondNavigateCalled = false;
+      mockInternalReader.navigate = async () => {
+        secondNavigateCalled = true;
+      };
+
+      await sidebar.openItemInReader("ATT_HANG", "Hanging Section");
+      assert.strictEqual(secondNavigateCalled, true, "Subsequent call must proceed after timeout cleared hanging navigation");
+    } finally {
+      if (origReader !== undefined) {
+        env.window.Zotero.Reader = origReader;
+      } else {
+        delete env.window.Zotero.Reader;
+      }
+      if (origGetByLib !== undefined) {
+        env.window.Zotero.Items.getByLibraryAndKey = origGetByLib;
+      } else if (env.window.Zotero?.Items) {
+        delete env.window.Zotero.Items.getByLibraryAndKey;
+      }
+    }
+  });
+
+  // 12. formatMessageContent: enriched_text vs raw unpruned text with canonical data-citation-occ
+  test("formatMessageContent: handles enriched_text with surviving occurrences and canonical data-citation-occ", () => {
+    // Occurrence 1 was rejected by verification (support_probability: 0.20, survived: false)
+    // Occurrence 2 survived (support_probability: 0.92, survived: true)
+    const metadata = {
+      citations: [
+        {
+          index: 1,
+          title: "Twins Study",
+          authors: "Jonsson et al.",
+          year: 2021,
+          section: "Methods",
+          occurrences: [
+            { occurrence: 1, survived: false, support_probability: 0.20 },
+            { occurrence: 2, survived: true, support_probability: 0.92 },
+          ],
+        },
+      ],
+      references: [
+        { title: "Twins Study", authors: "Jonsson et al.", year: 2021, tier: 1 },
+      ],
+    };
+
+    // Case A: enriched_text (where occurrence 1 was already removed from prose)
+    const enrichedText = "Only the second claim was verified [1].";
+    const renderedEnriched = sidebar.formatMessageContent(enrichedText, metadata);
+
+    assert.ok(renderedEnriched.includes('data-citation-idx="1"'));
+    assert.ok(renderedEnriched.includes('data-citation-occ="2"'), "Should attach canonical occurrence 2 to pill");
+    assert.ok(renderedEnriched.includes("Support probability: 0.92"), "Tooltip should show surviving occurrence probability");
+
+    // Case B: showEvidencePopover with this pill resolves canonical occurrence 2
+    sidebar.closeEvidencePopover();
+    const pill = createMockElement("span");
+    pill.setAttribute("data-citation-occ", "2");
+    sidebar.showEvidencePopover(pill, metadata.citations[0]);
+    const popover = env.document.body.querySelector(".evidence-popover");
+    assert.ok(popover, "Evidence popover should render");
+    const badge = popover.querySelector(".evidence-support-badge.high");
+    assert.ok(badge, "High support badge should be rendered for canonical occurrence 2");
+    assert.strictEqual(badge.textContent, "✓ Support Probability: 0.92");
+    sidebar.closeEvidencePopover();
+  });
+
+  test("formatMessageContent: handles raw unpruned text fallback and canonical data-citation-occ", () => {
+    const metadata = {
+      citations: [
+        {
+          index: 1,
+          title: "Twins Study",
+          authors: "Jonsson et al.",
+          year: 2021,
+          section: "Methods",
+          occurrences: [
+            { occurrence: 1, survived: false, support_probability: 0.20 },
+            { occurrence: 2, survived: true, support_probability: 0.92 },
+          ],
+        },
+      ],
+      references: [
+        { title: "Twins Study", authors: "Jonsson et al.", year: 2021, tier: 1 },
+      ],
+    };
+
+    // Raw unpruned text containing both occurrences in text
+    const rawText = "First ungrounded claim [1]. Second verified claim [1].";
+    const renderedRaw = sidebar.formatMessageContent(rawText, metadata);
+
+    // First [1] must NOT have a citation pill
+    assert.ok(!renderedRaw.includes("First ungrounded claim <span"), "First ungrounded claim must not have citation pill");
+    // Second [1] must have a citation pill with canonical occ 2
+    assert.ok(renderedRaw.includes('data-citation-idx="1"'));
+    assert.ok(renderedRaw.includes('data-citation-occ="2"'), "Surviving occurrence must have canonical occ 2");
+    assert.ok(renderedRaw.includes("Support probability: 0.92"));
+
+    // Verify only ONE pill is rendered total
+    const pillMatches = renderedRaw.match(/class="citation-pill"/g) || [];
+    assert.strictEqual(pillMatches.length, 1, "Only the surviving occurrence should be rendered as a pill");
+  });
+
+  test("formatMessageContent: deduplicates repeated numbers within the same bracket token", () => {
+    const metadata = {
+      citations: [
+        {
+          index: 1,
+          title: "Paper A",
+          authors: "Author A",
+          year: 2021,
+          support_probability: 0.85,
+        },
+      ],
+    };
+
+    const text = "Duplicate citation in token [1, 1].";
+    const rendered = sidebar.formatMessageContent(text, metadata);
+
+    const pillMatches = rendered.match(/data-citation-idx="1"/g) || [];
+    assert.strictEqual(pillMatches.length, 1, "Token [1, 1] must only render one citation pill for index 1");
+  });
+
+  test("formatMessageContent: strips lingering citation tokens when citations is empty and citation_verification is present", () => {
+    const metadata = {
+      citations: [],
+      citation_verification: {
+        model: "inception/mercury-decide:free",
+        summary: { batch_size: 1, kept: 0, demoted: 1 },
+      },
+    };
+
+    const text = "Claim that failed verification [1].";
+    const rendered = sidebar.formatMessageContent(text, metadata);
+    assert.ok(!rendered.includes("[1]"), "Bracket [1] should be stripped when citation verification demoted all citations");
+    assert.ok(rendered.includes("Claim that failed verification."), "Prose should be preserved");
+  });
+
+  test("finalizeChatStream: updates rawText with streamEnrichedText and verifies copy / citation toggle parity", () => {
+    const wrapper = createMockElement("div");
+    wrapper.className = "message-wrapper assistant";
+    const bubble = createMockElement("div");
+    bubble.className = "message-bubble";
+    wrapper.appendChild(bubble);
+
+    const actionsDiv = createMockElement("div");
+    actionsDiv.className = "message-actions";
+    const actionsLeft = createMockElement("div");
+    actionsLeft.className = "message-actions-left";
+    actionsDiv.appendChild(actionsLeft);
+    wrapper.appendChild(actionsDiv);
+
+    env.document.getElementById("chat-messages").appendChild(wrapper);
+
+    const rawStreamingText = "Raw streaming text with unverified citation [1].";
+    const verifiedEnrichedText = "Clean verified text without unverified citation.\n\n# Cited Sources\n- **Jonsson (2021)**. *Twins Study*.";
+
+    const streamCtx = {
+      assistantBubble: bubble,
+      currentResponseText: rawStreamingText,
+      streamEnrichedText: verifiedEnrichedText,
+      streamCitations: [],
+      streamReferences: [
+        { title: "Twins Study", authors: "Jonsson", year: 2021, tier: 1 },
+      ],
+      streamCitationVerification: { model: "inception/mercury-decide:free" },
+      streamModel: "google/gemini-2.5-flash",
+      streamUsage: { prompt_tokens: 100, candidates_tokens: 50, total_tokens: 150 },
+      streamFinishReason: "stop",
+      streamEventId: "evt-final-test",
+      streamInvocationId: "inv-final-test",
+      stepsBubble: null,
+      liveSteps: [],
+      payloadItems: [],
+      requestStartTime: Date.now() - 1000,
+      session: { messages: [] },
+    };
+
+    sidebar.finalizeChatStream(streamCtx, false);
+
+    // 1. Bubble raw text and currentResponseText should match streamEnrichedText
+    assert.strictEqual(streamCtx.currentResponseText, verifiedEnrichedText, "streamCtx.currentResponseText must be updated to streamEnrichedText");
+    assert.strictEqual(bubble._rawText, verifiedEnrichedText, "bubble._rawText must store verifiedEnrichedText");
+    assert.ok(bubble.innerHTML.includes("Clean verified text"), "Rendered innerHTML must reflect verified text");
+    assert.ok(!bubble.innerHTML.includes("[1]"), "Lingering [1] should be stripped");
+
+    // 2. Session messages must store verifiedEnrichedText
+    assert.strictEqual(streamCtx.session.messages.length, 1);
+    assert.strictEqual(streamCtx.session.messages[0].text, verifiedEnrichedText);
+
+    // 3. stripCitationsFromText preserves clean prose for copy-to-clipboard
+    const copiedCleanText = sidebar.stripCitationsFromText(bubble._rawText);
+    assert.strictEqual(copiedCleanText, "Clean verified text without unverified citation.");
+
+    // 4. Citation toggle functionality
+    assert.ok(sidebar.hasMessageCitations(bubble._rawText, bubble._metadata));
+    sidebar.ensureCitationToggleBtn(wrapper);
+    const toggleBtn = wrapper.querySelector(".citation-toggle-btn");
+    assert.ok(toggleBtn, "Citation toggle button should be present");
+
+    // Toggle off: citations hidden
+    toggleBtn.dispatchEvent("click");
+    assert.ok(wrapper.classList.contains("citations-hidden"));
+    assert.ok(toggleBtn.classList.contains("muted"));
+
+    // Toggle on: citations restored
+    toggleBtn.dispatchEvent("click");
+    assert.strictEqual(wrapper.classList.contains("citations-hidden"), false);
+    assert.strictEqual(toggleBtn.classList.contains("muted"), false);
+
+    wrapper.remove();
   });
 }
 
