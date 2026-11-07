@@ -458,14 +458,18 @@ def format_session_for_ui(
         citations = ev_meta.get("citations")
         references = ev_meta.get("references")
         candidates = ev_meta.get("candidates")
+        citation_verification = ev_meta.get("citation_verification")
 
-        if not citations and getattr(session, "state", None):
+        if (not citations or not citation_verification) and getattr(session, "state", None):
             audit_history = session.state.get("retrieved_evidence") or []
             inv_id = getattr(final_evt or asst_evts[-1], "invocation_id", None)
             for entry in reversed(audit_history):
                 if entry.get("invocation_id") == inv_id or not inv_id:
-                    citations = entry.get("citations")
-                    references = entry.get("references")
+                    if not citations:
+                        citations = entry.get("citations")
+                        references = entry.get("references")
+                    if not citation_verification:
+                        citation_verification = entry.get("citation_verification_telemetry")
                     break
 
         if not candidates and getattr(session, "state", None):
@@ -493,6 +497,7 @@ def format_session_for_ui(
             "citations": citations,
             "references": references,
             "candidates": candidates,
+            "citation_verification": citation_verification,
         })
 
     title = session.state.get("session_title", "New Chat") if getattr(session, "state", None) else "New Chat"

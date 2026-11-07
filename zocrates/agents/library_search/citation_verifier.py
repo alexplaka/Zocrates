@@ -14,6 +14,7 @@ import logging
 import math
 import os
 import re
+import statistics
 import time
 import urllib.parse
 from typing import Any
@@ -982,10 +983,15 @@ async def verify_citations_support(
             assessment_entry = dict(input_assessments[i])
             assessment_entry.update({
                 "support_probability": prob,
+                "threshold": verification_threshold,
                 "verdict": verdict,
                 "latency_ms": item_latencies.get((c_idx, occ_idx)) if execution_mode == "thread_pool" else None,
             })
             assessments.append(assessment_entry)
+
+        probs = [float(a["support_probability"]) for a in assessments if a.get("support_probability") is not None]
+        mean_support = round(statistics.fmean(probs), 3) if probs else None
+        std_support = round(statistics.stdev(probs), 3) if len(probs) >= 2 else (0.0 if len(probs) == 1 else None)
 
         wall_latency_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
         summary = {
@@ -993,6 +999,8 @@ async def verify_citations_support(
             "kept": kept_count,
             "demoted": demoted_count,
             "fail_open": fail_open_count,
+            "mean_support": mean_support,
+            "std_support": std_support,
             "latency_ms": wall_latency_ms,
             "budget_exceeded": budget_exceeded,
         }
@@ -1017,6 +1025,8 @@ async def verify_citations_support(
             _safe_set(span, "citation_verification.kept", kept_count)
             _safe_set(span, "citation_verification.demoted", demoted_count)
             _safe_set(span, "citation_verification.fail_open", fail_open_count)
+            _safe_set(span, "citation_verification.mean_support", mean_support)
+            _safe_set(span, "citation_verification.std_support", std_support)
             _safe_set(span, "citation_verification.latency_ms", wall_latency_ms)
         except Exception as span_err:
             logger.debug("Failed setting span output attributes: %s", span_err)

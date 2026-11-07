@@ -2304,6 +2304,15 @@ class TestStreamRunnerEvents:
                             "tier": 1,
                         }
                     ],
+                    "citation_verification_telemetry": {
+                        "model": "inception/mercury-decide:free",
+                        "summary": {
+                            "batch_size": 1,
+                            "kept": 1,
+                            "demoted": 0,
+                            "mean_support": 0.85,
+                        },
+                    },
                 }
             ]
         }
@@ -2316,6 +2325,8 @@ class TestStreamRunnerEvents:
         assert msg["citations"][0]["index"] == 1
         assert msg["references"] is not None
         assert len(msg["references"]) == 1
+        assert msg["citation_verification"] is not None
+        assert msg["citation_verification"]["model"] == "inception/mercury-decide:free"
 
 
 class TestItemsDeleteEndpoint:

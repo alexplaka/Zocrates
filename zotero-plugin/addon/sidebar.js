@@ -6764,6 +6764,286 @@ function openMessageInfoModal(meta) {
       }
     }
 
+    const verif = currentMeta.citation_verification && typeof currentMeta.citation_verification === "object" ? currentMeta.citation_verification : null;
+    const rawCitations = Array.isArray(currentMeta.citations) ? currentMeta.citations : [];
+    const hasVerificationTelemetry = Boolean(verif && (verif.summary || (Array.isArray(verif.assessments) && verif.assessments.length > 0)));
+    const hasNumericCitationProbs = rawCitations.some(c =>
+      typeof c?.support_probability === "number" ||
+      (Array.isArray(c?.occurrences) && c.occurrences.some(o => typeof o?.support_probability === "number"))
+    );
+
+    if (hasVerificationTelemetry || hasNumericCitationProbs) {
+      const citations = rawCitations;
+      const summary = verif?.summary || {};
+      const assessments = Array.isArray(verif?.assessments) ? verif.assessments : [];
+
+      const provider = verif?.provider || "openrouter";
+      const model = verif?.model || (provider === "local_laya" ? "laya" : null) || currentMeta.model || "Decision Model";
+      const latency = typeof summary.latency_ms === "number" ? summary.latency_ms : (typeof verif?.latency_ms === "number" ? verif.latency_ms : null);
+      const threshold = typeof verif?.threshold === "number"
+        ? verif.threshold
+        : (typeof summary.threshold === "number" ? summary.threshold : 0.60);
+
+      let probs = assessments
+        .map(a => a.support_probability)
+        .filter(p => typeof p === "number" && !isNaN(p));
+      if (probs.length === 0 && citations.length > 0) {
+        probs = citations
+          .flatMap(c => (c.occurrences && c.occurrences.length > 0 ? c.occurrences : [{ support_probability: c.support_probability }]))
+          .map(o => o?.support_probability)
+          .filter(p => typeof p === "number" && !isNaN(p));
+      }
+
+      const total = summary.batch_size !== undefined
+        ? summary.batch_size
+        : (assessments.length > 0 ? assessments.length : (probs.length > 0 ? probs.length : citations.length));
+
+      let kept = summary.kept;
+      if (kept === undefined) {
+        if (assessments.length > 0) {
+          kept = assessments.filter(a => a.verdict === "KEPT" || (typeof a.support_probability === "number" && a.support_probability >= threshold)).length;
+        } else if (citations.length > 0) {
+          const occs = citations.flatMap(c => c.occurrences || (c.support_probability !== undefined ? [{ support_probability: c.support_probability, survived: c.support_probability >= threshold }] : []));
+          kept = occs.filter(o => o.survived || (typeof o.support_probability === "number" && o.support_probability >= threshold)).length;
+        } else {
+          kept = 0;
+        }
+      }
+
+      let demoted = summary.demoted;
+      if (demoted === undefined) {
+        if (assessments.length > 0) {
+          demoted = assessments.filter(a => a.verdict === "DEMOTED" || (typeof a.support_probability === "number" && a.support_probability < threshold)).length;
+        } else if (citations.length > 0) {
+          const occs = citations.flatMap(c => c.occurrences || (c.support_probability !== undefined ? [{ support_probability: c.support_probability, survived: c.support_probability >= threshold }] : []));
+          demoted = occs.filter(o => o.survived === false || (typeof o.support_probability === "number" && o.support_probability < threshold)).length;
+        } else {
+          demoted = 0;
+        }
+      }
+
+      let failOpen = summary.fail_open;
+      if (failOpen === undefined) {
+        if (assessments.length > 0) {
+          failOpen = assessments.filter(a => a.verdict === "FAIL_OPEN" || a.support_probability === null || a.support_probability === undefined).length;
+        } else {
+          failOpen = 0;
+        }
+      }
+
+      let meanVal = summary.mean_support !== undefined && summary.mean_support !== null
+        ? summary.mean_support
+        : (probs.length > 0 ? probs.reduce((a, b) => a + b, 0) / probs.length : null);
+
+      let stdVal = summary.std_support !== undefined && summary.std_support !== null
+        ? summary.std_support
+        : (probs.length >= 2
+            ? Math.sqrt(probs.reduce((sum, p) => sum + Math.pow(p - meanVal, 2), 0) / (probs.length - 1))
+            : (probs.length === 1 ? 0 : null));
+
+      let meanPText = "Mean p: N/A";
+      const numProbs = probs.length;
+      if (numProbs > 0 && meanVal !== null && meanVal !== undefined) {
+        const mClamped = Math.max(0, Math.min(1, Number(meanVal))).toFixed(3);
+        if (numProbs === 1) {
+          meanPText = `Mean p: ${mClamped} ± N/A (std)`;
+        } else if (numProbs >= 2 && stdVal !== null && stdVal !== undefined) {
+          const sClamped = Math.max(0, Math.min(1, Number(stdVal))).toFixed(3);
+          meanPText = `Mean p: ${mClamped} ± ${sClamped} (std)`;
+        } else {
+          meanPText = `Mean p: ${mClamped} ± N/A (std)`;
+        }
+      }
+
+      const row = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+      row.className = "info-meta-row citation-support-row";
+
+      const titleRow = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+      titleRow.className = "citation-support-title-row";
+
+      const labelEl = document.createElementNS("http://www.w3.org/1999/xhtml", "span");
+      labelEl.className = "info-meta-label";
+      labelEl.textContent = "Citation Support";
+
+      const pill = document.createElementNS("http://www.w3.org/1999/xhtml", "span");
+      pill.className = "info-meta-pill citation-support-pill";
+      const latencyStr = typeof latency === "number" ? `${Math.round(latency)}ms` : "";
+      pill.textContent = latencyStr ? `${model} · ${latencyStr}` : model;
+      pill.title = `${model}${latencyStr ? ` (${latencyStr})` : ""}`;
+
+      titleRow.appendChild(labelEl);
+      titleRow.appendChild(pill);
+      row.appendChild(titleRow);
+
+      const valEl = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+      valEl.className = "info-meta-value citation-support-value";
+
+      const statsBox = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+      statsBox.className = "citation-support-stats";
+
+      const meanEl = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+      meanEl.className = "citation-support-mean";
+      meanEl.textContent = meanPText;
+      statsBox.appendChild(meanEl);
+
+      const countsBox = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+      countsBox.className = "citation-support-counts";
+
+      const totalLine = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+      totalLine.textContent = `${total} claims evaluated:`;
+      countsBox.appendChild(totalLine);
+
+      const threshFmt = Number(threshold).toFixed(3);
+
+      const verifiedLine = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+      verifiedLine.className = "citation-support-bullet verified";
+      verifiedLine.textContent = `• ${kept} verified (p ≥ ${threshFmt})`;
+      countsBox.appendChild(verifiedLine);
+
+      const rejectedLine = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+      rejectedLine.className = "citation-support-bullet rejected";
+      rejectedLine.textContent = `• ${demoted} rejected (p < ${threshFmt})`;
+      countsBox.appendChild(rejectedLine);
+
+      if (failOpen > 0) {
+        const failOpenLine = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+        failOpenLine.className = "citation-support-bullet fail-open";
+        failOpenLine.textContent = `• ${failOpen} unverified (fail-open)`;
+        countsBox.appendChild(failOpenLine);
+      }
+
+      statsBox.appendChild(countsBox);
+      valEl.appendChild(statsBox);
+
+      if (demoted > 0) {
+        let rejectedItems = assessments.filter(a =>
+          a.verdict === "DEMOTED" ||
+          (typeof a.support_probability === "number" && a.support_probability < (a.threshold !== undefined ? a.threshold : threshold))
+        );
+
+        if (rejectedItems.length === 0 && citations.length > 0) {
+          citations.forEach(c => {
+            const occs = c.occurrences || (c.support_probability !== undefined ? [{ support_probability: c.support_probability, survived: c.support_probability >= threshold }] : []);
+            occs.forEach(o => {
+              if (o.survived === false || (typeof o.support_probability === "number" && o.support_probability < threshold)) {
+                rejectedItems.push({
+                  claim: o.claim || c.claim || "Citation claim",
+                  source_text: c.quote || c.text || "",
+                  title: c.title || "",
+                  authors: c.authors || [],
+                  year: c.year || "",
+                  section: c.section || "",
+                  support_probability: o.support_probability,
+                  threshold: threshold,
+                  verdict: "DEMOTED"
+                });
+              }
+            });
+          });
+        }
+
+        const toggleBtn = document.createElementNS("http://www.w3.org/1999/xhtml", "button");
+        toggleBtn.type = "button";
+        toggleBtn.className = "citation-support-toggle-btn";
+        toggleBtn.textContent = "Show details ▾";
+
+        const drawer = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+        drawer.className = "citation-rejected-drawer";
+        drawer.style.display = "none";
+
+        rejectedItems.forEach(item => {
+          const card = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+          card.className = "citation-rejected-card";
+
+          // 1. Claim FIRST (user requirement)
+          const claimRow = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+          claimRow.className = "citation-rejected-claim-row";
+
+          const claimLabel = document.createElementNS("http://www.w3.org/1999/xhtml", "span");
+          claimLabel.className = "citation-rejected-claim-label";
+          claimLabel.textContent = "Claim:";
+
+          const claimText = document.createElementNS("http://www.w3.org/1999/xhtml", "span");
+          claimText.className = "citation-rejected-claim-text";
+          claimText.textContent = (item.claim || "No claim recorded").trim();
+
+          claimRow.appendChild(claimLabel);
+          claimRow.appendChild(claimText);
+          card.appendChild(claimRow);
+
+          // 2. Paper & Section: Author (Year) · § Section
+          let authorTag = "";
+          if (Array.isArray(item.authors) && item.authors.length > 0) {
+            const cleanAuthors = item.authors.map(a => String(a).split(",")[0].trim()).filter(Boolean);
+            if (cleanAuthors.length === 1) authorTag = cleanAuthors[0];
+            else if (cleanAuthors.length === 2) authorTag = cleanAuthors[0] + " & " + cleanAuthors[1];
+            else if (cleanAuthors.length > 2) authorTag = cleanAuthors[0] + " et al.";
+          } else if (typeof item.authors === "string" && item.authors.trim()) {
+            authorTag = item.authors.trim();
+          }
+
+          const paperLabel = item.title || "";
+          if (!authorTag) {
+            authorTag = paperLabel ? (paperLabel.length > 28 ? paperLabel.slice(0, 26) + "…" : paperLabel) : "Unknown Source";
+          }
+          const yearTag = item.year ? ` (${item.year})` : "";
+          const sectionTag = (item.section || item.heading || "").trim();
+
+          const paperRow = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+          paperRow.className = "citation-rejected-paper-row";
+
+          const paperInfo = document.createElementNS("http://www.w3.org/1999/xhtml", "span");
+          paperInfo.className = "citation-rejected-paper-info";
+          paperInfo.textContent = `${authorTag}${yearTag}${sectionTag ? ` · § ${sectionTag}` : ""}`;
+          if (paperLabel) paperInfo.title = paperLabel;
+
+          paperRow.appendChild(paperInfo);
+          card.appendChild(paperRow);
+
+          // 3. Evaluated Passage (subtle quote container)
+          const passageText = (item.source_text || item.quote || item.text || "").trim();
+          if (passageText) {
+            const passageContainer = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+            passageContainer.className = "citation-rejected-passage";
+            passageContainer.textContent = `"${passageText}"`;
+            card.appendChild(passageContainer);
+          }
+
+          // 4. Score: p = 0.xxx < 0.yyy (threshold)
+          const pVal = typeof item.support_probability === "number"
+            ? Math.max(0, Math.min(1, item.support_probability)).toFixed(3)
+            : "N/A";
+          const tVal = typeof item.threshold === "number"
+            ? Number(item.threshold).toFixed(3)
+            : Number(threshold).toFixed(3);
+
+          const scoreRow = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+          scoreRow.className = "citation-rejected-score-row";
+
+          const scoreBadge = document.createElementNS("http://www.w3.org/1999/xhtml", "span");
+          scoreBadge.className = "citation-rejected-score-badge";
+          scoreBadge.textContent = `p = ${pVal} < ${tVal} (threshold)`;
+
+          scoreRow.appendChild(scoreBadge);
+          card.appendChild(scoreRow);
+
+          drawer.appendChild(card);
+        });
+
+        toggleBtn.addEventListener("click", () => {
+          const isHidden = drawer.style.display === "none";
+          drawer.style.display = isHidden ? "flex" : "none";
+          toggleBtn.textContent = isHidden ? "Hide details ▴" : "Show details ▾";
+        });
+
+        valEl.appendChild(toggleBtn);
+        valEl.appendChild(drawer);
+      }
+
+      row.appendChild(valEl);
+      table.appendChild(row);
+    }
+
     if (currentMeta.active_context_items && Array.isArray(currentMeta.active_context_items) && currentMeta.active_context_items.length > 0) {
       const list = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
       list.className = "info-meta-chips-list";
@@ -6892,6 +7172,8 @@ function openMessageInfoModal(meta) {
           if (matchingMsg.intermediate_steps) meta.intermediate_steps = matchingMsg.intermediate_steps;
           if (matchingMsg.id) meta.event_id = matchingMsg.id;
           if (matchingMsg.invocation_id) meta.invocation_id = matchingMsg.invocation_id;
+          if (matchingMsg.citation_verification) meta.citation_verification = matchingMsg.citation_verification;
+          if (matchingMsg.citations) meta.citations = matchingMsg.citations;
           renderRows(meta);
         }
       })
@@ -8681,7 +8963,8 @@ function appendMessageDOM(role, text, isMarkdown = true, timestamp = null, autho
     text: text,
     citations: metadata?.citations || null,
     references: metadata?.references || null,
-    candidates: metadata?.candidates || null
+    candidates: metadata?.candidates || null,
+    citation_verification: metadata?.citation_verification || null
   };
   infoBtn._metadata = messageMeta;
 
@@ -9260,7 +9543,8 @@ function finalizeChatStream(streamCtx, isAborted = false) {
     const finalMeta = {
       citations: streamCtx.streamCitations,
       references: streamCtx.streamReferences,
-      candidates: streamCtx.streamCandidates
+      candidates: streamCtx.streamCandidates,
+      citation_verification: streamCtx.streamCitationVerification
     };
     if (streamCtx.streamCitations) {
       streamCtx.assistantBubble._citations = streamCtx.streamCitations;
@@ -9307,6 +9591,7 @@ function finalizeChatStream(streamCtx, isAborted = false) {
           infoBtn._metadata.citations = streamCtx.streamCitations;
           infoBtn._metadata.references = streamCtx.streamReferences;
           infoBtn._metadata.candidates = streamCtx.streamCandidates;
+          infoBtn._metadata.citation_verification = streamCtx.streamCitationVerification;
         }
       }
     }
@@ -9343,6 +9628,7 @@ function finalizeChatStream(streamCtx, isAborted = false) {
       existingMsg.citations = streamCtx.streamCitations;
       existingMsg.references = streamCtx.streamReferences;
       existingMsg.candidates = streamCtx.streamCandidates;
+      existingMsg.citation_verification = streamCtx.streamCitationVerification;
     } else {
       streamCtx.session.messages.push({
         role: "assistant",
@@ -9363,7 +9649,8 @@ function finalizeChatStream(streamCtx, isAborted = false) {
         intermediate_steps: streamCtx.liveSteps,
         citations: streamCtx.streamCitations,
         references: streamCtx.streamReferences,
-        candidates: streamCtx.streamCandidates
+        candidates: streamCtx.streamCandidates,
+        citation_verification: streamCtx.streamCitationVerification
       });
     }
   }
@@ -9563,6 +9850,8 @@ async function runChatStreamReader(res, streamCtx) {
           if (data.metadata?.references) streamCtx.streamReferences = data.metadata.references;
           if (data.metadata?.candidates) streamCtx.streamCandidates = data.metadata.candidates;
           if (data.candidates) streamCtx.streamCandidates = data.candidates;
+          if (data.citation_verification) streamCtx.streamCitationVerification = data.citation_verification;
+          if (data.metadata?.citation_verification) streamCtx.streamCitationVerification = data.metadata.citation_verification;
 
           if (data.parts && data.parts.length > 0) {
             for (let partIdx = 0; partIdx < data.parts.length; partIdx++) {
@@ -9783,6 +10072,8 @@ async function runChatStreamReader(res, streamCtx) {
           if (data.metadata?.references) streamCtx.streamReferences = data.metadata.references;
           if (data.metadata?.candidates) streamCtx.streamCandidates = data.metadata.candidates;
           if (data.candidates) streamCtx.streamCandidates = data.candidates;
+          if (data.citation_verification) streamCtx.streamCitationVerification = data.citation_verification;
+          if (data.metadata?.citation_verification) streamCtx.streamCitationVerification = data.metadata.citation_verification;
           if (data.error) {
             if (streamCtx.stepsBubble && !streamCtx.assistantBubble) {
               streamCtx.stepsBubble.remove();
@@ -10017,7 +10308,8 @@ async function streamDialogueResponse(prompt) {
     isInterrupted: false,
     streamCitations: null,
     streamReferences: null,
-    streamCandidates: null
+    streamCandidates: null,
+    streamCitationVerification: null
   };
 
   try {
@@ -12609,6 +12901,7 @@ async function loadActiveSessionMessages() {
         citations: msg.citations,
         references: msg.references,
         candidates: msg.candidates || msg.metadata?.candidates || null,
+        citation_verification: msg.citation_verification || msg.metadata?.citation_verification || null,
         isError: Boolean(msg.isError || msg.metadata?.isError),
         errorMessage: msg.errorMessage || msg.metadata?.errorMessage || null,
         invocationId: msg.invocationId || msg.invocation_id || msg.metadata?.invocationId || msg.metadata?.invocation_id || null

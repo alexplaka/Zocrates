@@ -730,6 +730,197 @@ body[data-theme="sepia"] .modal-input {
   white-space: nowrap;
 }
 
+/* Citation Support Row & Rejected Claims */
+.info-meta-row.citation-support-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.citation-support-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.citation-support-pill {
+  font-family: var(--font-family-mono);
+  font-size: calc(10.5px * var(--chat-font-scale, 1));
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--bg-hover, rgba(255, 255, 255, 0.08));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  color: var(--text-main);
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.citation-support-value {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left !important;
+  width: 100%;
+}
+
+.citation-support-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: calc(11.5px * var(--chat-font-scale, 1));
+  line-height: 1.45;
+}
+
+.citation-support-mean {
+  font-weight: 600;
+  font-family: var(--font-family-mono);
+  color: var(--text-main);
+  font-size: calc(12px * var(--chat-font-scale, 1));
+}
+
+.citation-support-counts {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--text-muted);
+  font-size: calc(11px * var(--chat-font-scale, 1));
+}
+
+.citation-support-bullet {
+  padding-left: 6px;
+}
+
+.citation-support-bullet.verified {
+  color: #10b981;
+}
+
+.citation-support-bullet.rejected {
+  color: #f87171;
+}
+
+.citation-support-toggle-btn {
+  align-self: flex-start;
+  background: var(--bg-hover, rgba(255, 255, 255, 0.08));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: calc(11px * var(--chat-font-scale, 1));
+  font-family: var(--font-family-sans);
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  margin-top: 2px;
+}
+
+.citation-support-toggle-btn:hover {
+  background: var(--bg-card-hover, rgba(255, 255, 255, 0.12));
+  color: var(--text-main);
+  border-color: var(--primary, #3b82f6);
+}
+
+.citation-rejected-drawer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 4px 6px 4px 2px;
+  margin-top: 4px;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.citation-rejected-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--bg-card, #1e293b);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-left: 3px solid #ef4444;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: calc(11.5px * var(--chat-font-scale, 1));
+  box-sizing: border-box;
+}
+
+.citation-rejected-claim-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.4;
+}
+
+.citation-rejected-claim-label {
+  font-weight: 700;
+  font-size: calc(10px * var(--chat-font-scale, 1));
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: #f87171;
+}
+
+.citation-rejected-claim-text {
+  color: var(--text-main);
+  font-weight: 500;
+  word-break: break-word;
+}
+
+.citation-rejected-paper-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: calc(11px * var(--chat-font-scale, 1));
+  color: var(--text-muted);
+}
+
+.citation-rejected-paper-info {
+  font-weight: 600;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.citation-rejected-passage {
+  background: rgba(0, 0, 0, 0.15);
+  border-left: 2px solid var(--border, rgba(255, 255, 255, 0.15));
+  border-radius: 0 4px 4px 0;
+  padding: 5px 8px;
+  font-size: calc(11px * var(--chat-font-scale, 1));
+  line-height: 1.4;
+  color: var(--text-muted);
+  font-style: italic;
+  max-height: 80px;
+  overflow-y: auto;
+  word-break: break-word;
+  scrollbar-width: thin;
+}
+
+body[data-theme="zotero-light"] .citation-rejected-passage,
+body[data-theme="sepia"] .citation-rejected-passage {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.citation-rejected-score-row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.citation-rejected-score-badge {
+  font-family: var(--font-family-mono);
+  font-size: calc(10.5px * var(--chat-font-scale, 1));
+  font-weight: 600;
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
 /* ---- Intermediate Steps Bubble ---- */
 .intermediate-steps-bubble {
   margin: 4px 0 8px 0;

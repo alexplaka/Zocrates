@@ -1,10 +1,13 @@
 """Unit tests for in-text citation and two-tier sources resolution."""
 
+import statistics
+from unittest.mock import patch
 import pytest
 from zocrates.agents.library_search.citation_resolver import (
     build_coordinator_view,
     resolve_citations_and_references,
 )
+from zocrates.agents.library_search.citation_verifier import verify_citations_support
 
 
 @pytest.fixture
@@ -709,4 +712,90 @@ def test_resolve_citations_legacy_flat_dict_normalization(sample_ranked_chunks):
     assert "Second statement [1]." in enriched
     assert "Third statement." in enriched
     assert "[2]" not in enriched
+
+
+@pytest.mark.asyncio
+async def test_verify_citations_support_stats_computation(sample_ranked_chunks):
+    """Verify mean_support and std_support calculation across multiple claims."""
+    text = "Twin studies show mutation rates [1]. Transformers use attention [2]."
+    telemetry = {}
+
+    call_count = 0
+
+    def mock_check_support(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        return 0.90 if call_count == 1 else 0.70
+
+    with patch("zocrates.agents.library_search.citation_verifier._check_support_openrouter", side_effect=mock_check_support):
+        res = await verify_citations_support(
+            text=text,
+            ranked_chunks=sample_ranked_chunks,
+            config={"citation_verification_provider": "openrouter", "citation_verification_threshold": 0.60},
+            telemetry_out=telemetry,
+        )
+
+    assert telemetry["summary"]["batch_size"] == 2
+    assert telemetry["summary"]["kept"] == 2
+    assert telemetry["summary"]["demoted"] == 0
+    assert telemetry["summary"]["mean_support"] == 0.800
+    expected_std = round(statistics.stdev([0.90, 0.70]), 3)
+    assert telemetry["summary"]["std_support"] == expected_std
+
+    # Ensure every assessment contains all required fields
+    assessments = telemetry["assessments"]
+    assert len(assessments) == 2
+    for a in assessments:
+        assert "claim" in a
+        assert "source_text" in a
+        assert "title" in a
+        assert "authors" in a
+        assert "year" in a
+        assert "section" in a
+        assert "support_probability" in a
+        assert "threshold" in a
+        assert a["threshold"] == 0.60
+        assert "verdict" in a
+        assert a["verdict"] == "KEPT"
+
+
+@pytest.mark.asyncio
+async def test_verify_citations_support_stats_single_and_fail_open(sample_ranked_chunks):
+    """Verify std_support is 0.0 when N=1, and None when all fail open."""
+    text = "Twin studies show mutation rates [1]."
+    telemetry = {}
+    config = {
+        "citation_verification_provider": "openrouter",
+        "citation_verification_model": "inception/mercury-decide:free",
+        "citation_verification_threshold": 0.60,
+    }
+
+    with patch("zocrates.agents.library_search.citation_verifier._check_support_openrouter", return_value=0.85):
+        await verify_citations_support(
+            text=text,
+            ranked_chunks=sample_ranked_chunks,
+            config=config,
+            telemetry_out=telemetry,
+        )
+
+    assert telemetry["summary"]["batch_size"] == 1
+    assert telemetry["summary"]["mean_support"] == 0.850
+    assert telemetry["summary"]["std_support"] == 0.0
+
+    # Fail open (None probability)
+    telemetry_fail = {}
+    with patch("zocrates.agents.library_search.citation_verifier._check_support_openrouter", return_value=None):
+        await verify_citations_support(
+            text=text,
+            ranked_chunks=sample_ranked_chunks,
+            config=config,
+            telemetry_out=telemetry_fail,
+        )
+
+    assert telemetry_fail["summary"]["fail_open"] == 1
+    assert telemetry_fail["summary"]["mean_support"] is None
+    assert telemetry_fail["summary"]["std_support"] is None
+    assert telemetry_fail["assessments"][0]["verdict"] == "FAIL_OPEN"
+    assert telemetry_fail["assessments"][0]["threshold"] == 0.60
+
 

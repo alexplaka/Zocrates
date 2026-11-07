@@ -1061,6 +1061,269 @@ async function runTests() {
       if (leftover) leftover.remove();
     }
   });
+
+  // 12. openMessageInfoModal: Citation Support stats and counts
+  test("openMessageInfoModal: renders Citation Support row with mean ± std and evaluated counts", () => {
+    const meta = {
+      role: "assistant",
+      author: "Zocrates",
+      text: "Synthesis text [1, 2].",
+      citation_verification: {
+        provider: "openrouter",
+        model: "inception/mercury-decide",
+        threshold: 0.60,
+        latency_ms: 245.5,
+        summary: {
+          batch_size: 2,
+          kept: 2,
+          demoted: 0,
+          fail_open: 0,
+          mean_support: 0.852,
+          std_support: 0.041,
+          latency_ms: 245.5,
+        },
+        assessments: [
+          {
+            claim: "Claim A assertion.",
+            source_text: "Passage A from paper.",
+            title: "Paper Title A",
+            authors: ["Author A"],
+            year: 2021,
+            section: "Methods",
+            support_probability: 0.881,
+            threshold: 0.60,
+            verdict: "KEPT",
+          },
+          {
+            claim: "Claim B assertion.",
+            source_text: "Passage B from paper.",
+            title: "Paper Title B",
+            authors: ["Author B1", "Author B2"],
+            year: 2022,
+            section: "Results",
+            support_probability: 0.823,
+            threshold: 0.60,
+            verdict: "KEPT",
+          },
+        ],
+      },
+    };
+
+    try {
+      sidebar.openMessageInfoModal(meta);
+      const overlay = document.querySelector(".info-modal-overlay");
+      assert.ok(overlay, "Modal overlay must exist in DOM");
+
+      const rows = Array.from(overlay.querySelectorAll(".info-meta-row"));
+      const citRow = rows.find(r => r.querySelector(".info-meta-label")?.textContent === "Citation Support");
+      assert.ok(citRow, "Citation Support row must be rendered");
+
+      const pill = citRow.querySelector(".citation-support-pill");
+      assert.ok(pill, "Model/latency pill must exist");
+      assert.strictEqual(pill.textContent, "inception/mercury-decide · 246ms");
+
+      const meanEl = citRow.querySelector(".citation-support-mean");
+      assert.ok(meanEl, "Mean support element must exist");
+      assert.strictEqual(meanEl.textContent, "Mean p: 0.852 ± 0.041 (std)");
+
+      const countsBox = citRow.querySelector(".citation-support-counts");
+      assert.ok(countsBox, "Counts box must exist");
+      assert.ok(countsBox.textContent.includes("2 claims evaluated:"));
+      assert.ok(countsBox.textContent.includes("• 2 verified (p ≥ 0.600)"));
+      assert.ok(countsBox.textContent.includes("• 0 rejected (p < 0.600)"));
+
+      // demoted === 0 -> no toggle button or drawer
+      const toggleBtn = citRow.querySelector(".citation-support-toggle-btn");
+      assert.strictEqual(toggleBtn, null, "Toggle button must not appear when demoted === 0");
+    } finally {
+      const leftover = document.querySelector(".info-modal-overlay");
+      if (leftover) leftover.remove();
+    }
+  });
+
+  // 13. openMessageInfoModal: Rejected cases drawer with toggle and claim first
+  test("openMessageInfoModal: renders rejected cases drawer with toggle button and claim first", () => {
+    const meta = {
+      role: "assistant",
+      author: "Zocrates",
+      text: "Synthesis text citing two items [1, 2].",
+      citation_verification: {
+        provider: "openrouter",
+        model: "inception/mercury-decide",
+        threshold: 0.60,
+        latency_ms: 180,
+        summary: {
+          batch_size: 2,
+          kept: 1,
+          demoted: 1,
+          mean_support: 0.620,
+          std_support: 0.325,
+          latency_ms: 180,
+        },
+        assessments: [
+          {
+            claim: "Mutation rates rise significantly across generations.",
+            source_text: "We identified embryonic mutations per twin pair without cross-generational rise.",
+            title: "Somatic mutation rates in monozygotic twins",
+            authors: ["Jonsson, Hakon", "Stefansson, Kari"],
+            year: 2021,
+            section: "Results",
+            support_probability: 0.390,
+            threshold: 0.60,
+            verdict: "DEMOTED",
+          },
+          {
+            claim: "Self-attention computes representations across sequences.",
+            source_text: "Attention maps a query and key-value pairs to an output.",
+            title: "Attention Is All You Need",
+            authors: ["Vaswani", "Shazeer", "Parmar"],
+            year: 2017,
+            section: "Attention",
+            support_probability: 0.850,
+            threshold: 0.60,
+            verdict: "KEPT",
+          },
+        ],
+      },
+    };
+
+    try {
+      sidebar.openMessageInfoModal(meta);
+      const overlay = document.querySelector(".info-modal-overlay");
+      assert.ok(overlay, "Modal overlay must exist");
+
+      const citRow = overlay.querySelector(".citation-support-row");
+      assert.ok(citRow, "Citation Support row must exist");
+
+      const toggleBtn = citRow.querySelector(".citation-support-toggle-btn");
+      assert.ok(toggleBtn, "Toggle button must exist when demoted > 0");
+      assert.strictEqual(toggleBtn.textContent, "Show details ▾");
+
+      const drawer = citRow.querySelector(".citation-rejected-drawer");
+      assert.ok(drawer, "Drawer must exist");
+      assert.strictEqual(drawer.style.display, "none", "Drawer must start collapsed");
+
+      // Expand drawer
+      toggleBtn.dispatchEvent("click");
+      assert.strictEqual(drawer.style.display, "flex", "Drawer must be visible on click");
+      assert.strictEqual(toggleBtn.textContent, "Hide details ▴", "Toggle button label must update");
+
+      // Collapse drawer
+      toggleBtn.dispatchEvent("click");
+      assert.strictEqual(drawer.style.display, "none", "Drawer must collapse on second click");
+      assert.strictEqual(toggleBtn.textContent, "Show details ▾");
+
+      // Re-expand to inspect card contents
+      toggleBtn.dispatchEvent("click");
+      const cards = drawer.querySelectorAll(".citation-rejected-card");
+      assert.strictEqual(cards.length, 1, "Must render exactly 1 rejected card");
+
+      const card = cards[0];
+
+      // 1. Claim MUST BE FIRST
+      const firstChild = card.children[0];
+      assert.ok(firstChild.classList.contains("citation-rejected-claim-row"), "First element of card must be Claim row");
+      assert.strictEqual(firstChild.querySelector(".citation-rejected-claim-label")?.textContent, "Claim:");
+      assert.strictEqual(
+        firstChild.querySelector(".citation-rejected-claim-text")?.textContent,
+        "Mutation rates rise significantly across generations."
+      );
+
+      // 2. Paper & Section
+      const secondChild = card.children[1];
+      assert.ok(secondChild.classList.contains("citation-rejected-paper-row"), "Second element must be Paper & Section row");
+      const paperInfo = secondChild.querySelector(".citation-rejected-paper-info");
+      assert.ok(paperInfo.textContent.includes("Jonsson & Stefansson"));
+      assert.ok(paperInfo.textContent.includes("(2021)"));
+      assert.ok(paperInfo.textContent.includes("§ Results"));
+      assert.strictEqual(paperInfo.title, "Somatic mutation rates in monozygotic twins");
+
+      // 3. Evaluated Passage
+      const thirdChild = card.children[2];
+      assert.ok(thirdChild.classList.contains("citation-rejected-passage"), "Third element must be Evaluated Passage container");
+      assert.ok(thirdChild.textContent.includes("without cross-generational rise"));
+
+      // 4. Score
+      const fourthChild = card.children[3];
+      assert.ok(fourthChild.classList.contains("citation-rejected-score-row"), "Fourth element must be Score row");
+      const badge = fourthChild.querySelector(".citation-rejected-score-badge");
+      assert.strictEqual(badge.textContent, "p = 0.390 < 0.600 (threshold)");
+    } finally {
+      const leftover = document.querySelector(".info-modal-overlay");
+      if (leftover) leftover.remove();
+    }
+  });
+
+  // 14. openMessageInfoModal: Display formatting when N=1 and N=0
+  test("openMessageInfoModal: handles single probability (N=1) and zero probabilities (N=0)", () => {
+    // N = 1
+    const metaSingle = {
+      role: "assistant",
+      author: "Zocrates",
+      citation_verification: {
+        summary: { batch_size: 1, kept: 1, demoted: 0, mean_support: 0.850, std_support: 0.0 },
+        assessments: [{ support_probability: 0.850, verdict: "KEPT" }],
+      },
+    };
+
+    try {
+      sidebar.openMessageInfoModal(metaSingle);
+      const overlay1 = document.querySelector(".info-modal-overlay");
+      const meanEl1 = overlay1.querySelector(".citation-support-mean");
+      assert.strictEqual(meanEl1.textContent, "Mean p: 0.850 ± N/A (std)");
+    } finally {
+      document.querySelectorAll(".info-modal-overlay").forEach(el => el.remove());
+    }
+
+    // N = 0 (no non-null probabilities)
+    const metaZero = {
+      role: "assistant",
+      author: "Zocrates",
+      citation_verification: {
+        summary: { batch_size: 1, kept: 0, demoted: 0, fail_open: 1, mean_support: null, std_support: null },
+        assessments: [{ support_probability: null, verdict: "FAIL_OPEN" }],
+      },
+    };
+
+    try {
+      sidebar.openMessageInfoModal(metaZero);
+      const overlay0 = document.querySelector(".info-modal-overlay");
+      const meanEl0 = overlay0.querySelector(".citation-support-mean");
+      assert.strictEqual(meanEl0.textContent, "Mean p: N/A");
+
+      const countsBox0 = overlay0.querySelector(".citation-support-counts");
+      assert.ok(countsBox0.textContent.includes("• 1 unverified (fail-open)"));
+    } finally {
+      document.querySelectorAll(".info-modal-overlay").forEach(el => el.remove());
+    }
+  });
+
+  // 15. openMessageInfoModal: Does not render Citation Support row when verification was not run
+  test("openMessageInfoModal: does NOT render Citation Support row when verification was disabled (citations only, no probs)", () => {
+    const metaNoVerif = {
+      role: "assistant",
+      author: "Zocrates",
+      citations: [
+        {
+          index: 1,
+          token: "[1]",
+          title: "Unverified Paper",
+          support_probability: null,
+          occurrences: [{ occurrence: 1, support_probability: null, survived: true }],
+        },
+      ],
+    };
+
+    try {
+      sidebar.openMessageInfoModal(metaNoVerif);
+      const overlay = document.querySelector(".info-modal-overlay");
+      assert.ok(overlay, "Modal overlay must exist");
+      const citRow = overlay.querySelector(".citation-support-row");
+      assert.strictEqual(citRow, null, "Citation Support row must NOT be rendered when no verification was run");
+    } finally {
+      document.querySelectorAll(".info-modal-overlay").forEach(el => el.remove());
+    }
+  });
 }
 
 if (require.main === module) {
