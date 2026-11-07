@@ -313,6 +313,145 @@
       font-weight: 600;
     }
 
+    .custom-dropdown-wrap {
+      position: relative;
+      display: inline-block;
+    }
+
+    .custom-dropdown-btn {
+      background-color: var(--bg-card);
+      border: 1px solid var(--border);
+      color: var(--text-main);
+      padding: 5px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      user-select: none;
+      transition: all 0.15s ease;
+      max-width: 320px;
+    }
+
+    .custom-dropdown-btn:hover {
+      background-color: var(--bg-card-hover);
+      border-color: var(--text-muted);
+    }
+
+    .custom-dropdown-btn:focus {
+      border-color: var(--primary, #6366f1);
+    }
+
+    .dropdown-icon {
+      font-size: 13px;
+      line-height: 1;
+    }
+
+    .dropdown-label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--text-main);
+    }
+
+    .dropdown-arrow {
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-left: 2px;
+    }
+
+    .custom-dropdown-menu {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+      padding: 6px;
+      display: none;
+      flex-direction: column;
+      z-index: 100;
+      min-width: 320px;
+      max-width: 480px;
+      max-height: 380px;
+      overflow-y: auto;
+    }
+
+    .custom-dropdown-menu.show {
+      display: flex;
+    }
+
+    .source-option-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      border: none;
+      background: transparent;
+      color: var(--text-main);
+      cursor: pointer;
+      text-align: left;
+      transition: background 0.12s ease;
+      width: 100%;
+    }
+
+    .source-option-item:hover {
+      background: var(--bg-card-hover);
+    }
+
+    .source-option-item.selected {
+      background: rgba(99, 102, 241, 0.15);
+    }
+
+    .source-option-check {
+      font-size: 12px;
+      color: var(--primary, #818cf8);
+      width: 14px;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .source-option-content {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .source-option-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .source-option-title {
+      font-weight: 600;
+      font-size: 12px;
+      color: var(--text-main);
+    }
+
+    .source-option-badge {
+      font-size: 10.5px;
+      color: var(--text-muted);
+      background: rgba(125, 125, 125, 0.15);
+      padding: 1px 6px;
+      border-radius: 10px;
+      white-space: nowrap;
+    }
+
+    .source-option-subtitle {
+      font-size: 11px;
+      color: var(--text-muted);
+      line-height: 1.35;
+      word-break: break-word;
+    }
+
     .claims-select {
       background-color: var(--bg-card);
       border: 1px solid var(--border);
@@ -780,9 +919,17 @@
           <button class="filter-tab" data-filter="FAIL_OPEN" id="tab-fail-open">⚠️ Unverified (<span class="tab-count">0</span>)</button>
         </div>
 
-        <select id="claims-paper-filter" class="claims-select">
-          <option value="">All Sources (0)</option>
-        </select>
+        <div class="custom-dropdown-wrap" id="claims-source-dropdown-wrap">
+          <button id="claims-source-btn" class="custom-dropdown-btn" type="button" aria-haspopup="true" aria-expanded="false" title="Filter claims by source paper">
+            <span class="dropdown-icon">📁</span>
+            <span id="claims-source-btn-label" class="dropdown-label">All Sources</span>
+            <span class="dropdown-arrow">▾</span>
+          </button>
+          <div id="claims-source-menu" class="custom-dropdown-menu"></div>
+          <select id="claims-paper-filter" class="claims-select" style="display: none;">
+            <option value="">All Sources (0)</option>
+          </select>
+        </div>
       </div>
 
       <div class="toolbar-right">

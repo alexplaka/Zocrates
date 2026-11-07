@@ -383,39 +383,103 @@
 
   function populatePaperFilter(assessments) {
     const select = document.getElementById("claims-paper-filter");
-    if (!select) return;
+    const dropdownMenu = document.getElementById("claims-source-menu");
+    const labelSpan = document.getElementById("claims-source-btn-label");
+    const dropdownBtn = document.getElementById("claims-source-btn");
 
-    const savedVal = activePaperFilter;
-    select.innerHTML = "";
-
+    const totalClaims = (assessments || []).length;
     const paperMap = new Map();
     (assessments || []).forEach(a => {
       const key = String(a.item_key || a.title || "Unknown");
       if (!paperMap.has(key)) {
         const label = formatSourceAuthorYear(a);
-        paperMap.set(key, { label, count: 0 });
+        const fullTitle = a.title || "";
+        paperMap.set(key, { label, fullTitle, count: 0 });
       }
       paperMap.get(key).count += 1;
     });
 
-    const rootOption = document.createElement("option");
-    rootOption.value = "";
-    rootOption.textContent = `All Sources (${paperMap.size})`;
-    select.appendChild(rootOption);
+    if (select) {
+      select.innerHTML = "";
+      const rootOpt = document.createElement("option");
+      rootOpt.value = "";
+      rootOpt.textContent = `All Sources (${totalClaims})`;
+      select.appendChild(rootOpt);
+      paperMap.forEach((meta, key) => {
+        const opt = document.createElement("option");
+        opt.value = key;
+        opt.textContent = `${meta.label} (${meta.count})`;
+        if (key === activePaperFilter) opt.selected = true;
+        select.appendChild(opt);
+      });
+    }
 
-    paperMap.forEach((meta, key) => {
-      const opt = document.createElement("option");
-      opt.value = key;
-      opt.textContent = `${meta.label} (${meta.count})`;
-      if (key === savedVal) {
-        opt.selected = true;
+    if (labelSpan) {
+      if (!activePaperFilter) {
+        labelSpan.textContent = `All Sources (${totalClaims})`;
+      } else if (paperMap.has(activePaperFilter)) {
+        const p = paperMap.get(activePaperFilter);
+        labelSpan.textContent = `${p.label} (${p.count})`;
+      } else {
+        labelSpan.textContent = `All Sources (${totalClaims})`;
       }
-      select.appendChild(opt);
-    });
+    }
 
-    if (savedVal && !paperMap.has(savedVal)) {
-      activePaperFilter = "";
-      rootOption.selected = true;
+    if (dropdownMenu) {
+      dropdownMenu.innerHTML = "";
+
+      // 1. Root option: All Sources
+      const rootItem = document.createElement("button");
+      rootItem.type = "button";
+      rootItem.className = "source-option-item" + (!activePaperFilter ? " selected" : "");
+      rootItem.innerHTML = `
+        <span class="source-option-check">${!activePaperFilter ? "✓" : ""}</span>
+        <div class="source-option-content">
+          <div class="source-option-header">
+            <span class="source-option-title">All Sources</span>
+            <span class="source-option-badge">${totalClaims} claims</span>
+          </div>
+          <div class="source-option-subtitle">Show claims evaluated across all papers in this response</div>
+        </div>
+      `;
+      rootItem.addEventListener("click", () => {
+        activePaperFilter = "";
+        if (select) select.value = "";
+        if (labelSpan) labelSpan.textContent = `All Sources (${totalClaims})`;
+        dropdownMenu.classList.remove("show");
+        dropdownBtn?.setAttribute("aria-expanded", "false");
+        populatePaperFilter(currentClaimsData?.assessments);
+        renderTableRows();
+      });
+      dropdownMenu.appendChild(rootItem);
+
+      // 2. Per-paper options
+      paperMap.forEach((meta, key) => {
+        const isSelected = key === activePaperFilter;
+        const itemBtn = document.createElement("button");
+        itemBtn.type = "button";
+        itemBtn.className = "source-option-item" + (isSelected ? " selected" : "");
+        itemBtn.innerHTML = `
+          <span class="source-option-check">${isSelected ? "✓" : ""}</span>
+          <div class="source-option-content">
+            <div class="source-option-header">
+              <span class="source-option-title">${esc(meta.label)}</span>
+              <span class="source-option-badge">${meta.count} claim${meta.count === 1 ? "" : "s"}</span>
+            </div>
+            ${meta.fullTitle ? `<div class="source-option-subtitle">${esc(meta.fullTitle)}</div>` : ""}
+          </div>
+        `;
+        itemBtn.addEventListener("click", () => {
+          activePaperFilter = key;
+          if (select) select.value = key;
+          if (labelSpan) labelSpan.textContent = `${meta.label} (${meta.count})`;
+          dropdownMenu.classList.remove("show");
+          dropdownBtn?.setAttribute("aria-expanded", "false");
+          populatePaperFilter(currentClaimsData?.assessments);
+          renderTableRows();
+        });
+        dropdownMenu.appendChild(itemBtn);
+      });
     }
   }
 
@@ -716,12 +780,30 @@
       });
     });
 
-    // 2. Paper Filter Select
+    // 2. Paper Filter Select & Custom Dropdown
     const paperSelect = document.getElementById("claims-paper-filter");
     if (paperSelect) {
       paperSelect.addEventListener("change", (e) => {
         activePaperFilter = e.target.value;
         renderTableRows();
+      });
+    }
+
+    const sourceBtn = document.getElementById("claims-source-btn");
+    const sourceMenu = document.getElementById("claims-source-menu");
+    if (sourceBtn && sourceMenu) {
+      sourceBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const isOpen = sourceMenu.classList.contains("show");
+        sourceMenu.classList.toggle("show");
+        sourceBtn.setAttribute("aria-expanded", !isOpen ? "true" : "false");
+      });
+
+      document.addEventListener("click", (e) => {
+        if (!sourceMenu.contains(e.target) && e.target !== sourceBtn) {
+          sourceMenu.classList.remove("show");
+          sourceBtn.setAttribute("aria-expanded", "false");
+        }
       });
     }
 
