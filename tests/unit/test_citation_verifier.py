@@ -882,6 +882,46 @@ def test_claim_extraction_markdown_header_boundary():
     claim = occurrences[0]["claim"]
     assert "The attention mechanism scales quadratically with sequence length" in claim
     assert "Some general background" not in claim
+    assert "Key Finding" not in claim
+
+
+@pytest.mark.asyncio
+async def test_compound_citation_prompt_instruction_dispatch():
+    """Verify single citations receive single instruction and compound citations receive compound instruction."""
+    from zocrates.agents.library_search.citation_verifier import (
+        DEFAULT_COMPOUND_CITATION_INSTRUCTIONS,
+        DEFAULT_SINGLE_CITATION_INSTRUCTIONS,
+        _check_support_openrouter,
+    )
+
+    text = (
+        "This is a standalone sentence with single citation [1]. "
+        "This is a compound sentence with multiple citations [1, 2]."
+    )
+    ranked_chunks = [
+        {"chunk_id": "c1", "text": "Evidence for chunk 1"},
+        {"chunk_id": "c2", "text": "Evidence for chunk 2"},
+    ]
+
+    occs = extract_claim_occurrences(text, total_chunks=2)
+    assert len(occs) == 3
+    assert occs[0]["is_compound"] is False
+    assert occs[1]["is_compound"] is True
+    assert occs[2]["is_compound"] is True
+
+    captured_calls = []
+
+    def mock_check(claim, source_text, model="typesafe/jev-1.14", api_key=None, timeout=10.0, is_compound=False):
+        captured_calls.append({"claim": claim, "is_compound": is_compound})
+        return 0.85
+
+    with patch("zocrates.agents.library_search.citation_verifier._check_support_openrouter", side_effect=mock_check):
+        await verify_citations_support(text, ranked_chunks)
+
+    assert len(captured_calls) == 3
+    assert captured_calls[0]["is_compound"] is False
+    assert captured_calls[1]["is_compound"] is True
+    assert captured_calls[2]["is_compound"] is True
 
 
 def test_find_backward_claim_boundary_max_chars_window():
