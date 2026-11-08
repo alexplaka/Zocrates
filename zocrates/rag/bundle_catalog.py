@@ -657,7 +657,7 @@ If a document leaves unanswered questions or you need adjacent prior/follow-up w
 
 For broad conceptual or semantic queries across large libraries, use the Zocrates vector/FTS search API to retrieve top-matching chunk candidates and their associated `item_key`s, then navigate directly to the corresponding `<item_key>/` bundle on disk.
 
-For full architectural details and design specifications, see the **[OKF Document Bundles & Agent Navigation Architecture](artifacts/okf_document_bundles_and_agent_navigation.md)** artifact.
+For full architectural details and design specifications, see the OKF Document Bundles & Agent Navigation Architecture documentation.
 """
     agents_path = cache_dir / "AGENTS.md"
     agents_path.write_text(content.strip() + "\n", encoding="utf-8")

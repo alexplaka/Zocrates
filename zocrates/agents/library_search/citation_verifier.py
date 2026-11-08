@@ -14,6 +14,7 @@ import logging
 import math
 import os
 import re
+import statistics
 import time
 import urllib.parse
 from typing import Any
@@ -35,6 +36,8 @@ except Exception:
     _StatusCode = None
 
 __all__ = [
+    "DEFAULT_COMPOUND_CITATION_INSTRUCTIONS",
+    "DEFAULT_SINGLE_CITATION_INSTRUCTIONS",
     "MAX_CLAIM_CHARS",
     "MAX_SOURCE_TEXT_CHARS",
     "extract_claim_occurrences",
@@ -46,7 +49,7 @@ __all__ = [
 # Service endpoints & defaults
 OPENROUTER_DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions"
 OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
-DEFAULT_OPENROUTER_MODEL = "inception/mercury-decide"
+DEFAULT_OPENROUTER_MODEL = "~typesafe/jev-latest"
 DEFAULT_LOCAL_URL = "http://127.0.0.1:8005/v1/systemone"
 DEFAULT_HEALTH_TIMEOUT_SEC: float = 0.150  # 150ms probe
 DEFAULT_TIMEOUT_SEC: float = 10.0
@@ -56,6 +59,16 @@ MAX_SOURCE_TEXT_CHARS: int = 6000
 MAX_LOCAL_SOURCE_TEXT_CHARS: int = 1800
 MIN_CLAIM_CHARS: int = 30
 MAX_CLAIM_CHARS: int = 800
+
+# Canonical question instructions for decision models
+DEFAULT_SINGLE_CITATION_INSTRUCTIONS: str = "Does the `source_text` support the `claim`?"
+DEFAULT_COMPOUND_CITATION_INSTRUCTIONS: str = (
+    "This claim cites multiple sources. Does the `source_text` support a substantive part of the `claim`?"
+)
+DEFAULT_RESPAN_SINGLE_INSTRUCTIONS: str = "Does the source text support the claim?"
+DEFAULT_RESPAN_COMPOUND_INSTRUCTIONS: str = (
+    "This claim cites multiple sources. Does the source text support a substantive part of the claim?"
+)
 
 # Regex patterns for masking
 _CODE_BLOCK_RE = re.compile(r"(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]+`)")
@@ -86,7 +99,7 @@ _STRUCTURAL_BOUNDARY_RES = [
     re.compile(r"\n\s*\n"),
     re.compile(r"\n\s*[-*+]\s+"),
     re.compile(r"\n\s*\d+\.\s+"),
-    re.compile(r"\n\s*#{1,6}\s+"),
+    re.compile(r"(?:^|\n)\s*#{1,6}\s+[^\n]*\n+"),
 ]
 
 
@@ -255,11 +268,16 @@ def _find_forward_sentence_boundary(suffix: str) -> int:
     return max_search
 
 
-def _find_backward_claim_boundary(prefix: str, max_chars: int = MAX_CLAIM_CHARS) -> int:
+def _find_backward_claim_boundary(
+    prefix: str,
+    total_chunks: int = 0,
+    max_chars: int = MAX_CLAIM_CHARS,
+) -> int:
     """Find start index of the paragraph/block preceding a citation token.
 
-    Step 1: Scans prefix for earlier citation tokens; if found, min_boundary is the
-    end of the last citation match so citations in the same block do not bleed.
+    Step 1: Scans prefix for earlier valid citation tokens (1 <= idx <= total_chunks);
+    if found, min_boundary is the end of the last citation match so citations in the
+    same block do not bleed. Out-of-range author references (e.g. [44, 69]) are ignored.
     Step 2: In search_region = prefix[min_boundary:], searches for the latest structural
     boundary (paragraph breaks, list bullets, numbered items, or markdown headers).
     Step 3: Bounds backward claim length to max_chars, advancing past the first
@@ -269,10 +287,16 @@ def _find_backward_claim_boundary(prefix: str, max_chars: int = MAX_CLAIM_CHARS)
     if n == 0:
         return 0
 
-    # Step 1: Find the last in-text citation match in prefix
+    # Step 1: Find the last valid in-text citation match in prefix
     min_boundary = 0
-    for m in _IN_TEXT_CITATION_TOKEN_RE.finditer(prefix):
-        min_boundary = m.end()
+    if total_chunks > 0:
+        for m in _IN_TEXT_CITATION_TOKEN_RE.finditer(prefix):
+            raw_content = m.group(1) if m.group(1) is not None else m.group(2)
+            if not raw_content:
+                continue
+            parts = [p.strip() for p in re.split(r"[,;]", raw_content) if p.strip()]
+            if any(p.isascii() and p.isdigit() and 1 <= int(p) <= total_chunks for p in parts):
+                min_boundary = m.end()
 
     # Step 2: Search for the latest structural boundary end in search_region
     search_region = prefix[min_boundary:]
@@ -295,7 +319,7 @@ def _find_backward_claim_boundary(prefix: str, max_chars: int = MAX_CLAIM_CHARS)
     return start_idx
 
 
-def _clean_and_join_spans(backward: str, forward: str) -> str:
+def _clean_and_join_spans(backward: str, forward: str, total_chunks: int = 0) -> str:
     """Join backward and forward spans into a clean, complete claim."""
     backward = backward.strip()
     forward = forward.strip()
@@ -321,9 +345,23 @@ def _clean_and_join_spans(backward: str, forward: str) -> str:
     claim = claim.replace("**", "").replace("__", "").replace("`", "")
 
     claim = re.sub(r"\s+", " ", claim).strip()
-    claim = _IN_TEXT_CITATION_TOKEN_RE.sub("", claim)
+
+    def _strip_valid_citation(m: re.Match) -> str:
+        if total_chunks <= 0:
+            return ""
+        raw_content = m.group(1) if m.group(1) is not None else m.group(2)
+        if not raw_content:
+            return ""
+        parts = [p.strip() for p in re.split(r"[,;]", raw_content) if p.strip()]
+        if any(p.isascii() and p.isdigit() and 1 <= int(p) <= total_chunks for p in parts):
+            return ""
+        return m.group(0)
+
+    claim = _IN_TEXT_CITATION_TOKEN_RE.sub(_strip_valid_citation, claim)
+    claim = re.sub(r"\(\s*\)", "", claim)
+    claim = re.sub(r"\[\s*\]", "", claim)
     claim = re.sub(r"\s+", " ", claim).strip()
-    claim = re.sub(r"^(?:[\.\,\;\:\!\?\*\-\#\>\s]|\d+\.\s*)+", "", claim).strip()
+    claim = re.sub(r"^(?:[\.\,\;\:\!\?\*\-\#\>\)\}\]\s]|\d+\.\s*)+", "", claim).strip()
 
     if claim and not claim.endswith((".", "!", "?")):
         claim = claim + "."
@@ -374,7 +412,7 @@ def extract_claim_occurrences(
 
         # Backward scan
         prefix = masked_text[:token_start]
-        b_idx = _find_backward_claim_boundary(prefix)
+        b_idx = _find_backward_claim_boundary(prefix, total_chunks=total_chunks)
         backward_span = prefix[b_idx:].strip()
 
         # Forward scan check
@@ -384,12 +422,12 @@ def extract_claim_occurrences(
             f_idx = _find_forward_sentence_boundary(suffix)
             forward_span = suffix[:f_idx].strip()
 
-        claim = _clean_and_join_spans(backward_span, forward_span)
+        claim = _clean_and_join_spans(backward_span, forward_span, total_chunks=total_chunks)
         if len(claim) < 15:
             start_w = max(0, token_start - 100)
             end_w = min(len(masked_text), token_end + 100)
             fallback_span = masked_text[start_w:end_w].strip()
-            claim = _clean_and_join_spans(fallback_span, "")
+            claim = _clean_and_join_spans(fallback_span, "", total_chunks=total_chunks)
 
         claim = unmask_text(claim, placeholders)
 
@@ -400,6 +438,7 @@ def extract_claim_occurrences(
                 "chunk_index": idx,
                 "occurrence": occ,
                 "claim": claim,
+                "is_compound": len(valid_indices) > 1,
             })
 
     return occurrences
@@ -464,6 +503,7 @@ def _check_support_openrouter(
     model: str = DEFAULT_OPENROUTER_MODEL,
     api_key: str | None = None,
     timeout: float = DEFAULT_TIMEOUT_SEC,
+    is_compound: bool = False,
 ) -> float | None:
     """Query OpenRouter Decisions API with fallback and fail-open handling."""
     effective_key = (
@@ -487,17 +527,27 @@ def _check_support_openrouter(
 
     model_lower = model.lower()
     if "respan" in model_lower:
+        instructions = (
+            DEFAULT_RESPAN_COMPOUND_INSTRUCTIONS
+            if is_compound
+            else DEFAULT_RESPAN_SINGLE_INSTRUCTIONS
+        )
         payload = {
             "model": model,
             "state": f"Source text: {source_text}\n\nClaim: {claim}",
             "questions": {
                 "support": {
                     "type": "noul",
-                    "instructions": "Does the source text support the claim?",
+                    "instructions": instructions,
                 }
             },
         }
     else:
+        instructions = (
+            DEFAULT_COMPOUND_CITATION_INSTRUCTIONS
+            if is_compound
+            else DEFAULT_SINGLE_CITATION_INSTRUCTIONS
+        )
         payload = {
             "model": model,
             "state": {
@@ -507,7 +557,7 @@ def _check_support_openrouter(
             "questions": {
                 "support": {
                     "type": "noul",
-                    "instructions": "Does the `source_text` support the `claim`?",
+                    "instructions": instructions,
                 }
             },
         }
@@ -532,15 +582,22 @@ def _check_support_openrouter(
 
         # Fallback to chat completions if 404 on alpha decisions endpoint
         if resp.status_code == 404:
+            sys_msg = (
+                "You are a citation verification model. This claim cites multiple sources. "
+                "Determine whether the source text supports a substantive part of the claim. "
+                "Respond with JSON in the form: {\"noul\": <probability between 0.0 and 1.0>}."
+                if is_compound
+                else (
+                    "You are a citation verification model. Determine whether the source text supports the claim. "
+                    "Respond with JSON in the form: {\"noul\": <probability between 0.0 and 1.0>}."
+                )
+            )
             chat_payload = {
                 "model": model,
                 "messages": [
                     {
                         "role": "system",
-                        "content": (
-                            "You are a citation verification model. Determine whether the source text supports the claim. "
-                            "Respond with JSON in the form: {\"noul\": <probability between 0.0 and 1.0>}."
-                        ),
+                        "content": sys_msg,
                     },
                     {
                         "role": "user",
@@ -614,6 +671,7 @@ def _check_support_local_laya(
     local_url: str = DEFAULT_LOCAL_URL,
     timeout: float = DEFAULT_TIMEOUT_SEC,
     skip_health_probe: bool = False,
+    is_compound: bool = False,
 ) -> float | None:
     """Query local Laya endpoint with fail-open health probe and error handling."""
     parsed = urllib.parse.urlparse(local_url)
@@ -625,6 +683,11 @@ def _check_support_local_laya(
 
     effective_timeout = max(timeout, 10.0)
 
+    instructions = (
+        DEFAULT_COMPOUND_CITATION_INSTRUCTIONS
+        if is_compound
+        else DEFAULT_SINGLE_CITATION_INSTRUCTIONS
+    )
     payload = {
         "model": model,
         "state": {
@@ -634,7 +697,7 @@ def _check_support_local_laya(
         "questions": {
             "support": {
                 "type": "noul",
-                "instructions": "Does the `source_text` support the `claim`?",
+                "instructions": instructions,
             }
         },
     }
@@ -684,27 +747,56 @@ def _check_support_local_laya_batch(
     items: list[tuple[Any, ...]],
     local_url: str = DEFAULT_LOCAL_URL,
     timeout: float = 15.0,
+    is_compound: bool = False,
 ) -> dict[Any, float | None] | None:
     """Evaluate multiple citation claims concurrently via Laya's native /v1/systemone/batch endpoint.
 
-    Supports both 3-tuples (chunk_idx, claim, source_text) and 4-tuples
-    (chunk_idx, occ_idx, claim, source_text).
+    Supports 3-tuples (chunk_idx, claim, source_text), 4-tuples
+    (chunk_idx, occ_idx, claim, source_text), and 5-tuples
+    (chunk_idx, occ_idx, claim, source_text, is_compound).
     """
+    if not items:
+        return {}
+
+    # If items are 5-tuples containing is_compound flags, partition into sub-batches
+    if len(items[0]) >= 5:
+        single_items = [it[:4] for it in items if not it[4]]
+        compound_items = [it[:4] for it in items if it[4]]
+        out: dict[Any, float | None] = {}
+        if single_items:
+            res_s = _check_support_local_laya_batch(
+                single_items, local_url=local_url, timeout=timeout, is_compound=False
+            )
+            if res_s is not None:
+                out.update(res_s)
+        if compound_items:
+            res_c = _check_support_local_laya_batch(
+                compound_items, local_url=local_url, timeout=timeout, is_compound=True
+            )
+            if res_c is not None:
+                out.update(res_c)
+        return out if out or not (single_items or compound_items) else None
+
     parsed = urllib.parse.urlparse(local_url)
     batch_url = f"{parsed.scheme}://{parsed.netloc}/v1/systemone/batch"
     states = []
     for item in items:
-        if len(item) == 4:
+        if len(item) >= 4:
             states.append({"source_text": item[3], "claim": item[2]})
         else:
             states.append({"source_text": item[2], "claim": item[1]})
 
+    instructions = (
+        DEFAULT_COMPOUND_CITATION_INSTRUCTIONS
+        if is_compound
+        else DEFAULT_SINGLE_CITATION_INSTRUCTIONS
+    )
     payload = {
         "states": states,
         "questions": {
             "support": {
                 "type": "noul",
-                "instructions": "Does the `source_text` support the `claim`?",
+                "instructions": instructions,
             }
         },
     }
@@ -794,17 +886,21 @@ async def verify_citations_support(
         for item in occurrences:
             c_idx = item["chunk_index"]
             occ_idx = item["occurrence"]
+            is_comp = bool(item.get("is_compound", False))
             chunk = ranked_chunks[c_idx - 1] if (1 <= c_idx <= len(ranked_chunks)) else {}
-            src = prepare_source_text(chunk, item["claim"])[:1500]
+            src = prepare_source_text(chunk, item["claim"])
             input_assessments.append({
                 "chunk_index": c_idx,
                 "occurrence": occ_idx,
+                "is_compound": is_comp,
                 "claim": item["claim"],
                 "source_text": src,
                 "title": str(chunk.get("title") or ""),
                 "section": str(chunk.get("section") or chunk.get("heading") or ""),
                 "authors": chunk.get("authors") if chunk.get("authors") is not None else [],
                 "year": chunk.get("year") or "",
+                "item_key": str(chunk.get("item_key") or ""),
+                "attachment_key": chunk.get("attachment_key"),
             })
 
         metadata_dict = {
@@ -862,6 +958,7 @@ async def verify_citations_support(
                             item["claim"],
                             max_chars=MAX_LOCAL_SOURCE_TEXT_CHARS,
                         ),
+                        bool(item.get("is_compound", False)),
                     )
                     for item in occurrences
                 ]
@@ -886,13 +983,19 @@ async def verify_citations_support(
                         len(occurrences),
                     )
         else:
-            def _verify_one(chunk_idx: int, occ_idx: int, claim: str) -> tuple[int, int, float | None, float]:
+            def _verify_one(
+                chunk_idx: int,
+                occ_idx: int,
+                claim: str,
+                is_compound: bool = False,
+            ) -> tuple[int, int, float | None, float]:
                 """Verify a single claim against its referenced chunk evidence.
 
                 Args:
                     chunk_idx: 1-based index of the candidate evidence chunk.
                     occ_idx: 1-based occurrence number of the citation within the text.
                     claim: Extracted claim sentence to evaluate.
+                    is_compound: Whether this citation occurrence originates from a multi-citation bracket.
 
                 Returns:
                     Tuple of (chunk_idx, occ_idx, support_probability, elapsed_ms).
@@ -909,6 +1012,7 @@ async def verify_citations_support(
                             local_url=local_url,
                             timeout=timeout_sec,
                             skip_health_probe=True,
+                            is_compound=is_compound,
                         )
                     else:
                         prob = _check_support_openrouter(
@@ -916,6 +1020,7 @@ async def verify_citations_support(
                             source_text=source_text,
                             model=model,
                             timeout=timeout_sec,
+                            is_compound=is_compound,
                         )
                     elapsed_item_ms = (time.perf_counter() - t0) * 1000.0
                     return chunk_idx, occ_idx, prob, round(elapsed_item_ms, 2)
@@ -940,6 +1045,7 @@ async def verify_citations_support(
                             item["chunk_index"],
                             item["occurrence"],
                             item["claim"],
+                            bool(item.get("is_compound", False)),
                         )
                         for item in occurrences
                     ]
@@ -982,10 +1088,15 @@ async def verify_citations_support(
             assessment_entry = dict(input_assessments[i])
             assessment_entry.update({
                 "support_probability": prob,
+                "threshold": verification_threshold,
                 "verdict": verdict,
                 "latency_ms": item_latencies.get((c_idx, occ_idx)) if execution_mode == "thread_pool" else None,
             })
             assessments.append(assessment_entry)
+
+        probs = [float(a["support_probability"]) for a in assessments if a.get("support_probability") is not None]
+        mean_support = round(statistics.fmean(probs), 3) if probs else None
+        std_support = round(statistics.stdev(probs), 3) if len(probs) >= 2 else (0.0 if len(probs) == 1 else None)
 
         wall_latency_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
         summary = {
@@ -993,6 +1104,8 @@ async def verify_citations_support(
             "kept": kept_count,
             "demoted": demoted_count,
             "fail_open": fail_open_count,
+            "mean_support": mean_support,
+            "std_support": std_support,
             "latency_ms": wall_latency_ms,
             "budget_exceeded": budget_exceeded,
         }
@@ -1017,6 +1130,8 @@ async def verify_citations_support(
             _safe_set(span, "citation_verification.kept", kept_count)
             _safe_set(span, "citation_verification.demoted", demoted_count)
             _safe_set(span, "citation_verification.fail_open", fail_open_count)
+            _safe_set(span, "citation_verification.mean_support", mean_support)
+            _safe_set(span, "citation_verification.std_support", std_support)
             _safe_set(span, "citation_verification.latency_ms", wall_latency_ms)
         except Exception as span_err:
             logger.debug("Failed setting span output attributes: %s", span_err)

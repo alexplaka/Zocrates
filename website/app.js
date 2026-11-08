@@ -282,6 +282,133 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  /* Citations Visibility Toggle & Claim Verification Inspector Modal */
+  const toggleCitationsBtn = document.getElementById('btn-toggle-citations');
+  const heroAssistantBubble = document.querySelector('.chat-bubble-assistant');
+  if (toggleCitationsBtn && heroAssistantBubble) {
+    let citationsVisible = true;
+    toggleCitationsBtn.addEventListener('click', () => {
+      citationsVisible = !citationsVisible;
+      heroAssistantBubble.classList.toggle('citations-hidden', !citationsVisible);
+      if (citationsVisible) {
+        toggleCitationsBtn.innerHTML = '👁️ Citations: Visible';
+        toggleCitationsBtn.classList.add('active-pill');
+        toggleCitationsBtn.classList.remove('muted-pill');
+      } else {
+        toggleCitationsBtn.innerHTML = '👁️ Citations: Hidden';
+        toggleCitationsBtn.classList.remove('active-pill');
+        toggleCitationsBtn.classList.add('muted-pill');
+      }
+    });
+  }
+
+  const claimsModal = document.getElementById('claims-inspector-modal');
+  const openClaimsBtn = document.getElementById('btn-open-claims-inspector');
+  const closeClaimsBtn = document.getElementById('claims-modal-close-btn');
+  const claimsFilterSelect = document.getElementById('claims-filter-select');
+  const claimsTableBody = document.getElementById('claims-table-body');
+
+  function openClaimsInspector() {
+    if (claimsModal) {
+      claimsModal.classList.add('open');
+      claimsModal.setAttribute('aria-hidden', 'false');
+      document.body.style.overflow = 'hidden';
+    }
+  }
+
+  function closeClaimsInspector() {
+    if (claimsModal) {
+      claimsModal.classList.remove('open');
+      claimsModal.setAttribute('aria-hidden', 'true');
+      document.body.style.overflow = '';
+    }
+  }
+
+  if (openClaimsBtn) {
+    openClaimsBtn.addEventListener('click', openClaimsInspector);
+  }
+  if (closeClaimsBtn) {
+    closeClaimsBtn.addEventListener('click', closeClaimsInspector);
+  }
+  const claimPassageData = {
+    '1': {
+      unhighlighted: `"Multi-head attention allows the model to jointly attend to information from different representation subspaces at different positions. With a single attention head, averaging inhibits this. In this work we employ h = 8 parallel attention layers."`,
+      highlighted: `<span class="sentence-attr-highlight">"Multi-head attention allows the model to jointly attend to information from different representation subspaces at different positions.</span> With a single attention head, averaging inhibits this. In this work we employ h = 8 parallel attention layers."`
+    },
+    '2': {
+      unhighlighted: `"Standard attention materializes intermediate N × N matrices in high-bandwidth memory, creating an IO bottleneck. FlashAttention computes exact attention with fewer memory accesses by tiling inputs across fast SRAM blocks and restructuring the backward pass without materializing the large N × N matrix. We observe a 2–4× wall-clock speedup across standard Transformer architectures."`,
+      highlighted: `"Standard attention materializes intermediate N × N matrices in high-bandwidth memory, creating an IO bottleneck. <span class="sentence-attr-highlight">FlashAttention computes exact attention with fewer memory accesses by tiling inputs across fast SRAM blocks and restructuring the backward pass without materializing the large N × N matrix.</span> We observe a 2–4× wall-clock speedup across standard Transformer architectures."`
+    },
+    '3': {
+      unhighlighted: `"Standard self-attention mechanisms scale quadratically with sequence length, making long document modeling computationally prohibitive. The Longformer attention mechanism combines a localized sliding window with selected task-motivated global tokens, dropping time and memory complexity from 𝒪(N²) down to 𝒪(N). This allows processing documents of thousands of tokens directly."`,
+      highlighted: `"Standard self-attention mechanisms scale quadratically with sequence length, making long document modeling computationally prohibitive. <span class="sentence-attr-highlight">The Longformer attention mechanism combines a localized sliding window with selected task-motivated global tokens, dropping time and memory complexity from 𝒪(N²) down to 𝒪(N).</span> This allows processing documents of thousands of tokens directly."`
+    }
+  };
+
+  const modalAttrState = { '1': 0, '2': 0, '3': 0 };
+
+  if (claimsModal) {
+    claimsModal.addEventListener('click', (e) => {
+      const toggleBtn = e.target.closest('.modal-attr-btn');
+      if (toggleBtn) {
+        const claimId = toggleBtn.dataset.claimId;
+        const passageEl = document.getElementById(`modal-passage-${claimId}`);
+        const noteEl = document.getElementById(`modal-note-${claimId}`);
+        const data = claimPassageData[claimId];
+        if (!passageEl || !data) return;
+
+        const currentState = modalAttrState[claimId] || 0;
+        if (currentState === 0 || currentState === 2) {
+          passageEl.innerHTML = data.highlighted;
+          if (noteEl) noteEl.style.display = 'block';
+          toggleBtn.textContent = '✨ Attribution: Shown';
+          modalAttrState[claimId] = 1;
+        } else {
+          passageEl.innerHTML = data.unhighlighted;
+          if (noteEl) noteEl.style.display = 'none';
+          toggleBtn.textContent = '🔍 Attribution: Hidden';
+          modalAttrState[claimId] = 2;
+        }
+        return;
+      }
+      if (e.target === claimsModal) {
+        closeClaimsInspector();
+      }
+    });
+  }
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && claimsModal && claimsModal.classList.contains('open')) {
+      closeClaimsInspector();
+    }
+  });
+
+  if (claimsFilterSelect && claimsTableBody) {
+    claimsFilterSelect.addEventListener('change', () => {
+      const selectedSource = claimsFilterSelect.value;
+      const rows = claimsTableBody.querySelectorAll('tr');
+      rows.forEach((row) => {
+        if (selectedSource === 'all' || row.dataset.source === selectedSource) {
+          row.style.display = '';
+        } else {
+          row.style.display = 'none';
+        }
+      });
+    });
+  }
+
+  const msgInfoBtn = document.getElementById('btn-msg-info');
+  if (msgInfoBtn) {
+    msgInfoBtn.addEventListener('click', () => {
+      const orig = msgInfoBtn.innerHTML;
+      msgInfoBtn.innerHTML = '✓ 3 verified (p ≥ 0.600)';
+      msgInfoBtn.style.color = 'var(--success)';
+      setTimeout(() => {
+        msgInfoBtn.innerHTML = orig;
+        msgInfoBtn.style.color = '';
+      }, 2600);
+    });
+  }
+
   /* ------------------------------------------------------------------------
      3. Hero Predictive Ghost Text Input Demo ([Tab ⇥] Acceptance)
      ------------------------------------------------------------------------ */
@@ -387,7 +514,7 @@ Instead of performing a single attention function with d_model-dimensional keys.
   });
 
   /* ------------------------------------------------------------------------
-     5. Bento Widget 1: Citation Mode & Clean Manuscript Export Switcher
+     5. Bento Showcase: Citation Mode & Clean Manuscript Export Switcher
      ------------------------------------------------------------------------ */
   const citeModeBtns = document.querySelectorAll('.cite-mode-btn');
   const citeModeDisplay = document.getElementById('cite-mode-display');
@@ -435,7 +562,40 @@ Instead of performing a single attention function with d_model-dimensional keys.
   });
 
   /* ------------------------------------------------------------------------
-     6. Bento Widget 2: Online Discovery & 1-Click Import Simulator
+     5b. Bento Showcase: Sentence-Level Micro-Attribution & Claim Inspector
+     ------------------------------------------------------------------------ */
+  const bentoSentenceToggleBtn = document.getElementById('bento-sentence-toggle-btn');
+  const bentoSentencePassage = document.getElementById('bento-sentence-passage');
+  const bentoSentenceNote = document.getElementById('bento-sentence-note');
+
+  if (bentoSentenceToggleBtn && bentoSentencePassage && bentoSentenceNote) {
+    let bentoAttrState = 0; // 0 = unobtained, 1 = shown, 2 = hidden
+    const unhighlightedText = `Standard attention materializes intermediate N × N matrices in high-bandwidth memory, creating an IO bottleneck. FlashAttention computes exact attention with fewer memory accesses by tiling inputs across fast SRAM blocks and restructuring the backward pass without materializing the large N × N matrix. We observe substantial wall-clock speedups across GPU architectures.`;
+    const highlightedText = `Standard attention materializes intermediate N × N matrices in high-bandwidth memory, creating an IO bottleneck. <span class="sentence-attr-highlight">FlashAttention computes exact attention with fewer memory accesses by tiling inputs across fast SRAM blocks and restructuring the backward pass without materializing the large N × N matrix.</span> We observe substantial wall-clock speedups across GPU architectures.`;
+
+    bentoSentenceToggleBtn.addEventListener('click', () => {
+      if (bentoAttrState === 0 || bentoAttrState === 2) {
+        bentoSentencePassage.innerHTML = highlightedText;
+        bentoSentenceNote.style.display = 'block';
+        bentoSentenceToggleBtn.textContent = '✨ Attribution: Shown';
+        bentoAttrState = 1;
+      } else {
+        bentoSentencePassage.innerHTML = unhighlightedText;
+        bentoSentenceNote.style.display = 'none';
+        bentoSentenceToggleBtn.textContent = '🔍 Attribution: Hidden';
+        bentoAttrState = 2;
+      }
+    });
+  }
+
+  document.addEventListener('click', (e) => {
+    if (e.target && e.target.closest('.open-full-inspector-btn')) {
+      openClaimsInspector();
+    }
+  });
+
+  /* ------------------------------------------------------------------------
+     6. Bento Showcase: Online Discovery & 1-Click Import Simulator
      ------------------------------------------------------------------------ */
   const candidateItems = document.querySelectorAll('.candidate-card-item');
   const importBtn = document.getElementById('btn-simulate-import');
@@ -513,7 +673,7 @@ Instead of performing a single attention function with d_model-dimensional keys.
   }
 
   /* ------------------------------------------------------------------------
-     7. Bento Widget 3: Interactive HTML5 Canvas 2D Paper Relations Graph
+     7. Bento Showcase: Interactive HTML5 Canvas 2D Paper Relations Graph
      ------------------------------------------------------------------------ */
   const canvas = document.getElementById('relations-canvas');
   const graphInspectorText = document.getElementById('graph-inspector-text');
@@ -628,7 +788,7 @@ Instead of performing a single attention function with d_model-dimensional keys.
   }
 
   /* ------------------------------------------------------------------------
-     8. Bento Widget 4: Deep Research Investigation Checkpoint Demo
+     8. Bento Showcase: Deep Research Investigation Checkpoint Demo
      ------------------------------------------------------------------------ */
   const hitlExtendBtn = document.getElementById('btn-hitl-extend');
   const hitlSynthBtn = document.getElementById('btn-hitl-synthesize');
@@ -653,7 +813,7 @@ Instead of performing a single attention function with d_model-dimensional keys.
   }
 
   /* ------------------------------------------------------------------------
-     9. Bento Widget 5: Mermaid Diagram Code / Visual Toggle
+     9. Bento Showcase: Mermaid Diagram Code / Visual Toggle
      ------------------------------------------------------------------------ */
   const mermaidToggleBtn = document.getElementById('btn-toggle-mermaid');
   const mermaidVisualView = document.getElementById('mermaid-visual-view');

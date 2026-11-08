@@ -489,13 +489,13 @@ async def test_verify_citations_support_local_laya_batch(sample_ranked_chunks):
 # 11. Default Model and Logging Tests
 # ---------------------------------------------------------------------------
 def test_default_citation_verification_model():
-    """Verify default citation verification model is inception/mercury-decide (Recommended tier, §5.2)."""
+    """Verify default citation verification model is ~typesafe/jev-latest (Recommended tier, §5.2)."""
     from zocrates.agents.library_search.citation_verifier import DEFAULT_OPENROUTER_MODEL
     from zocrates.config import DEFAULT_CITATION_VERIFICATION_MODEL, DEFAULT_CONFIG
 
-    assert DEFAULT_CITATION_VERIFICATION_MODEL == "inception/mercury-decide"
-    assert DEFAULT_OPENROUTER_MODEL == "inception/mercury-decide"
-    assert DEFAULT_CONFIG["citation_verification_model"] == "inception/mercury-decide"
+    assert DEFAULT_CITATION_VERIFICATION_MODEL == "~typesafe/jev-latest"
+    assert DEFAULT_OPENROUTER_MODEL == "~typesafe/jev-latest"
+    assert DEFAULT_CONFIG["citation_verification_model"] == "~typesafe/jev-latest"
 
 
 @pytest.mark.asyncio
@@ -882,6 +882,64 @@ def test_claim_extraction_markdown_header_boundary():
     claim = occurrences[0]["claim"]
     assert "The attention mechanism scales quadratically with sequence length" in claim
     assert "Some general background" not in claim
+    assert "Key Finding" not in claim
+
+
+def test_claim_extraction_in_sentence_author_references_intact():
+    """Verify in-sentence author reference numbers (e.g. [44, 69]) are not treated as boundaries or stripped."""
+    text = (
+        "- **Validation strategy:** qualitative comparison against published experiments, "
+        "especially Chang et al. (their refs. [44, 69]), rather than fitting to a new dataset [3, 4]."
+    )
+    occurrences = extract_claim_occurrences(text, total_chunks=4)
+    assert len(occurrences) == 2
+    for occ in occurrences:
+        assert occ["chunk_index"] in (3, 4)
+        assert occ["is_compound"] is True
+        assert not occ["claim"].startswith(")")
+        assert occ["claim"] == (
+            "Validation strategy: qualitative comparison against published experiments, "
+            "especially Chang et al. (their refs. [44, 69]), rather than fitting to a new dataset."
+        )
+
+
+@pytest.mark.asyncio
+async def test_compound_citation_prompt_instruction_dispatch():
+    """Verify single citations receive single instruction and compound citations receive compound instruction."""
+    from zocrates.agents.library_search.citation_verifier import (
+        DEFAULT_COMPOUND_CITATION_INSTRUCTIONS,
+        DEFAULT_SINGLE_CITATION_INSTRUCTIONS,
+        _check_support_openrouter,
+    )
+
+    text = (
+        "This is a standalone sentence with single citation [1]. "
+        "This is a compound sentence with multiple citations [1, 2]."
+    )
+    ranked_chunks = [
+        {"chunk_id": "c1", "text": "Evidence for chunk 1"},
+        {"chunk_id": "c2", "text": "Evidence for chunk 2"},
+    ]
+
+    occs = extract_claim_occurrences(text, total_chunks=2)
+    assert len(occs) == 3
+    assert occs[0]["is_compound"] is False
+    assert occs[1]["is_compound"] is True
+    assert occs[2]["is_compound"] is True
+
+    captured_calls = []
+
+    def mock_check(claim, source_text, model="~typesafe/jev-latest", api_key=None, timeout=10.0, is_compound=False):
+        captured_calls.append({"claim": claim, "is_compound": is_compound})
+        return 0.85
+
+    with patch("zocrates.agents.library_search.citation_verifier._check_support_openrouter", side_effect=mock_check):
+        await verify_citations_support(text, ranked_chunks)
+
+    assert len(captured_calls) == 3
+    assert captured_calls[0]["is_compound"] is False
+    assert captured_calls[1]["is_compound"] is True
+    assert captured_calls[2]["is_compound"] is True
 
 
 def test_find_backward_claim_boundary_max_chars_window():
@@ -964,6 +1022,8 @@ async def test_verify_citations_support_telemetry_schema_and_verdicts(sample_ran
     assert a1["section"] == "Methods"
     assert a1["authors"] == ["Jonsson, Hakon", "Stefansson, Kari"]
     assert a1["year"] == "2021"
+    assert a1["item_key"] == "99R6SJ7T"
+    assert a1["attachment_key"] == "ATT99R6"
     assert len(a1["source_text"]) <= 1500
     assert isinstance(a1["latency_ms"], (int, float))
 

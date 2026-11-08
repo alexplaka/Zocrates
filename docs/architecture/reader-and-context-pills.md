@@ -437,9 +437,12 @@ sequenceDiagram
     Sidebar->>Sidebar: extractLeafHeading(rawSection, docTitle)
 
     alt Branch A: PDF Attachment
-        Sidebar->>PDF: Poll internalReader._state.outline / pdfDocument.getOutline() (<= 3.5s)
+        Sidebar->>PDF: Poll internalReader._state.outline / pdfDocument.getOutline2() / getOutline() (<= 3.5s)
         Sidebar->>Sidebar: findOutlineDestination(outline, leaf, parents)
-        Sidebar->>PDF: internalReader.navigate({ dest }) or linkService.goToDestination(dest)
+        opt Leaf Missing in Shallow Outline
+            Sidebar->>Sidebar: Walk parents hierarchy backwards to find containing section
+        end
+        Sidebar->>PDF: internalReader.navigate(targetLocation) with timeout race
     else Branch B: HTML Snapshot
         Sidebar->>PDF: Poll iframeWindow.document readyState === 'complete' (<= 3.5s)
         Sidebar->>Sidebar: findHtmlSnapshotHeading(doc, leaf)
@@ -447,21 +450,29 @@ sequenceDiagram
     end
 ```
 
-### 9.3 Heading Extraction & Outline Scoring
+### 9.3 Heading Extraction, Outline Scoring & Hierarchical Fallback
 
-1. **Heading Extraction (`extractLeafHeading`)**:
+1. **Heading Extraction & Math Normalization (`extractLeafHeading`, `normalizeForComparison`)**:
    - Parses breadcrumbs (`"Attention > 3 Architecture > 3.2 Attention"` $\rightarrow$ leaf: `"3.2 Attention"`, parents: `["Attention", "3 Architecture"]`).
    - Strips leading section symbols (`§`), Markdown formatting (`**bold**`, `*italic*`), and backticks.
-   - Filters out non-navigable document labels (`"Frontmatter"`, `"Full Document"`, `"Abstract"`, `/^(?:figure|table)\s+\d/i`).
+   - Unwraps LaTeX math expressions (`$[Ca^{2+}]$` $\rightarrow$ `[Ca^{2+}]`) and normalizes LaTeX punctuation (`[\^\{\}\[\]\+_\\]`) so equations match outline entries (`Ca2+`), while preserving word hyphens as spaces (`Multi-Head Attention` $\leftrightarrow$ `Multi Head Attention`).
+   - Filters out non-navigable document labels (`"Frontmatter"`, `"Full Document"`, `"Abstract"`, `/^(?:figure|table)\s+\d/i`) via `isSyntheticOrTitle`.
    - Compares against the document title to avoid redundant jumps to the top of page 1.
-2. **Heading Decomposition (`parseHeadingParts`)**:
+2. **Dual-Schema Outline Compatibility**:
+   - Supports both pre-compiled PDF Document Outlines (`node.dest` $\rightarrow$ `{ dest }`) and Zotero's layout-synthesized outline schema (`node.location = { position: { pageIndex, rects } }`).
+   - Polling queries Zotero's enhanced layout outline generator (`pdfDoc.getOutline2()`) when internal state is empty before falling back to native `pdfDoc.getOutline()`.
+3. **Heading Decomposition (`parseHeadingParts`)**:
    - Separates numbering prefixes (`3.2.2`, `III`, `Appendix B`) from core titles using case-sensitive rules (preserving plain titles like `"Mix of Experts"` and `"A Survey"`).
-3. **Scored Pre-Order DFS Traversal (`findOutlineDestination`)**:
+4. **Scored Pre-Order DFS Traversal (`findOutlineDestination`)**:
    - Evaluates outline entries across structural tiers:
      - Exact match on core title + numbering ($+100$).
      - Numbering conflict rejection: if the query specifies section `3.2` and the candidate is `4.2`, the match is rejected ($-\infty$).
      - Parent corroboration: candidate nodes whose ancestors match query breadcrumbs receive $+20$ points per matching ancestor.
      - Ambiguity rejection: if multiple destinations tie with the exact same top score, navigation is skipped to prevent jumping to the wrong location.
+5. **Hierarchical Parent Breadcrumb Fallback**:
+   - If a specific sub-section leaf is omitted in a shallow outline (e.g., outline only indexes H1/H2 chapters like *Results*), the algorithm walks backwards through `parents` to find the nearest non-synthetic ancestor, jumping to the containing chapter instead of abandoning navigation.
+6. **Bounded Execution**:
+   - Destination jumps via `internalReader.navigate(targetLocation)` are bounded by a timeout race against the remaining deadline, preventing permanently stuck promises in `_activeReaderNavigations` if a host call hangs.
 4. **Lifecycle & Concurrency Guards**:
    - **Promise Coalescing**: Rapid multi-clicks on the same attachment and section coalesce into a single in-flight `Promise` in `_activeReaderNavigations`, with `.finally()` cleanup guaranteeing no stuck promises on early returns.
    - **Deadline Bounds**: Both PDF outline polling and HTML document readiness are bounded by a strict 3.5-second timeout, immediately failing open if the reader takes longer to load.

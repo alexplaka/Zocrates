@@ -1110,6 +1110,19 @@ class TestLLMEndpoints:
             assert client.get("/llm/config").status_code == 404
             assert client.post("/llm/config", json=post_payload).status_code == 404
 
+    def test_post_config_returns_sentence_attribution_model(self, client, tmp_path) -> None:
+        """POST /config returns sentence_attribution_model in the returned config dictionary."""
+        with patch("zocrates.config.resolve_zotero_data_dir", return_value=tmp_path), \
+             patch("zocrates.agents.app.set_agent_models"):
+            post_payload = {
+                "sentence_attribution_model": "custom/attribution-model",
+            }
+            post_res = client.post("/config", json=post_payload)
+            assert post_res.status_code == 200
+            assert post_res.json()["status"] == "success"
+            cfg_out = post_res.json()["config"]
+            assert cfg_out.get("sentence_attribution_model") == "custom/attribution-model"
+
     def test_post_config_updates_datalab_api_key(self, client, tmp_path) -> None:
         """POST /config updates datalab_api_key in memory via save_datalab_api_key."""
         from zocrates.config import get_datalab_api_key
@@ -2196,6 +2209,9 @@ class TestStreamRunnerEvents:
                 assert len(data["citations"]) == 1
                 assert data["citations"][0]["index"] == 1
                 assert "references" in data
+                assert "enriched_text" in data
+                assert "metadata" in data and "enriched_text" in data["metadata"]
+                assert mock_event.custom_metadata.get("enriched_text") is not None
         finally:
             del app.state.runner
 
@@ -2304,6 +2320,15 @@ class TestStreamRunnerEvents:
                             "tier": 1,
                         }
                     ],
+                    "citation_verification_telemetry": {
+                        "model": "inception/mercury-decide:free",
+                        "summary": {
+                            "batch_size": 1,
+                            "kept": 1,
+                            "demoted": 0,
+                            "mean_support": 0.85,
+                        },
+                    },
                 }
             ]
         }
@@ -2316,6 +2341,104 @@ class TestStreamRunnerEvents:
         assert msg["citations"][0]["index"] == 1
         assert msg["references"] is not None
         assert len(msg["references"]) == 1
+        assert msg["citation_verification"] is not None
+        assert msg["citation_verification"]["model"] == "inception/mercury-decide:free"
+
+    def test_format_session_for_ui_sets_final_text_from_enriched_text(self) -> None:
+        """Verify format_session_for_ui sets final_text from enriched_text and rehydrates references even when citations is empty."""
+        from zocrates.utils.session_formatting import format_session_for_ui
+        from zocrates.agents.common.state_keys import RETRIEVED_EVIDENCE
+        from google.adk.events.event import Event
+        from google.genai import types
+
+        raw_text = "Raw unpruned claim [1] and hallucinated claim [2]."
+        enriched = "Enriched verified claim [1].\n\n# Cited Sources\n1. Jonsson (2021)"
+        text_part = types.Part.from_text(text=raw_text)
+        event = Event(
+            id="evt-enriched-1",
+            invocation_id="inv-enriched-1",
+            author="library_synthesizer_agent",
+            content=types.Content(role="model", parts=[text_part]),
+            custom_metadata={},
+        )
+
+        mock_session = MagicMock()
+        mock_session.id = "sess-enriched"
+        mock_session.events = [event]
+        mock_session.state = {
+            RETRIEVED_EVIDENCE: [
+                {
+                    "invocation_id": "inv-enriched-1",
+                    "citations": [],
+                    "references": [
+                        {
+                            "item_key": "99R6SJ7T",
+                            "authors": "Jonsson",
+                            "year": "2021",
+                            "title": "Twins Study",
+                            "tier": 2,
+                        }
+                    ],
+                    "enriched_text": enriched,
+                    "citation_verification_telemetry": {
+                        "model": "inception/mercury-decide:free",
+                    },
+                }
+            ]
+        }
+
+        res = format_session_for_ui(mock_session)
+        assert len(res["messages"]) == 1
+        msg = res["messages"][0]
+        assert msg["text"] == enriched
+        assert msg["references"] is not None
+        assert len(msg["references"]) == 1
+        assert msg["references"][0]["item_key"] == "99R6SJ7T"
+
+    @pytest.mark.parametrize(
+        "synthesizer_author",
+        [
+            "library_synthesizer_agent",
+            "library_synthesizer",
+            "online_synthesizer_agent",
+            "online_synthesizer",
+            "synthesizer_agent",
+            "synthesizer",
+        ],
+    )
+    def test_format_session_for_ui_recognizes_all_synthesizer_authors(self, synthesizer_author: str) -> None:
+        """Verify all synthesizer agent role variants are recognized as final response event."""
+        from zocrates.utils.session_formatting import format_session_for_ui
+        from google.adk.events.event import Event
+        from google.genai import types
+
+        coord_part = types.Part.from_text(text="I will now coordinate the search.")
+        coord_event = Event(
+            id="evt-coord",
+            invocation_id="inv-syn",
+            author="coordinator_agent",
+            content=types.Content(role="model", parts=[coord_part]),
+        )
+
+        synth_part = types.Part.from_text(text="Here is the final verified synthesis.")
+        synth_event = Event(
+            id="evt-synth",
+            invocation_id="inv-syn",
+            author=synthesizer_author,
+            content=types.Content(role="model", parts=[synth_part]),
+        )
+
+        mock_session = MagicMock()
+        mock_session.id = "sess-synth"
+        mock_session.events = [coord_event, synth_event]
+        mock_session.state = {}
+
+        res = format_session_for_ui(mock_session)
+        assert len(res["messages"]) == 1
+        msg = res["messages"][0]
+        assert msg["text"] == "Here is the final verified synthesis."
+        agent_steps = [s for s in msg["intermediate_steps"] if s["type"] == "agent_text"]
+        assert any("coordinate the search" in s["text"] for s in agent_steps)
 
 
 class TestItemsDeleteEndpoint:

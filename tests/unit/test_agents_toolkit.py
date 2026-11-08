@@ -379,6 +379,117 @@ def test_read_document_core_fuzzy_heading_and_multi_id(sample_okf_bundle):
         assert res_multi["assets"][1]["asset_id"] == "f1"
 
 
+def test_read_document_core_hierarchical_breadcrumbs(tmp_path: Path):
+    """Verify read_document_core builds hierarchical breadcrumbs for nested sections,
+    ignoring frontmatter and title, and preserving existing ' > ' breadcrumbs."""
+    cache_dir = tmp_path / "cache"
+    bundle_dir = cache_dir / "NESTED_ITEM"
+    bundle_dir.mkdir(parents=True)
+    doc_lines = [
+        "---",
+        "title: Neural Signal Processing",
+        "---",
+        "# Neural Signal Processing",
+        "Document title paragraph.",
+        "## Results",
+        "Main results overview.",
+        "### A leaky integrator of $[Ca^{2+}]$ signals",
+        "Integrator details and math formulation.",
+        "#### Frequency Response",
+        "High-frequency filtering characteristics.",
+        "### Downstream Decoding",
+        "Decoding calcium transients.",
+        "## Methods > In Vitro Preparations",
+        "Electrophysiological recording setup.",
+        "### Electrophysiology Setup",
+        "Rig configuration.",
+        "## Discussion",
+        "Concluding remarks.",
+        "Section without explicit level.",
+        "Section with None level.",
+    ]
+    (bundle_dir / "document.md").write_text("\n".join(doc_lines), encoding="utf-8")
+    toc_data = {
+        "title": "Neural Signal Processing",
+        "item_key": "NESTED_ITEM",
+        "sections": [
+            {"id": "s0", "heading": "Frontmatter", "level": 0, "start_line": 1, "end_line": 3, "word_count": 5},
+            {"id": "s1", "heading": "Neural Signal Processing", "level": 1, "start_line": 4, "end_line": 5, "word_count": 6},
+            {"id": "s2", "heading": "Results", "level": 2, "start_line": 6, "end_line": 7, "word_count": 5},
+            {"id": "s3", "heading": "A leaky integrator of $[Ca^{2+}]$ signals", "level": 3, "start_line": 8, "end_line": 9, "word_count": 8},
+            {"id": "s4", "heading": "Frequency Response", "level": 4, "start_line": 10, "end_line": 11, "word_count": 6},
+            {"id": "s5", "heading": "Downstream Decoding", "level": 3, "start_line": 12, "end_line": 13, "word_count": 6},
+            {"id": "s6", "heading": "Methods > In Vitro Preparations", "level": 2, "start_line": 14, "end_line": 15, "word_count": 6},
+            {"id": "s6_sub", "heading": "Electrophysiology Setup", "level": 3, "start_line": 15, "end_line": 16, "word_count": 4},
+            {"id": "s7", "heading": "Discussion", "level": 2, "start_line": 16, "end_line": 17, "word_count": 4},
+            {"id": "", "heading": "Unnumbered Alpha", "level": None, "start_line": 17, "end_line": 18, "word_count": 4},
+            {"id": "", "heading": "Unnumbered Beta", "level": "", "start_line": 18, "end_line": 19, "word_count": 4},
+        ],
+    }
+    (bundle_dir / "toc.json").write_text(json.dumps(toc_data), encoding="utf-8")
+
+    mock_syncer = MagicMock()
+    mock_syncer.processor._cache_dir = cache_dir
+    mock_syncer.store.get_intersecting_chunk_ids.return_value = []
+
+    with patch("zocrates.agents.common.toolkit.get_syncer", return_value=mock_syncer):
+        # 1. Frontmatter (s0) is not modified and not prepended
+        res_s0 = read_document_core("NESTED_ITEM", asset_id="s0")
+        assert res_s0["assets"][0]["heading"] == "Frontmatter"
+
+        # 2. Document title (s1) is not modified
+        res_s1 = read_document_core("NESTED_ITEM", asset_id="s1")
+        assert res_s1["assets"][0]["heading"] == "Neural Signal Processing"
+
+        # 3. Level 2 "Results" (s2) has no parent since title is excluded
+        res_s2 = read_document_core("NESTED_ITEM", asset_id="s2")
+        assert res_s2["assets"][0]["heading"] == "Results"
+
+        # 4. Level 3 "A leaky integrator..." (s3) has parent "Results"
+        res_s3 = read_document_core("NESTED_ITEM", asset_id="s3")
+        assert res_s3["assets"][0]["heading"] == "Results > A leaky integrator of $[Ca^{2+}]$ signals"
+
+        # 5. Level 4 "Frequency Response" (s4) has parents "Results" and "A leaky integrator..."
+        res_s4 = read_document_core("NESTED_ITEM", asset_id="s4")
+        assert res_s4["assets"][0]["heading"] == "Results > A leaky integrator of $[Ca^{2+}]$ signals > Frequency Response"
+
+        # 6. Level 3 "Downstream Decoding" (s5) pops s4 and has parent "Results"
+        res_s5 = read_document_core("NESTED_ITEM", asset_id="s5")
+        assert res_s5["assets"][0]["heading"] == "Results > Downstream Decoding"
+
+        # 7. Section with pre-existing ' > ' is preserved verbatim without prepending
+        res_s6 = read_document_core("NESTED_ITEM", asset_id="s6")
+        assert res_s6["assets"][0]["heading"] == "Methods > In Vitro Preparations"
+
+        # 7b. Descendant under 'Methods > In Vitro Preparations' pushes only leaf onto stack
+        res_s6_sub = read_document_core("NESTED_ITEM", asset_id="s6_sub")
+        assert res_s6_sub["assets"][0]["heading"] == "In Vitro Preparations > Electrophysiology Setup"
+
+        # 8. Level 2 "Discussion" (s7) pops all preceding sections and has no parent
+        res_s7 = read_document_core("NESTED_ITEM", asset_id="s7")
+        assert res_s7["assets"][0]["heading"] == "Discussion"
+
+        # 8b. Safe level conversion handles level=None and level="" without empty-id collision
+        res_empty1 = read_document_core("NESTED_ITEM", asset_id="Unnumbered Alpha")
+        assert res_empty1["status"] == "success"
+        assert res_empty1["assets"][0]["heading"] == "Unnumbered Alpha"
+        res_empty2 = read_document_core("NESTED_ITEM", asset_id="Unnumbered Beta")
+        assert res_empty2["status"] == "success"
+        assert res_empty2["assets"][0]["heading"] == "Unnumbered Beta"
+
+        # 9. Fuzzy search by leaf heading returns the section with hierarchical breadcrumbs
+        res_fuzzy = read_document_core("NESTED_ITEM", asset_id="A leaky integrator")
+        assert res_fuzzy["status"] == "success"
+        assert res_fuzzy["assets"][0]["asset_id"] == "s3"
+        assert res_fuzzy["assets"][0]["heading"] == "Results > A leaky integrator of $[Ca^{2+}]$ signals"
+
+        # 10. Fuzzy search by full breadcrumb string also resolves correctly
+        res_fuzzy_full = read_document_core("NESTED_ITEM", asset_id="Results > A leaky integrator")
+        assert res_fuzzy_full["status"] == "success"
+        assert res_fuzzy_full["assets"][0]["asset_id"] == "s3"
+        assert res_fuzzy_full["assets"][0]["heading"] == "Results > A leaky integrator of $[Ca^{2+}]$ signals"
+
+
 def test_read_document_core_abstract_from_metadata(tmp_path: Path):
     """Verify virtual asset_id='abstract' returns toc.json metadata abstract when no section exists."""
     cache_dir = tmp_path / "cache"
