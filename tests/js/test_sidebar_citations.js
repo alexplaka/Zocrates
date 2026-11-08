@@ -1763,6 +1763,8 @@ async function runTests() {
     const mockBubble = createMockElement("div");
     mockBubble.className = "message-bubble";
     mockBubble._metadata = {
+      turn_cost_usd: 0.005,
+      usage: { prompt_tokens: 500, candidates_tokens: 100, total_tokens: 600, cost_usd: 0.005 },
       citation_verification: {
         assessments: [
           {
@@ -1849,6 +1851,8 @@ async function runTests() {
         unsupported_aspects: "",
         model: "nvidia/nemotron-3.5-lightning:free",
         latency_ms: 120,
+        usage: { prompt_tokens: 100, completion_tokens: 25, total_tokens: 125 },
+        cost_usd: 0.00015,
       };
 
       claims.syncSentenceAttribution(targetItem, attrResult);
@@ -1859,6 +1863,20 @@ async function runTests() {
       // Verify bubble._metadata updated
       const bubbleAssessment = mockBubble._metadata.citation_verification.assessments[0];
       assert.strictEqual(bubbleAssessment.sentence_attribution, attrResult, "bubble assessment must have sentence_attribution");
+      assert.strictEqual(mockBubble._metadata.turn_cost_usd, 0.00515);
+      assert.strictEqual(mockBubble._metadata.usage.prompt_tokens, 500);
+      assert.strictEqual(mockBubble._metadata.usage.candidates_tokens, 100);
+      assert.strictEqual(mockBubble._metadata.usage.total_tokens, 725);
+      assert.strictEqual(mockBubble._metadata.usage.cost_usd, 0.00515);
+
+      // Verify _syncedCost and _syncedTotalTokens tracked
+      assert.strictEqual(bubbleAssessment._syncedCost, 0.00015);
+      assert.strictEqual(bubbleAssessment._syncedTotalTokens, 125);
+
+      // Idempotency: re-syncing with identical result does NOT double-increment
+      claims.syncSentenceAttribution(targetItem, attrResult);
+      assert.strictEqual(mockBubble._metadata.turn_cost_usd, 0.00515, "Re-sync must not double-count cost");
+      assert.strictEqual(mockBubble._metadata.usage.total_tokens, 725, "Re-sync must not double-count tokens");
 
       // Verify mockSession message updated
       const sessAssessment = mockSession.messages[0].citation_verification.assessments[0];
@@ -1866,6 +1884,200 @@ async function runTests() {
     } finally {
       global.Zotero = origZot;
       if (typeof window !== "undefined") window.Zotero = origWinZot;
+    }
+  });
+
+  // 34. claims.js: updateAttributionHeaderStats calculation and DOM updates
+  test("claims.js: updateAttributionHeaderStats calculation and DOM updates", () => {
+    const claims = require("../../zotero-plugin/addon/claims.js");
+    let badge = document.getElementById("badge-attr-cost");
+    if (!badge) {
+      badge = createMockElement("span");
+      badge.id = "badge-attr-cost";
+      document.body.appendChild(badge);
+    }
+
+    // 1. When count === 0 or assessments empty -> display none
+    claims.updateClaimsData({
+      assessments: [
+        { claim: "Claim 1", sentence_attribution: null },
+      ],
+    });
+    assert.strictEqual(badge.style.display, "none", "updateClaimsData must auto-refresh header stats");
+
+    // 1b. When status !== 'ok' even if supporting_indices exists -> display none
+    claims.updateClaimsData({
+      assessments: [
+        {
+          claim: "Claim 1",
+          sentence_attribution: {
+            status: "error",
+            supporting_indices: [1],
+            cost_usd: 0.0001,
+            usage: { total_tokens: 100 },
+          },
+        },
+      ],
+    });
+    assert.strictEqual(badge.style.display, "none", "Non-ok status must not be counted even with supporting_indices");
+
+    // 2. When count > 0 and free (cost_usd === 0)
+    claims.updateClaimsData({
+      assessments: [
+        {
+          claim: "Claim 1",
+          sentence_attribution: {
+            status: "ok",
+            cost_usd: 0.0,
+            usage: { prompt_tokens: 150, completion_tokens: 50, total_tokens: 200 },
+          },
+        },
+      ],
+    });
+    claims.updateAttributionHeaderStats();
+    assert.strictEqual(badge.style.display, "inline-flex");
+    assert.ok(badge.textContent.includes("200 tokens"));
+    assert.ok(badge.textContent.includes("(Free)"));
+    assert.ok(badge.title.includes("Sentence Attribution: 1 evaluated"));
+    assert.ok(badge.title.includes("Exact Cost: $0.000000"));
+
+    // 3. When count > 0 and cost_usd > 0
+    claims.updateClaimsData({
+      assessments: [
+        {
+          claim: "Claim 1",
+          sentence_attribution: {
+            status: "ok",
+            cost_usd: 0.00012,
+            usage: { prompt_tokens: 200, completion_tokens: 40, total_tokens: 240 },
+          },
+        },
+        {
+          claim: "Claim 2",
+          sentence_attribution: {
+            status: "ok",
+            cost_usd: 0.00018,
+            usage: { prompt_tokens: 300, completion_tokens: 60, total_tokens: 360 },
+          },
+        },
+      ],
+    });
+    claims.updateAttributionHeaderStats();
+    assert.strictEqual(badge.style.display, "inline-flex");
+    assert.ok(badge.textContent.includes("600 tokens"));
+    assert.ok(badge.textContent.includes("$"));
+    assert.ok(badge.title.includes("Sentence Attribution: 2 evaluated"));
+    assert.ok(badge.title.includes("Tokens: 600"));
+    assert.ok(badge.title.includes("Exact Cost: $0.000300"));
+  });
+
+  // 35. sidebar.js: openMessageInfoModal renders sentence attribution row
+  test("sidebar.js: openMessageInfoModal renders sentence attribution token count and cost row", () => {
+    // 1. With completed sentence attribution and cost > 0
+    const metaWithCost = {
+      role: "assistant",
+      author: "Zocrates",
+      text: "Synthesized text [1].",
+      citation_verification: {
+        provider: "openrouter",
+        model: "inception/mercury-decide",
+        threshold: 0.60,
+        summary: { batch_size: 1, kept: 1, demoted: 0, fail_open: 0, mean_support: 0.85 },
+        assessments: [
+          {
+            claim: "Claim A.",
+            support_probability: 0.85,
+            verdict: "KEPT",
+            sentence_attribution: {
+              status: "ok",
+              cost_usd: 0.00015,
+              usage: { prompt_tokens: 100, completion_tokens: 25, total_tokens: 125 },
+            },
+          },
+        ],
+      },
+    };
+
+    try {
+      sidebar.openMessageInfoModal(metaWithCost);
+      const overlay = document.querySelector(".info-modal-overlay");
+      assert.ok(overlay, "Modal overlay must exist");
+      const citRow = overlay.querySelector(".citation-support-row");
+      assert.ok(citRow, "Citation Support row must exist");
+      const saBox = citRow.querySelector(".citation-support-attribution");
+      assert.ok(saBox, "Sentence attribution row must exist");
+      assert.strictEqual(saBox.textContent, "Sentence Attribution: 1 evaluated (125 tokens • $0.00015)");
+    } finally {
+      const leftover = document.querySelector(".info-modal-overlay");
+      if (leftover) leftover.remove();
+    }
+
+    // 2. With completed sentence attribution and cost === 0 (Free)
+    const metaFree = {
+      role: "assistant",
+      author: "Zocrates",
+      text: "Synthesized text [1].",
+      citation_verification: {
+        provider: "openrouter",
+        model: "inception/mercury-decide",
+        threshold: 0.60,
+        summary: { batch_size: 1, kept: 1, demoted: 0, fail_open: 0, mean_support: 0.85 },
+        assessments: [
+          {
+            claim: "Claim A.",
+            support_probability: 0.85,
+            verdict: "KEPT",
+            sentence_attribution: {
+              status: "ok",
+              cost_usd: 0.0,
+              usage: { prompt_tokens: 80, completion_tokens: 20, total_tokens: 100 },
+            },
+          },
+        ],
+      },
+    };
+
+    try {
+      sidebar.openMessageInfoModal(metaFree);
+      const overlay = document.querySelector(".info-modal-overlay");
+      const citRow = overlay.querySelector(".citation-support-row");
+      const saBox = citRow.querySelector(".citation-support-attribution");
+      assert.ok(saBox, "Sentence attribution row must exist for free attribution");
+      assert.strictEqual(saBox.textContent, "Sentence Attribution: 1 evaluated (100 tokens • Free)");
+    } finally {
+      const leftover = document.querySelector(".info-modal-overlay");
+      if (leftover) leftover.remove();
+    }
+
+    // 3. Without sentence attribution -> row should NOT exist
+    const metaNoSa = {
+      role: "assistant",
+      author: "Zocrates",
+      text: "Synthesized text [1].",
+      citation_verification: {
+        provider: "openrouter",
+        model: "inception/mercury-decide",
+        threshold: 0.60,
+        summary: { batch_size: 1, kept: 1, demoted: 0, fail_open: 0, mean_support: 0.85 },
+        assessments: [
+          {
+            claim: "Claim A.",
+            support_probability: 0.85,
+            verdict: "KEPT",
+          },
+        ],
+      },
+    };
+
+    try {
+      sidebar.openMessageInfoModal(metaNoSa);
+      const overlay = document.querySelector(".info-modal-overlay");
+      const citRow = overlay.querySelector(".citation-support-row");
+      const saBox = citRow.querySelector(".citation-support-attribution");
+      assert.strictEqual(saBox, null, "Sentence attribution row must not exist when no assessments have sentence attribution");
+    } finally {
+      const leftover = document.querySelector(".info-modal-overlay");
+      if (leftover) leftover.remove();
     }
   });
 }

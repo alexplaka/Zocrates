@@ -5426,6 +5426,7 @@ async def sentence_attribution_endpoint(request: SentenceAttributionRequest) -> 
         api_key=api_key,
         model=model,
         base_url=cfg.get("llm_base_url") if is_local else None,
+        zotero_data_dir=zot_dir,
     )
 
     if request.session_id:

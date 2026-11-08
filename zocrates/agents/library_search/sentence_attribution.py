@@ -13,6 +13,7 @@ import json
 import logging
 import re
 import time
+from pathlib import Path
 from typing import Any
 
 from zocrates.agents.common.state_keys import RETRIEVED_EVIDENCE
@@ -238,6 +239,7 @@ async def compute_sentence_attribution(
     timeout: float = SENTENCE_ATTRIBUTION_TIMEOUT_SEC,
     model: str | None = None,
     base_url: str | None = None,
+    zotero_data_dir: Path | str | None = None,
 ) -> dict[str, Any]:
     """Compute sentence-level attribution for a claim against source text.
 
@@ -248,6 +250,7 @@ async def compute_sentence_attribution(
         timeout: Timeout in seconds for model completion.
         model: Optional model identifier override.
         base_url: Optional API base URL for local providers.
+        zotero_data_dir: Optional Zotero data directory for catalog discovery.
 
     Returns:
         Attribution result dictionary.
@@ -268,6 +271,8 @@ async def compute_sentence_attribution(
             "unsupported_aspects": "Source passage is empty",
             "model": model,
             "latency_ms": 0.0,
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            "cost_usd": 0.0,
         }
 
     formatted_spans = format_spans_for_prompt(spans)
@@ -301,6 +306,56 @@ async def compute_sentence_attribution(
         )
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
+        usage_obj = getattr(response, "usage", None)
+        if usage_obj is None and isinstance(response, dict):
+            usage_obj = response.get("usage")
+
+        prompt_tokens = 0
+        completion_tokens = 0
+        total_tokens = 0
+        if usage_obj is not None:
+            if isinstance(usage_obj, dict):
+                try:
+                    prompt_tokens = int(usage_obj.get("prompt_tokens") or 0)
+                except (ValueError, TypeError):
+                    prompt_tokens = 0
+                try:
+                    completion_tokens = int(usage_obj.get("completion_tokens") or 0)
+                except (ValueError, TypeError):
+                    completion_tokens = 0
+                try:
+                    total_tokens = int(usage_obj.get("total_tokens") or (prompt_tokens + completion_tokens))
+                except (ValueError, TypeError):
+                    total_tokens = prompt_tokens + completion_tokens
+            else:
+                try:
+                    prompt_tokens = int(getattr(usage_obj, "prompt_tokens", 0) or 0)
+                except (ValueError, TypeError):
+                    prompt_tokens = 0
+                try:
+                    completion_tokens = int(getattr(usage_obj, "completion_tokens", 0) or 0)
+                except (ValueError, TypeError):
+                    completion_tokens = 0
+                try:
+                    total_tokens = int(getattr(usage_obj, "total_tokens", 0) or (prompt_tokens + completion_tokens))
+                except (ValueError, TypeError):
+                    total_tokens = prompt_tokens + completion_tokens
+
+        cost_usd = 0.0
+        try:
+            from zocrates.utils.cost_calculator import calculate_event_cost
+
+            cost_usd = float(
+                calculate_event_cost(
+                    model,
+                    prompt_tokens=prompt_tokens,
+                    candidates_tokens=completion_tokens,
+                    zotero_data_dir=zotero_data_dir,
+                )
+            )
+        except Exception as cost_exc:
+            logger.debug("Sentence attribution cost calculation failed: %s", cost_exc)
+
         raw_content = ""
         if response and response.choices and len(response.choices) > 0:
             choice = response.choices[0]
@@ -317,6 +372,12 @@ async def compute_sentence_attribution(
             "unsupported_aspects": parsed["unsupported_aspects"],
             "model": model,
             "latency_ms": round(elapsed_ms, 2),
+            "usage": {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+            },
+            "cost_usd": round(cost_usd, 6),
         }
     except Exception as exc:
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
@@ -328,6 +389,8 @@ async def compute_sentence_attribution(
             "unsupported_aspects": f"Evaluation error: {exc}",
             "model": model,
             "latency_ms": round(elapsed_ms, 2),
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            "cost_usd": 0.0,
         }
 
 

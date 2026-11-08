@@ -332,30 +332,6 @@ def format_session_for_ui(
             "total_tokens": turn_total,
         } if has_usage else None
 
-        # Compute multi-agent turn cost and model mapping
-        turn_cost, agent_models = aggregate_turn_cost(
-            asst_evts,
-            default_model=default_model,
-            zotero_data_dir=zotero_data_dir,
-        )
-        session_total_cost += turn_cost
-        if aggregated_usage:
-            session_total_tokens += aggregated_usage.get("total_tokens", 0)
-
-        if aggregated_usage is not None:
-            aggregated_usage["cost_usd"] = round(turn_cost, 6)
-            aggregated_usage["agent_models"] = agent_models
-        elif agent_models:
-            aggregated_usage = {
-                "prompt_tokens": 0,
-                "candidates_tokens": 0,
-                "thoughts_tokens": 0,
-                "cached_tokens": 0,
-                "total_tokens": 0,
-                "cost_usd": round(turn_cost, 6),
-                "agent_models": agent_models,
-            }
-
         # Determine the final response event and text
         text_events: list[tuple[Any, str]] = []
         for evt in asst_evts:
@@ -382,6 +358,116 @@ def format_session_for_ui(
 
         if not final_evt and text_events:
             final_evt, final_text = text_events[-1]
+
+        ev_meta = getattr(final_evt, "custom_metadata", None) or {}
+        if not isinstance(ev_meta, dict):
+            ev_meta = {}
+        citations = ev_meta.get("citations")
+        references = ev_meta.get("references")
+        candidates = ev_meta.get("candidates")
+        citation_verification = ev_meta.get("citation_verification")
+        enriched_text = ev_meta.get("enriched_text")
+
+        if getattr(session, "state", None):
+            audit_history = session.state.get("retrieved_evidence") or []
+            inv_id = getattr(final_evt or asst_evts[-1], "invocation_id", None)
+            for entry in reversed(audit_history):
+                # Strictly scope to matching invocation_id to prevent leaking across turns
+                entry_inv = entry.get("invocation_id")
+                if (inv_id and entry_inv == inv_id) or (not inv_id and not entry_inv):
+                    if not citations:
+                        citations = entry.get("citations")
+                    if not references:
+                        references = entry.get("references")
+                    if not enriched_text:
+                        enriched_text = entry.get("enriched_text")
+                    if not citation_verification:
+                        citation_verification = entry.get("citation_verification_telemetry")
+                    break
+
+        if enriched_text:
+            final_text = enriched_text
+
+        if not candidates and getattr(session, "state", None):
+            inv_id = getattr(final_evt or asst_evts[-1], "invocation_id", None)
+            cand_inv_id = session.state.get("candidates_invocation_id")
+            if inv_id and cand_inv_id and inv_id == cand_inv_id:
+                candidates = session.state.get("candidates") or session.state.get("selected_candidates")
+
+        # Compute multi-agent turn cost and model mapping
+        turn_cost, agent_models = aggregate_turn_cost(
+            asst_evts,
+            default_model=default_model,
+            zotero_data_dir=zotero_data_dir,
+        )
+
+        # Inspect citation_verification assessments for sentence attribution accounting
+        if citation_verification and isinstance(citation_verification, dict):
+            sa_cost = 0.0
+            sa_prompt = 0
+            sa_completion = 0
+            sa_total = 0
+            has_sa = False
+            for assessment in citation_verification.get("assessments", []):
+                if not isinstance(assessment, dict):
+                    continue
+                sa = assessment.get("sentence_attribution")
+                if sa and isinstance(sa, dict) and sa.get("status") == "ok":
+                    has_sa = True
+                    try:
+                        sa_cost += float(sa.get("cost_usd") or 0.0)
+                    except (ValueError, TypeError):
+                        pass
+                    u = sa.get("usage") or {}
+                    if isinstance(u, dict):
+                        try:
+                            p = int(u.get("prompt_tokens") or 0)
+                        except (ValueError, TypeError):
+                            p = 0
+                        try:
+                            c = int(u.get("completion_tokens") or 0)
+                        except (ValueError, TypeError):
+                            c = 0
+                        try:
+                            t = int(u.get("total_tokens") or (p + c))
+                        except (ValueError, TypeError):
+                            t = p + c
+                        sa_prompt += p
+                        sa_completion += c
+                        sa_total += t
+
+            if has_sa:
+                turn_cost += sa_cost
+                if aggregated_usage is None:
+                    aggregated_usage = {
+                        "prompt_tokens": sa_prompt,
+                        "candidates_tokens": sa_completion,
+                        "thoughts_tokens": 0,
+                        "cached_tokens": 0,
+                        "total_tokens": sa_total,
+                    }
+                else:
+                    aggregated_usage["prompt_tokens"] = aggregated_usage.get("prompt_tokens", 0) + sa_prompt
+                    aggregated_usage["candidates_tokens"] = aggregated_usage.get("candidates_tokens", 0) + sa_completion
+                    aggregated_usage["total_tokens"] = aggregated_usage.get("total_tokens", 0) + sa_total
+
+        session_total_cost += turn_cost
+        if aggregated_usage:
+            session_total_tokens += aggregated_usage.get("total_tokens", 0)
+
+        if aggregated_usage is not None:
+            aggregated_usage["cost_usd"] = round(turn_cost, 6)
+            aggregated_usage["agent_models"] = agent_models
+        elif agent_models:
+            aggregated_usage = {
+                "prompt_tokens": 0,
+                "candidates_tokens": 0,
+                "thoughts_tokens": 0,
+                "cached_tokens": 0,
+                "total_tokens": 0,
+                "cost_usd": round(turn_cost, 6),
+                "agent_models": agent_models,
+            }
 
         # Extract intermediate steps
         intermediate_steps: list[dict[str, Any]] = []
@@ -460,40 +546,7 @@ def format_session_for_ui(
         except Exception:
             pass
 
-        ev_meta = getattr(final_evt, "custom_metadata", None) or {}
-        if not isinstance(ev_meta, dict):
-            ev_meta = {}
-        citations = ev_meta.get("citations")
-        references = ev_meta.get("references")
-        candidates = ev_meta.get("candidates")
-        citation_verification = ev_meta.get("citation_verification")
-        enriched_text = ev_meta.get("enriched_text")
 
-        if getattr(session, "state", None):
-            audit_history = session.state.get("retrieved_evidence") or []
-            inv_id = getattr(final_evt or asst_evts[-1], "invocation_id", None)
-            for entry in reversed(audit_history):
-                # Strictly scope to matching invocation_id to prevent leaking across turns
-                entry_inv = entry.get("invocation_id")
-                if (inv_id and entry_inv == inv_id) or (not inv_id and not entry_inv):
-                    if not citations:
-                        citations = entry.get("citations")
-                    if not references:
-                        references = entry.get("references")
-                    if not enriched_text:
-                        enriched_text = entry.get("enriched_text")
-                    if not citation_verification:
-                        citation_verification = entry.get("citation_verification_telemetry")
-                    break
-
-        if enriched_text:
-            final_text = enriched_text
-
-        if not candidates and getattr(session, "state", None):
-            inv_id = getattr(final_evt or asst_evts[-1], "invocation_id", None)
-            cand_inv_id = session.state.get("candidates_invocation_id")
-            if inv_id and cand_inv_id and inv_id == cand_inv_id:
-                candidates = session.state.get("candidates") or session.state.get("selected_candidates")
 
         messages.append({
             "id": getattr(final_evt or asst_evts[-1], "id", None),

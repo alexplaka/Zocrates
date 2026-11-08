@@ -790,6 +790,15 @@ body[data-theme="sepia"] .modal-input {
   white-space: normal;
 }
 
+.citation-support-attribution {
+  display: block;
+  color: var(--text-muted);
+  font-size: calc(11px * var(--chat-font-scale, 1));
+  line-height: 1.4;
+  white-space: normal;
+  margin-top: 2px;
+}
+
 .citation-support-toggle-btn {
   align-self: flex-start;
   background: var(--bg-hover, rgba(255, 255, 255, 0.08));

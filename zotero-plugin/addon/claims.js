@@ -217,6 +217,30 @@
             );
             if (match) {
               match.sentence_attribution = result;
+
+              // Incrementally add to parent bubble._metadata.turn_cost_usd and bubble._metadata.usage if present
+              const newCost = Number(result?.cost_usd || 0.0);
+              const usageObj = result?.usage || {};
+              const addedTotal = Number(usageObj.total_tokens || (Number(usageObj.prompt_tokens || 0) + Number(usageObj.completion_tokens || 0)) || 0);
+
+              const prevCost = Number(match._syncedCost || 0.0);
+              const prevTotal = Number(match._syncedTotalTokens || 0);
+              const deltaCost = Math.max(0, Number((newCost - prevCost).toFixed(6)));
+              const deltaTotal = Math.max(0, addedTotal - prevTotal);
+
+              if (deltaCost > 0 || deltaTotal > 0) {
+                if (b._metadata.turn_cost_usd !== undefined && b._metadata.turn_cost_usd !== null) {
+                  b._metadata.turn_cost_usd = Number((Number(b._metadata.turn_cost_usd) + deltaCost).toFixed(6));
+                }
+                if (b._metadata.usage && typeof b._metadata.usage === "object") {
+                  b._metadata.usage.total_tokens = Number(b._metadata.usage.total_tokens || 0) + deltaTotal;
+                  if (b._metadata.usage.cost_usd !== undefined && b._metadata.usage.cost_usd !== null) {
+                    b._metadata.usage.cost_usd = Number((Number(b._metadata.usage.cost_usd) + deltaCost).toFixed(6));
+                  }
+                }
+              }
+              match._syncedCost = newCost;
+              match._syncedTotalTokens = addedTotal;
             }
           }
         });
@@ -245,6 +269,44 @@
         });
       }
     } catch (_) {}
+
+    updateAttributionHeaderStats();
+  }
+
+  function updateAttributionHeaderStats() {
+    const badge = document.getElementById("badge-attr-cost");
+    if (!badge) return;
+
+    const assessments = currentClaimsData?.assessments;
+    if (!Array.isArray(assessments)) {
+      badge.style.display = "none";
+      return;
+    }
+
+    let count = 0;
+    let tokens = 0;
+    let cost = 0.0;
+
+    assessments.forEach(a => {
+      const sa = a?.sentence_attribution;
+      if (sa && sa.status === "ok") {
+        count++;
+        const u = sa.usage || {};
+        const p = Number(u.prompt_tokens || 0);
+        const c = Number(u.completion_tokens || 0);
+        tokens += Number(u.total_tokens || (p + c) || 0);
+        cost += Number(sa.cost_usd || 0.0);
+      }
+    });
+
+    if (count > 0) {
+      const costStr = cost < 0.001 ? cost.toFixed(5) : (cost < 0.01 ? cost.toFixed(4) : cost.toFixed(2));
+      badge.textContent = `🔍 Attribution: ${tokens.toLocaleString()} tokens${cost > 0 ? ` • $${costStr}` : " (Free)"}`;
+      badge.title = `Sentence Attribution: ${count} evaluated\nTokens: ${tokens.toLocaleString()}\nExact Cost: $${cost.toFixed(6)}`;
+      badge.style.display = "inline-flex";
+    } else {
+      badge.style.display = "none";
+    }
   }
 
   function renderRichContent(rawText, isBlock = false) {
@@ -1306,6 +1368,7 @@
     } catch (e) {}
     applyTheme();
     renderAll();
+    updateAttributionHeaderStats();
   };
 
   // Re-check on focus if parent pushed newer data
@@ -1323,6 +1386,7 @@
         renderAll();
       }
     } catch (e) {}
+    updateAttributionHeaderStats();
   });
 
   window.matchMedia?.("(prefers-color-scheme: dark)")?.addEventListener("change", () => {
@@ -1336,6 +1400,7 @@
     const data = resolveClaimsData();
     currentClaimsData = data;
     renderAll();
+    updateAttributionHeaderStats();
   }
 
   if (document.readyState === "loading") {
@@ -1352,6 +1417,7 @@
       formatSourceAuthorYear,
       formatAttributionNoteHtml,
       syncSentenceAttribution,
+      updateAttributionHeaderStats,
       getSidebarWindow,
       updateClaimsData: (typeof window !== "undefined" ? window.updateClaimsData : null),
     };

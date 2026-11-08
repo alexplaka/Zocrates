@@ -6932,6 +6932,29 @@ function openMessageInfoModal(meta) {
       countsBox.textContent = `${total} claims evaluated: ${kept} verified (p ≥ ${threshFmt}), ${demoted} rejected (p < ${threshFmt})${failOpen > 0 ? `, ${failOpen} unverified` : ""}`;
       statsBox.appendChild(countsBox);
 
+      if (Array.isArray(verif?.assessments)) {
+        let saCount = 0;
+        let saTokens = 0;
+        let saCost = 0.0;
+        verif.assessments.forEach(a => {
+          const sa = a?.sentence_attribution;
+          if (sa && sa.status === "ok") {
+            saCount++;
+            const u = sa.usage || {};
+            const p = Number(u.prompt_tokens || 0);
+            const c = Number(u.completion_tokens || 0);
+            saTokens += Number(u.total_tokens || (p + c) || 0);
+            saCost += Number(sa.cost_usd || 0.0);
+          }
+        });
+        if (saCount > 0) {
+          const saRow = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+          saRow.className = "citation-support-attribution";
+          saRow.textContent = `Sentence Attribution: ${saCount} evaluated (${saTokens.toLocaleString()} tokens${saCost > 0 ? ` • $${saCost.toFixed(5)}` : " • Free"})`;
+          statsBox.appendChild(saRow);
+        }
+      }
+
       valEl.appendChild(statsBox);
 
       row.appendChild(valEl);

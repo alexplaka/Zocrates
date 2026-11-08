@@ -158,6 +158,8 @@ class TestComputeSentenceAttribution:
         assert res["supporting_indices"] == []
         assert res["spans"] == []
         assert res["latency_ms"] == 0.0
+        assert res["usage"] == {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        assert res["cost_usd"] == 0.0
 
     @pytest.mark.asyncio
     async def test_successful_evaluation(self):
@@ -167,6 +169,7 @@ class TestComputeSentenceAttribution:
         mock_choice.message.content = '{"supporting_indices": [1], "unsupported_aspects": ""}'
         mock_resp = MagicMock()
         mock_resp.choices = [mock_choice]
+        mock_resp.usage = MagicMock(prompt_tokens=120, completion_tokens=30, total_tokens=150)
 
         with patch("litellm.acompletion", new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = mock_resp
@@ -181,6 +184,37 @@ class TestComputeSentenceAttribution:
             assert res["unsupported_aspects"] == ""
             assert len(res["spans"]) == 1
             assert res["model"] == get_sentence_attribution_model()
+            assert res["usage"]["prompt_tokens"] == 120
+            assert res["usage"]["completion_tokens"] == 30
+            assert res["usage"]["total_tokens"] == 150
+            assert isinstance(res["cost_usd"], float)
+
+    @pytest.mark.asyncio
+    async def test_returns_usage_and_calculated_cost(self):
+        mock_choice = MagicMock()
+        mock_choice.message.content = '{"supporting_indices": [1], "unsupported_aspects": ""}'
+        mock_resp = MagicMock()
+        mock_resp.choices = [mock_choice]
+        mock_resp.usage = MagicMock(prompt_tokens=250, completion_tokens=50, total_tokens=300)
+
+        with patch("litellm.acompletion", new_callable=AsyncMock) as mock_llm, \
+             patch("zocrates.utils.cost_calculator.calculate_event_cost", return_value=0.000123) as mock_cost:
+            mock_llm.return_value = mock_resp
+            res = await compute_sentence_attribution(
+                claim="Model achieves 95% accuracy.",
+                source_text="The proposed architecture achieves 95% accuracy on ImageNet.",
+                api_key="test-key",
+                model="test/custom-model",
+            )
+            assert res["status"] == "ok"
+            assert res["usage"] == {"prompt_tokens": 250, "completion_tokens": 50, "total_tokens": 300}
+            assert res["cost_usd"] == 0.000123
+            mock_cost.assert_called_once_with(
+                "test/custom-model",
+                prompt_tokens=250,
+                candidates_tokens=50,
+                zotero_data_dir=None,
+            )
 
     @pytest.mark.asyncio
     async def test_llm_exception_handled(self):
@@ -195,6 +229,8 @@ class TestComputeSentenceAttribution:
             assert "support_level" not in res
             assert res["supporting_indices"] == []
             assert "error" in res["unsupported_aspects"].lower()
+            assert res["usage"] == {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+            assert res["cost_usd"] == 0.0
 
 
 class TestSessionPersistence:
@@ -483,3 +519,247 @@ class TestSentenceAttributionModelConfig:
             assert call_kwargs["model"] == "ollama_chat/llama3.2:3b"
             assert "extra_body" not in call_kwargs
             assert "extra_headers" not in call_kwargs
+
+
+class TestSessionFormattingSentenceAttribution:
+    """Tests for session_formatting.py sentence attribution cost and token aggregation."""
+
+    def test_aggregates_sentence_attribution_cost_and_tokens(self):
+        from zocrates.utils.session_formatting import format_session_for_ui
+
+        user_part = MagicMock(thought=False, text="Explain finding", function_call=None, function_response=None)
+        evt_user = MagicMock(
+            author="user",
+            timestamp=100.0,
+            content=MagicMock(parts=[user_part]),
+            actions=None,
+            usage_metadata=None,
+            invocation_id="inv_1",
+        )
+
+        asst_part = MagicMock(thought=False, text="Here is the explanation.", function_call=None, function_response=None)
+        evt_asst = MagicMock(
+            author="library_synthesizer_agent",
+            model_version="google/gemini-2.5-flash",
+            timestamp=105.0,
+            content=MagicMock(parts=[asst_part]),
+            actions=None,
+            usage_metadata={
+                "prompt_token_count": 1000,
+                "candidates_token_count": 200,
+                "total_token_count": 1200,
+            },
+            invocation_id="inv_1",
+            custom_metadata={
+                "citation_verification": {
+                    "assessments": [
+                        {
+                            "claim": "Claim 1",
+                            "sentence_attribution": {
+                                "status": "ok",
+                                "cost_usd": 0.000150,
+                                "usage": {
+                                    "prompt_tokens": 120,
+                                    "completion_tokens": 30,
+                                    "total_tokens": 150,
+                                },
+                            },
+                        },
+                        {
+                            "claim": "Claim 2",
+                            "sentence_attribution": {
+                                "status": "ok",
+                                "cost_usd": 0.000080,
+                                "usage": {
+                                    "prompt_tokens": 90,
+                                    "completion_tokens": 20,
+                                    "total_tokens": 110,
+                                },
+                            },
+                        },
+                    ]
+                }
+            },
+        )
+
+        session = MagicMock()
+        session.id = "sess_attr_test"
+        session.state = {"session_title": "Attribution Test"}
+        session.events = [evt_user, evt_asst]
+
+        with patch("zocrates.utils.session_formatting.aggregate_turn_cost", return_value=(0.005000, {"library_synthesizer": "google/gemini-2.5-flash"})):
+            ui_data = format_session_for_ui(session)
+
+        # Base turn cost = 0.005, Attribution cost = 0.00015 + 0.00008 = 0.00023 -> Turn cost = 0.005230
+        asst_msg = ui_data["messages"][-1]
+        assert asst_msg["turn_cost_usd"] == 0.005230
+        assert ui_data["total_cost_usd"] == 0.005230
+
+        # Base tokens = 1200, Attribution tokens = 150 + 110 = 260 -> Total tokens = 1460
+        assert asst_msg["usage"]["total_tokens"] == 1460
+        assert asst_msg["usage"]["prompt_tokens"] == 1000 + (120 + 90)
+        assert asst_msg["usage"]["candidates_tokens"] == 200 + (30 + 20)
+        assert ui_data["total_tokens"] == 1460
+
+    def test_ignores_non_ok_or_missing_attribution(self):
+        from zocrates.utils.session_formatting import format_session_for_ui
+
+        user_part = MagicMock(thought=False, text="Query", function_call=None, function_response=None)
+        evt_user = MagicMock(
+            author="user",
+            timestamp=100.0,
+            content=MagicMock(parts=[user_part]),
+            actions=None,
+            usage_metadata=None,
+            invocation_id="inv_1",
+        )
+
+        asst_part = MagicMock(thought=False, text="Response", function_call=None, function_response=None)
+        evt_asst = MagicMock(
+            author="synthesizer",
+            model_version="google/gemini-2.5-flash",
+            timestamp=105.0,
+            content=MagicMock(parts=[asst_part]),
+            actions=None,
+            usage_metadata={
+                "prompt_token_count": 500,
+                "candidates_token_count": 100,
+                "total_token_count": 600,
+            },
+            invocation_id="inv_1",
+            custom_metadata={
+                "citation_verification": {
+                    "assessments": [
+                        {
+                            "claim": "Claim error",
+                            "sentence_attribution": {
+                                "status": "error",
+                                "cost_usd": 0.0005,
+                                "usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
+                            },
+                        },
+                        {
+                            "claim": "Claim none",
+                            "sentence_attribution": None,
+                        },
+                    ]
+                }
+            },
+        )
+
+        session = MagicMock(id="sess_err", state={}, events=[evt_user, evt_asst])
+        with patch("zocrates.utils.session_formatting.aggregate_turn_cost", return_value=(0.001000, {})):
+            ui_data = format_session_for_ui(session)
+
+        asst_msg = ui_data["messages"][-1]
+        assert asst_msg["turn_cost_usd"] == 0.001000
+        assert ui_data["total_cost_usd"] == 0.001000
+        assert asst_msg["usage"]["total_tokens"] == 600
+        assert ui_data["total_tokens"] == 600
+
+    def test_initializes_usage_when_originally_none(self):
+        from zocrates.utils.session_formatting import format_session_for_ui
+
+        user_part = MagicMock(thought=False, text="Query", function_call=None, function_response=None)
+        evt_user = MagicMock(
+            author="user",
+            timestamp=100.0,
+            content=MagicMock(parts=[user_part]),
+            actions=None,
+            usage_metadata=None,
+            invocation_id="inv_1",
+        )
+
+        asst_part = MagicMock(thought=False, text="Response", function_call=None, function_response=None)
+        evt_asst = MagicMock(
+            author="synthesizer",
+            model_version="test-model",
+            timestamp=105.0,
+            content=MagicMock(parts=[asst_part]),
+            actions=None,
+            usage_metadata=None,  # No event usage
+            invocation_id="inv_1",
+            custom_metadata={
+                "citation_verification": {
+                    "assessments": [
+                        {
+                            "claim": "Claim 1",
+                            "sentence_attribution": {
+                                "status": "ok",
+                                "cost_usd": 0.000045,
+                                "usage": {
+                                    "prompt_tokens": 80,
+                                    "completion_tokens": 15,
+                                    "total_tokens": 95,
+                                },
+                            },
+                        }
+                    ]
+                }
+            },
+        )
+
+        session = MagicMock(id="sess_none_usage", state={}, events=[evt_user, evt_asst])
+        with patch("zocrates.utils.session_formatting.aggregate_turn_cost", return_value=(0.0, {})):
+            ui_data = format_session_for_ui(session)
+
+        asst_msg = ui_data["messages"][-1]
+        assert asst_msg["turn_cost_usd"] == 0.000045
+        assert ui_data["total_cost_usd"] == 0.000045
+        assert asst_msg["usage"] is not None
+        assert asst_msg["usage"]["prompt_tokens"] == 80
+        assert asst_msg["usage"]["candidates_tokens"] == 15
+        assert asst_msg["usage"]["total_tokens"] == 95
+        assert ui_data["total_tokens"] == 95
+
+    def test_malformed_cost_or_tokens_fails_open(self):
+        from zocrates.utils.session_formatting import format_session_for_ui
+
+        user_part = MagicMock(thought=False, text="Query", function_call=None, function_response=None)
+        evt_user = MagicMock(
+            author="user",
+            timestamp=100.0,
+            content=MagicMock(parts=[user_part]),
+            actions=None,
+            usage_metadata=None,
+            invocation_id="inv_1",
+        )
+
+        asst_part = MagicMock(thought=False, text="Response", function_call=None, function_response=None)
+        evt_asst = MagicMock(
+            author="synthesizer",
+            model_version="test-model",
+            timestamp=105.0,
+            content=MagicMock(parts=[asst_part]),
+            actions=None,
+            usage_metadata={"total_token_count": 500},
+            invocation_id="inv_1",
+            custom_metadata={
+                "citation_verification": {
+                    "assessments": [
+                        {
+                            "claim": "Claim malformed",
+                            "sentence_attribution": {
+                                "status": "ok",
+                                "cost_usd": "not-a-float",
+                                "usage": {
+                                    "prompt_tokens": "not-an-int",
+                                    "completion_tokens": {},
+                                    "total_tokens": "bad",
+                                },
+                            },
+                        }
+                    ]
+                }
+            },
+        )
+
+        session = MagicMock(id="sess_malformed", state={}, events=[evt_user, evt_asst])
+        with patch("zocrates.utils.session_formatting.aggregate_turn_cost", return_value=(0.001, {})):
+            ui_data = format_session_for_ui(session)
+
+        asst_msg = ui_data["messages"][-1]
+        assert asst_msg["turn_cost_usd"] == 0.001
+        assert asst_msg["usage"]["total_tokens"] == 500
+
+
