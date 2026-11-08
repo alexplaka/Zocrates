@@ -1,6 +1,6 @@
 [project]
 name = "zocrates"
-version = "0.91.0"
+version = "0.92.0"
 description = "An LLM-powered assistant for Zotero."
 license = { text = "AGPL-3.0-or-later" }
 authors = [
