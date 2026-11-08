@@ -90,7 +90,7 @@ sequenceDiagram
     API-->>UI: Deliver SSE event data
     UI->>UI: Render .hitl-checkpoint-card inside existing assistant bubble
 
-    alt Option A: User Grants Deep Research Extension
+    alt User Grants Deep Research Extension
         User->>UI: Click "Grant Deep Research Extension" (+ optional guidance)
         UI->>API: POST /chat/resume {session_id, invocation_id, interrupt_id, response: {action: "extend_budget", guidance: "..."}}
         API->>Runner: runner._run_node_async(new_message=FunctionResponse("adk_request_input"), node=search_pipeline_node)
@@ -100,7 +100,7 @@ sequenceDiagram
             Subagent->>Subagent: Targeted retrieval for remaining gaps
         end
         Subagent-->>Pipe: conclude_search(updated_summary, updated_gaps)
-    else Option B: User Requests Immediate Synthesis
+    else User Requests Immediate Synthesis
         User->>UI: Click "Synthesize Response with Existing Evidence"
         UI->>API: POST /chat/resume {response: {action: "synthesize"}}
         API->>Runner: runner._run_node_async(...)

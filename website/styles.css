@@ -2223,6 +2223,12 @@ body[data-theme="zotero-light"] .section-alt {
   border: 1px solid rgba(239, 68, 68, 0.35);
 }
 
+.claim-verdict-badge.partial {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
 .claim-prob-val {
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.76rem;
@@ -2249,6 +2255,83 @@ body[data-theme="zotero-light"] .section-alt {
   padding: 0.4rem 0.65rem;
   border-radius: 0 4px 4px 0;
   margin: 0;
+}
+
+/* ---- Sentence-Level Micro-Attribution ---- */
+.sentence-attr-highlight {
+  background-color: rgba(16, 185, 129, 0.22);
+  border-bottom: 2px solid #10b981;
+  border-radius: 2px;
+  padding: 1px 3px;
+  color: inherit;
+}
+
+tr.sentence-attr-highlight {
+  background-color: rgba(16, 185, 129, 0.2) !important;
+  border-left: 3px solid #10b981;
+}
+
+tr.sentence-attr-highlight td {
+  background-color: rgba(16, 185, 129, 0.15) !important;
+}
+
+.sentence-attr-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--primary);
+  cursor: pointer;
+  margin-top: 0.45rem;
+  transition: all 0.15s ease;
+}
+
+.sentence-attr-action-btn:hover {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+}
+
+.sentence-attr-note {
+  margin-top: 0.45rem;
+  padding: 0.45rem 0.65rem;
+  border-radius: 6px;
+  font-size: 0.73rem;
+  line-height: 1.4;
+  background: rgba(0, 0, 0, 0.2);
+  border-left: 3px solid var(--accent);
+}
+
+.sentence-attr-note.full {
+  border-left-color: #10b981;
+  background: rgba(16, 185, 129, 0.1);
+  color: #34d399;
+}
+
+.sentence-attr-note.partial {
+  border-left-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.1);
+  color: #fbbf24;
+}
+
+[data-theme="zotero-light"] .sentence-attr-highlight,
+[data-theme="light"] .sentence-attr-highlight {
+  background-color: rgba(16, 185, 129, 0.18);
+  border-bottom: 2px solid #059669;
+}
+
+[data-theme="zotero-light"] .sentence-attr-note.full,
+[data-theme="light"] .sentence-attr-note.full {
+  color: #047857;
+}
+
+[data-theme="zotero-light"] .sentence-attr-note.partial,
+[data-theme="light"] .sentence-attr-note.partial {
+  color: #b45309;
 }
 
 /* ---- Responsive Breakpoints ---- */

@@ -155,15 +155,19 @@ Unlike generic search plugins, Zocrates uses a specialized multi-agent retrieval
 * **Shared Cross-Encoder Reranking**: Dynamically scores retrieved passages using local cross-encoders with empty-evidence fallback guards.
 * **Three-Pillar Table of Contents Continuity**: Dual-key ToC caching (`cached_tocs`), section level-folding for dense monographs (>15 sections), and complete-range asset summarization (>8 figures / >6 tables).
 
-### 2. Interactive In-Text Citations & Evidence Peeks
-Zocrates treats academic attribution as an absolute priority:
-* **Clean Single-ID Citations**: Numbered references (`[1]`, `[2]`, `[1, 2]`) follow relevance order without leaking internal database IDs.
-* **AI Decision-Model Verification Pre-Pass**: Evaluates claims on a **per-occurrence** basis using fast probabilistic decision models (cloud `inception/mercury-decide:free` or local `laya`).
+### 2. Two-Tier Attribution: Passage Grounding by Default & Sentence Micro-Attribution on Demand
+Zocrates treats academic attribution and epistemic honesty as an absolute priority, offering a two-tier verification depth:
+* **Passage-Level Attribution by Default**: Numbered in-text references (`[1]`, `[2]`, `[1, 2]`) follow cross-encoder relevance order without leaking internal database keys.
+* **Per-Occurrence AI Decision-Model Verification**: Evaluates claims on a **per-occurrence** basis using fast probabilistic decision models (cloud `~typesafe/jev-latest`, `inception/mercury-decide`, or local `laya` via `uv tool`).
 * **Compound Bracket Pruning**: If one citation in `[1, 2]` is unsupported, the failing citation is pruned while the valid one is preserved.
 * **Two-Tier Sources (100% Recall)**:
-  - `# Cited Sources`: Documents providing direct claim support.
+  - `# Cited Sources`: Documents providing direct claim support ($p \ge \tau$).
   - `## Other Considered Sources`: Documents evaluated during retrieval but not cited, guaranteeing zero silently dropped literature.
-* **Interactive Evidence Popovers**: Clicking any citation displays exact section breadcrumbs (`§ Methodology`), verbatim source quotes, and empirical confidence badges (`high`, `moderate`, `low`), with one-click buttons to open the PDF passage in Zotero's reader or select the item in your library.
+* **Interactive Evidence Popovers**: Clicking any in-text citation pill displays exact section breadcrumbs (`§ Methodology`), calibrated attribution confidence badges (`High`, `Moderate`, `Low`), full verbatim source passages, and 1-click buttons to jump to the section in Zotero's reader or select the item in your library.
+* **Standalone Claim Verification Inspector**: Click `'🛡️ Claim Verification Inspector'` on any assistant response to launch an interactive audit window detailing every claim sentence, source paper, evaluated passage, calibrated probability score ($p$), and status badge (`VERIFIED` / `REJECTED`).
+* **Opt-In Sentence-Level Micro-Attribution**: For granular factual audit, click `[🔍 Obtain Sentence-Level Attribution]` on any claim. An atomic span engine partitions the source passage into numbered spans (preserving headings, tables, and math) and highlights the exact supporting sentences in-place (`.sentence-attr-highlight`) and supporting table rows (`tr.sentence-attr-highlight`), alongside natural scholarly missing-fact notes without index jargon.
+* **Dynamic Coordinator Model Inheritance**: Sentence attribution dynamically uses your active coordinator model by default, or an optional dedicated `sentence_attribution_model` configured in `zocrates_config.json`.
+* **Citation Visibility Toggle & Clean Manuscript Export**: Click `Citations: Visible` $\leftrightarrow$ `Citations: Hidden` to switch between interactive pills and clean distraction-free prose. Copying with citations visible generates APA-formatted parenthetical references and bibliographies; copying with citations hidden produces clean prose with bracket tokens removed while preserving code and punctuation.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -171,10 +175,10 @@ Zocrates treats academic attribution as an absolute priority:
 │  Section: § 3.2 Multi-Head Attention                        │
 │  Support: [ High Confidence: 0.94 ]                         │
 ├─────────────────────────────────────────────────────────────┤
-│  "Multi-head attention allows the model to jointly attend    │
+│  "Multi-head attention allows the model to jointly attend   │
 │   to information from different representation subspaces..."│
 ├─────────────────────────────────────────────────────────────┤
-│  [ Open in Reader ]                   [ Select in Library ] │
+│  [ 📖 Open in Reader ]             [ 📁 Select in Library ] │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -242,7 +246,7 @@ Zocrates operates as an extension inside Zotero and inherits the platform baseli
 
 You can test or deploy Zocrates using either pre-built CI artifacts or a local developer build:
 
-#### Option A: Download Pre-Built CI Add-on (`.xpi`) Artifact
+#### Method 1: Install Pre-Built Add-on (`.xpi`)
 If you want to test a Pull Request or the latest commit on `main` without setting up a local Python build toolchain:
 1. Navigate to the [Build Add-on Actions tab](https://github.com/alexplaka/Zocrates/actions/workflows/build-addon.yml) on GitHub.
 2. Select the latest **Build Add-on** workflow run (or click **Details** next to the `Build Add-on` check on any Pull Request).
@@ -250,7 +254,7 @@ If you want to test a Pull Request or the latest commit on `main` without settin
 4. Unzip `zocrates-xpi.zip` to extract the `zocrates.xpi` file.
 5. In Zotero, open **Tools** → **Add-ons**, click the gear icon (⚙️) in the top-right corner, select **Install Add-on From File...**, and choose `zocrates.xpi`.
 
-#### Option B: Local Source Deployment (`./local_deploy.sh`)
+#### Method 2: Local Source Deployment (`./local_deploy.sh`)
 For active development on the frontend extension and Python backend:
 
 ```bash

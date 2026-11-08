@@ -285,7 +285,15 @@ Surviving citations carry calibrated probabilities into the Zotero desktop UI:
      - *Supporting Evidence*: Exact passage evaluated by the decision model, with rendered KaTeX math, Markdown styling, and syntax highlighting.
      - *Probability & Verdict*: Exact calibrated support probability formatted to 3 decimal places ($p = 0.852$) alongside distinct `VERIFIED` (green) or `REJECTED` (red) status badges.
    - **Custom Dropdown Filter (`#claims-source-dropdown-wrap`)**: High-contrast, Gecko/GTK-immune custom DOM dropdown menu (`#claims-source-btn` + `#claims-source-menu`) allowing researchers to filter claims by specific cited paper without theme rendering glitches.
-   - **Reader & Library Navigation**: Direct action buttons on each claim row enabling "Jump to Section in Reader" and "Select in Library".
+   - **Reader & Library Navigation**: Direct action buttons on each claim row (`📖 Open in Reader` and `📁 Select in Library`) jump directly to the target section in Zotero Reader or reveal the item in the collection tree via the `getSidebarWindow()` bridge.
+   - **Opt-In Sentence-Level Micro-Attribution**:
+     - *Interactive Action Bar*: Researchers can click `[🔍 Obtain Sentence-Level Attribution]` in Column 4 to perform top-down factual verification.
+     - *Pre-Segmented Numbered Spans*: Backed by `zocrates/agents/library_search/sentence_attribution.py` and `POST /citations/sentence_attribution`. Uses `segment_source_text()` to partition the source passage into numbered spans while preserving Markdown headings, table rows, and display math.
+     - *Top-Down Factual Prompt*: Evaluates supporting sentences and missing facts without categorical `support_level` labels, avoiding contradiction with the decision model's continuous probability $p$. Explanatory notes strictly prohibit internal "span" jargon.
+     - *In-Place & Table Row Highlighting*: Wraps supporting sentences in `.sentence-attr-highlight` and highlights supporting table rows with `tr.sentence-attr-highlight` via `data-attr-highlight-tr`.
+     - *Attribution Toggle*: Allows toggling between highlighted view (`✨ Attribution: Shown`) and clean source passage (`🔍 Attribution: Hidden`).
+     - *Window Bridge Persistence*: `getSidebarWindow()` synchronizes attribution results into `assistantBubble._claimsData` and SQLite `sessions.db`, persisting state across inspector dialog close and reopen.
+   - **Claim Extraction Boundary Isolation**: In `citation_verifier.py`, backward claim scanning is bounded strictly to valid retrieved chunk numbers (`1 <= idx <= total_chunks`), preserving in-sentence author citations (e.g. `Chang et al. (their refs. [44, 69])`) and cleanly stripping orphaned leading closing parentheses/brackets.
 4. **Message Information Modal Telemetry (`openMessageInfoModal`)**:
    In the Message Information modal (`⋯` → `Message Information`), the Citation Support section provides aggregated statistical diagnostics:
    - **Probability Diagnostics**: Computes the mean support probability and sample standard deviation formatted to 3 decimal places:  
@@ -308,6 +316,7 @@ All verification parameters follow Zocrates' Single Source of Truth architecture
    - `citation_verification_auto_start_local`: `true`
    - `citation_verification_timeout_sec`: `10.0`
    - `citation_verification_turn_budget_sec`: `20.0`
+   - `sentence_attribution_model`: `""` (advanced setting in `zocrates_config.json`; when empty, dynamically inherits the active coordinator model)
    - Config parameters are seeded on initial creation and backfilled atomically under file lock in `zocrates/config.py`.
 2. **Zotero Preferences UI (`preferences.xhtml` & `preferences.js`)**:
    - Includes a dedicated expandable card drawer: **"Citation Verification (Decision Models)"**.

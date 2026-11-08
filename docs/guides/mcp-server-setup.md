@@ -132,7 +132,7 @@ Restart Claude Desktop after editing this file. A hammer/tool icon will confirm 
 
 Cursor supports MCP servers either through the Graphical User Interface or via workspace configuration files.
 
-#### Option A: Cursor GUI Settings
+#### Method 1: Cursor GUI Settings
 1. Open **Cursor Settings** (`Ctrl + Shift + J` or `Cmd + Shift + J`).
 2. Navigate to **Features** → **MCP Servers**.
 3. Click **+ Add New MCP Server**.
@@ -145,7 +145,7 @@ Cursor supports MCP servers either through the Graphical User Interface or via w
      ```
 5. Click **Save**.
 
-#### Option B: Workspace `.cursor/mcp.json`
+#### Method 2: Workspace `.cursor/mcp.json`
 To make Zocrates MCP available for a specific project or workspace, create or edit `.cursor/mcp.json` in your workspace root:
 
 ```json

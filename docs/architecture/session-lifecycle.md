@@ -197,18 +197,18 @@ sequenceDiagram
         Runner->>DB: session_service.append_event(RequestInputEvent)
         Runner-->>API: Yield request_input SSE event
         API-->>UI: Stream request_input -> Render .hitl-checkpoint-card
-        alt Option A: User Grants Extension
+        alt User Grants Extension
             UI->>API: POST /chat/resume {session_id, invocation_id, interrupt_id, response: {action: "extend_budget", guidance}}
             API->>Runner: runner._run_node_async(new_message=FunctionResponse("adk_request_input"), node=search_pipeline_node)
             Runner->>DB: Rehydrate from hitl_snapshot -> Append extension retrieval events
             Runner-->>API: SSE Stream (tokens reconnect into active assistant bubble)
             API-->>UI: Live render into same assistant bubble
-        else Option B: Immediate Synthesis
+        else Immediate Synthesis
             UI->>API: POST /chat/resume {action: "synthesize"}
             API->>Runner: runner._run_node_async(...)
             Runner-->>API: Immediate rerank & synthesis stream
             API-->>UI: Final answer streams into existing bubble
-        else Option C: User Rewinds Interrupted Turn
+        else User Rewinds Interrupted Turn
             UI->>API: POST /sessions/{id}/rewind {invocation_id}
             API->>Runner: runner.rewind_async(invocation_id)
             Runner->>DB: Prune uncommitted invocation events

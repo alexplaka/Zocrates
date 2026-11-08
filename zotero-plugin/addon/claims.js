@@ -275,8 +275,8 @@
     // 2. Parse Markdown if marked is available
     let html = "";
     const markedLib = typeof marked !== "undefined" ? marked : (window.marked || window.opener?.marked);
-    const hasTable = /\|[^\n\r]+\|/.test(processed);
-    const useBlock = Boolean(isBlock || hasTable);
+    const containsTable = /\|[^\n\r]+\|/.test(processed);
+    const useBlock = Boolean(isBlock || containsTable);
 
     if (markedLib) {
       try {
