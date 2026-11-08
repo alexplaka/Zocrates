@@ -1427,6 +1427,447 @@ async function runTests() {
 
     wrapper.remove();
   });
+
+  // 27. buildClaimsInspectorData: passes session_id and handles sentence_attribution
+  test("buildClaimsInspectorData: passes session_id and handles sentence_attribution", () => {
+    const metaWithSid = {
+      sessionId: "sess_custom_123",
+      invocationId: "inv_turn_456",
+      citation_verification: {
+        model: "inception/mercury-decide:free",
+        assessments: [
+          {
+            chunk_index: 1,
+            occurrence: 1,
+            claim: "Sentence level claim A",
+            source_text: "Passage containing supporting evidence.",
+            support_probability: 0.92,
+            verdict: "KEPT",
+            sentence_attribution: {
+              status: "ok",
+              supporting_indices: [1],
+              spans: ["Passage containing supporting evidence."],
+              unsupported_aspects: "",
+              model: "nvidia/nemotron-3.5-lightning:free",
+            },
+          },
+        ],
+      },
+    };
+
+    const data = sidebar.buildClaimsInspectorData(metaWithSid);
+    assert.strictEqual(data.sessionId, "sess_custom_123");
+    assert.strictEqual(data.invocationId, "inv_turn_456");
+    assert.strictEqual(data.assessments.length, 1);
+    assert.ok(data.assessments[0].sentence_attribution, "sentence_attribution must be preserved");
+    assert.strictEqual(data.assessments[0].sentence_attribution.support_level, undefined, "support_level must not be present");
+    assert.deepStrictEqual(data.assessments[0].sentence_attribution.supporting_indices, [1]);
+
+    // Test fallback from currentSessionId when meta.sessionId is omitted
+    sidebar.setCurrentSessionId?.("sess_active_789");
+    const metaNoSid = {
+      invocation_id: "inv_999",
+      citation_verification: {
+        assessments: [
+          {
+            chunk_index: 1,
+            occurrence: 1,
+            claim: "Claim without sid",
+            source_text: "Passage",
+            support_probability: 0.88,
+          },
+        ],
+      },
+    };
+    const dataActive = sidebar.buildClaimsInspectorData(metaNoSid);
+    assert.strictEqual(dataActive.sessionId, "sess_active_789");
+    assert.strictEqual(dataActive.invocationId, "inv_999");
+
+    // Test nested invocation_id in citation_verification
+    const metaVerInv = {
+      citation_verification: {
+        invocation_id: "inv_nested_ver_42",
+        assessments: [],
+      },
+    };
+    const dataVerInv = sidebar.buildClaimsInspectorData(metaVerInv);
+    assert.strictEqual(dataVerInv.invocationId, "inv_nested_ver_42", "Must resolve invocation_id from citation_verification");
+
+    // Test citation occurrence fallback preserves sentence_attribution
+    const metaCitationOcc = {
+      sessionId: "sess_occ_1",
+      citations: [
+        {
+          index: 1,
+          claim: "Citation claim",
+          occurrences: [
+            {
+              occurrence: 1,
+              support_probability: 0.85,
+              sentence_attribution: {
+                status: "ok",
+                supporting_indices: [2],
+                unsupported_aspects: "missing date",
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const dataOcc = sidebar.buildClaimsInspectorData(metaCitationOcc);
+    assert.strictEqual(dataOcc.sessionId, "sess_occ_1");
+    assert.strictEqual(dataOcc.assessments.length, 1);
+    assert.strictEqual(dataOcc.assessments[0].sentence_attribution.support_level, undefined);
+    assert.deepStrictEqual(dataOcc.assessments[0].sentence_attribution.supporting_indices, [2]);
+    assert.strictEqual(dataOcc.assessments[0].sentence_attribution.unsupported_aspects, "missing date");
+  });
+
+  // 28. buildHighlightedPassage: prose span wrapping
+  test("buildHighlightedPassage: wraps supporting prose spans in sentence-attr-highlight", () => {
+    const claims = require("../../zotero-plugin/addon/claims.js");
+    const sourceText = "Deep learning architectures have evolved rapidly. Attention mechanisms enable effective sequence modeling. Residual connections mitigate gradient vanishing.";
+    const spans = [
+      "Deep learning architectures have evolved rapidly.",
+      "Attention mechanisms enable effective sequence modeling.",
+      "Residual connections mitigate gradient vanishing.",
+    ];
+    // Span index 2 (1-based: spanNum 2) is supporting
+    const highlighted = claims.buildHighlightedPassage(sourceText, spans, [2]);
+
+    assert.ok(
+      highlighted.includes('<span class="sentence-attr-highlight">Attention mechanisms enable effective sequence modeling.</span>'),
+      "Supporting span must be wrapped in sentence-attr-highlight"
+    );
+    assert.ok(
+      highlighted.startsWith("Deep learning architectures have evolved rapidly. "),
+      "Unsupporting span 1 must not be wrapped"
+    );
+    assert.ok(
+      highlighted.endsWith(" Residual connections mitigate gradient vanishing."),
+      "Unsupporting span 3 must not be wrapped"
+    );
+  });
+
+  // 29. buildHighlightedPassage: table row highlighting marker
+  test("buildHighlightedPassage: injects data-attr-highlight-tr marker into table row spans", () => {
+    const claims = require("../../zotero-plugin/addon/claims.js");
+    const tableText = [
+      "| Model | Accuracy | F1 |",
+      "|---|---|---|",
+      "| Baseline | 76.2% | 0.74 |",
+      "| Proposed | 84.9% | 0.83 |",
+    ].join("\n");
+
+    const spans = [
+      "| Baseline | 76.2% | 0.74 |",
+      "| Proposed | 84.9% | 0.83 |",
+    ];
+
+    // Span 2 (Proposed) is supporting
+    const highlighted = claims.buildHighlightedPassage(tableText, spans, [2]);
+
+    assert.ok(
+      highlighted.includes('| <span data-attr-highlight-tr="true"></span>Proposed | 84.9% | 0.83 |'),
+      "Supporting table row must contain data-attr-highlight-tr marker"
+    );
+    assert.ok(
+      !highlighted.includes('<span class="sentence-attr-highlight">| Proposed'),
+      "Table row must NOT be wrapped in generic inline span"
+    );
+    assert.ok(
+      highlighted.includes("| Baseline | 76.2% | 0.74 |"),
+      "Non-supporting row must remain unchanged without marker"
+    );
+  });
+
+  // 30. buildHighlightedPassage: empty, null, and missing spans fallback
+  test("buildHighlightedPassage: handles empty, null, and missing spans without duplicating text or misaligning cursor", () => {
+    const claims = require("../../zotero-plugin/addon/claims.js");
+    const sourceText = "Sentence one. Sentence two. Sentence three.";
+
+    // A. Empty / null fallbacks
+    assert.strictEqual(claims.buildHighlightedPassage("", ["Span"], [1]), "");
+    assert.strictEqual(claims.buildHighlightedPassage(sourceText, [], [1]), sourceText);
+    assert.strictEqual(claims.buildHighlightedPassage(sourceText, null, [1]), sourceText);
+    assert.strictEqual(claims.buildHighlightedPassage(null, ["Span"], [1]), "");
+
+    // B. Missing span (idx === -1) between valid spans
+    const spansWithMissing = [
+      "Sentence one.",
+      "Sentence phantom that does not exist in source text.",
+      "Sentence three.",
+    ];
+    // Supporting spans 1 and 3 (spanNum 1 and 3)
+    const result = claims.buildHighlightedPassage(sourceText, spansWithMissing, [1, 3]);
+
+    assert.ok(
+      result.includes('<span class="sentence-attr-highlight">Sentence one.</span>'),
+      "First span must be highlighted"
+    );
+    assert.ok(
+      result.includes(" Sentence two. "),
+      "Middle unmentioned sentence must be preserved verbatim once"
+    );
+    assert.ok(
+      result.includes('<span class="sentence-attr-highlight">Sentence three.</span>'),
+      "Third span must be highlighted despite missing intermediate span"
+    );
+    assert.ok(
+      !result.includes("phantom"),
+      "Phantom missing span must not be injected into output"
+    );
+    // Crucial: ensure Sentence two is not duplicated
+    const countSentenceTwo = (result.match(/Sentence two\./g) || []).length;
+    assert.strictEqual(countSentenceTwo, 1, "Sentence two must appear exactly once (no duplication)");
+  });
+
+  // 31. renderRichContent: isBlock produces table rows with sentence-attr-highlight
+  test("renderRichContent: produces table rows with sentence-attr-highlight when isBlock is true", () => {
+    const claims = require("../../zotero-plugin/addon/claims.js");
+    const tableText = [
+      "| Model | Score |",
+      "|---|---|",
+      "| Baseline | 70% |",
+      "| Proposed | 85% |",
+    ].join("\n");
+
+    const spans = [
+      "| Baseline | 70% |",
+      "| Proposed | 85% |",
+    ];
+
+    // Highlight row 2
+    const highlightedMd = claims.buildHighlightedPassage(tableText, spans, [2]);
+    assert.ok(highlightedMd.includes('data-attr-highlight-tr="true"'));
+
+    // Render with isBlock = true
+    const html = claims.renderRichContent(highlightedMd, true);
+    assert.ok(html.includes("<table"), "Output must contain <table> element");
+    assert.ok(html.includes("<tr"), "Output must contain <tr> elements");
+
+    // Mount to DOM element and execute closest('tr') post-processing as done in updatePassageDisplay
+    const passageBox = createMockElement("div");
+    passageBox.innerHTML = html;
+
+    passageBox.querySelectorAll("span[data-attr-highlight-tr]").forEach((marker) => {
+      const trEl = marker.closest("tr");
+      if (trEl) trEl.classList.add("sentence-attr-highlight");
+      marker.remove();
+    });
+
+    const trs = passageBox.querySelectorAll("tr");
+    assert.strictEqual(trs.length, 3, "Expected 1 header tr + 2 data trs");
+
+    // tr 0: header, tr 1: Baseline (not highlighted), tr 2: Proposed (highlighted)
+    assert.strictEqual(trs[0].classList.contains("sentence-attr-highlight"), false);
+    assert.strictEqual(trs[1].classList.contains("sentence-attr-highlight"), false);
+    assert.strictEqual(trs[2].classList.contains("sentence-attr-highlight"), true, "Target row must have sentence-attr-highlight class");
+
+    // Marker span must have been removed
+    const remainingMarkers = passageBox.querySelectorAll("span[data-attr-highlight-tr]");
+    assert.strictEqual(remainingMarkers.length, 0, "All data-attr-highlight-tr markers must be cleaned up");
+  });
+
+  // 32. sentence_attribution: formatAttributionNoteHtml renders error, supporting, and unsupported notes
+  test("sentence_attribution: formatAttributionNoteHtml renders distinct structures without support_level", () => {
+    const claims = require("../../zotero-plugin/addon/claims.js");
+
+    function renderNote(item) {
+      const noteWrap = createMockElement("div");
+      noteWrap.className = "sentence-attr-note-wrap";
+      const attr = item.sentence_attribution;
+      if (!attr || item._showSentenceAttribution === false) {
+        noteWrap.style.display = "none";
+        return noteWrap;
+      }
+      noteWrap.style.display = "block";
+      noteWrap.innerHTML = claims.formatAttributionNoteHtml(attr);
+      return noteWrap;
+    }
+
+    // A: Error status
+    const itemError = {
+      claim: "Testing error",
+      sentence_attribution: {
+        status: "error",
+        error: "OpenRouter rate limit reached",
+        supporting_indices: [],
+      },
+      _showSentenceAttribution: true,
+    };
+    const wrapError = renderNote(itemError);
+    const errEl = wrapError.querySelector(".sentence-attr-note.error");
+    assert.ok(errEl, "Must render .sentence-attr-note.error");
+    assert.ok(errEl.textContent.includes("⚠️ Attribution Error: OpenRouter rate limit reached"));
+    assert.ok(!wrapError.textContent.includes("No direct supporting sentences"));
+
+    // B: Supporting sentences > 0, fully substantiated
+    const itemFull = {
+      claim: "Accuracy is 95%",
+      sentence_attribution: {
+        status: "ok",
+        supporting_indices: [1, 2],
+        unsupported_aspects: "",
+      },
+      _showSentenceAttribution: true,
+    };
+    const wrapFull = renderNote(itemFull);
+    const fullEl = wrapFull.querySelector(".sentence-attr-note.full");
+    assert.ok(fullEl, "Must render .sentence-attr-note.full");
+    assert.ok(fullEl.textContent.includes("🎯 2 supporting sentences highlighted above"));
+    assert.strictEqual(wrapFull.querySelector(".sentence-attr-missing"), null);
+
+    // C: Supporting sentences > 0, partial (unsupported aspects present)
+    const itemPartial = {
+      claim: "Concentration is 20 uM at 37C",
+      sentence_attribution: {
+        status: "ok",
+        supporting_indices: [1],
+        unsupported_aspects: "temperature 37C is not mentioned",
+      },
+      _showSentenceAttribution: true,
+    };
+    const wrapPartial = renderNote(itemPartial);
+    const partEl = wrapPartial.querySelector(".sentence-attr-note.partial");
+    assert.ok(partEl, "Must render .sentence-attr-note.partial");
+    assert.ok(partEl.textContent.includes("🎯 1 supporting sentence highlighted above"));
+    const missingEl = wrapPartial.querySelector(".sentence-attr-missing");
+    assert.ok(missingEl, "Must render .sentence-attr-missing");
+    assert.ok(missingEl.innerHTML.includes("<strong>Not found in this passage:</strong>"));
+    assert.ok(missingEl.textContent.includes("temperature 37C is not mentioned"));
+
+    // D: Supporting sentences === 0, missing explanation present
+    const itemNone = {
+      claim: "Model uses Pepke et al ODE solver",
+      sentence_attribution: {
+        status: "ok",
+        supporting_indices: [],
+        unsupported_aspects: "Passage discusses general kinetics but does not name Pepke et al.",
+      },
+      _showSentenceAttribution: true,
+    };
+    const wrapNone = renderNote(itemNone);
+    const noneEl = wrapNone.querySelector(".sentence-attr-note.none");
+    assert.ok(noneEl, "Must render .sentence-attr-note.none");
+    assert.ok(noneEl.textContent.includes("❌ No direct supporting sentences found in this passage"));
+    const noneMissingEl = wrapNone.querySelector(".sentence-attr-missing");
+    assert.ok(noneMissingEl, "Must render .sentence-attr-missing");
+    assert.ok(noneMissingEl.innerHTML.includes("<strong>Missing from passage:</strong>"));
+    assert.ok(noneMissingEl.textContent.includes("Passage discusses general kinetics"));
+  });
+
+  // 33. claims.js: getSidebarWindow resolution and syncSentenceAttribution
+  test("claims.js: getSidebarWindow and syncSentenceAttribution update DOM and sessions", () => {
+    const claims = require("../../zotero-plugin/addon/claims.js");
+
+    const mockBubble = createMockElement("div");
+    mockBubble.className = "message-bubble";
+    mockBubble._metadata = {
+      citation_verification: {
+        assessments: [
+          {
+            chunk_index: 1,
+            occurrence: 1,
+            claim: "Claim A",
+            source_text: "Passage text",
+            sentence_attribution: null,
+          },
+        ],
+      },
+    };
+
+    const mockDoc = {
+      querySelectorAll: (sel) => {
+        if (sel === ".message-bubble") return [mockBubble];
+        return [];
+      },
+    };
+
+    const mockSession = {
+      id: "sess_test",
+      messages: [
+        {
+          role: "assistant",
+          citation_verification: {
+            assessments: [
+              {
+                chunk_index: 1,
+                occurrence: 1,
+                claim: "Claim A",
+                source_text: "Passage text",
+                sentence_attribution: null,
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    let openedInReader = null;
+    let selectedInLibrary = null;
+
+    const mockSidebarWindow = {
+      document: mockDoc,
+      sessions: [mockSession],
+      openItemInReader: (key, section) => { openedInReader = { key, section }; },
+      selectItemInLibrary: (key) => { selectedInLibrary = key; },
+      closed: false,
+    };
+
+    // Update window.Zotero mock for test
+    const origZot = global.Zotero;
+    const origWinZot = typeof window !== "undefined" ? window.Zotero : undefined;
+    const mockZot = {
+      Zocrates: {
+        _sidebarWindow: mockSidebarWindow,
+      },
+    };
+    global.Zotero = mockZot;
+    if (typeof window !== "undefined") window.Zotero = mockZot;
+
+    try {
+      const resolvedWin = claims.getSidebarWindow();
+      assert.strictEqual(resolvedWin, mockSidebarWindow, "Must resolve sidebar window from Zotero.Zocrates._sidebarWindow");
+
+      // Test reader and library methods on resolved window
+      resolvedWin.openItemInReader("ATT123", "Introduction");
+      assert.deepStrictEqual(openedInReader, { key: "ATT123", section: "Introduction" });
+      resolvedWin.selectItemInLibrary("ITEM456");
+      assert.strictEqual(selectedInLibrary, "ITEM456");
+
+      // Test syncSentenceAttribution updates bubble._metadata and session message
+      const targetItem = {
+        chunk_index: 1,
+        occurrence: 1,
+        claim: "Claim A",
+        source_text: "Passage text",
+      };
+      const attrResult = {
+        status: "ok",
+        supporting_indices: [1],
+        spans: ["Passage text"],
+        unsupported_aspects: "",
+        model: "nvidia/nemotron-3.5-lightning:free",
+        latency_ms: 120,
+      };
+
+      claims.syncSentenceAttribution(targetItem, attrResult);
+
+      // Verify item updated
+      assert.strictEqual(targetItem.sentence_attribution, attrResult);
+
+      // Verify bubble._metadata updated
+      const bubbleAssessment = mockBubble._metadata.citation_verification.assessments[0];
+      assert.strictEqual(bubbleAssessment.sentence_attribution, attrResult, "bubble assessment must have sentence_attribution");
+
+      // Verify mockSession message updated
+      const sessAssessment = mockSession.messages[0].citation_verification.assessments[0];
+      assert.strictEqual(sessAssessment.sentence_attribution, attrResult, "session message assessment must have sentence_attribution");
+    } finally {
+      global.Zotero = origZot;
+      if (typeof window !== "undefined") window.Zotero = origWinZot;
+    }
+  });
 }
 
 if (require.main === module) {

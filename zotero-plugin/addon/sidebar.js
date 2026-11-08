@@ -7788,7 +7788,9 @@ function buildClaimsInspectorData(meta) {
       provider: "openrouter",
       threshold: 0.60,
       latency_ms: null,
-      theme: (typeof document !== "undefined" && document.body?.getAttribute?.("data-theme")) || "slate"
+      theme: (typeof document !== "undefined" && document.body?.getAttribute?.("data-theme")) || "slate",
+      sessionId: (typeof currentSessionId !== "undefined" ? currentSessionId : null) || (typeof resolveActiveSessionId === "function" ? resolveActiveSessionId() : null),
+      invocationId: null
     };
   }
 
@@ -7891,7 +7893,8 @@ function buildClaimsInspectorData(meta) {
             support_probability: prob,
             threshold: thresh,
             verdict: verdict,
-            latency_ms: occ.latency_ms || null
+            latency_ms: occ.latency_ms || null,
+            sentence_attribution: occ.sentence_attribution || c.sentence_attribution || null
           });
         });
       }
@@ -7937,7 +7940,9 @@ function buildClaimsInspectorData(meta) {
     provider: ver?.provider || "openrouter",
     threshold,
     latency_ms: (ver && ver.latency_ms !== undefined) ? ver.latency_ms : (summary?.latency_ms ?? null),
-    theme: meta.theme || (typeof document !== "undefined" && document.body?.getAttribute?.("data-theme")) || "slate"
+    theme: meta.theme || (typeof document !== "undefined" && document.body?.getAttribute?.("data-theme")) || "slate",
+    sessionId: meta.sessionId || meta.session_id || (typeof currentSessionId !== "undefined" ? currentSessionId : null) || (typeof resolveActiveSessionId === "function" ? resolveActiveSessionId() : null),
+    invocationId: meta.invocation_id || meta.invocationId || (meta.citation_verification && meta.citation_verification.invocation_id) || null
   };
 }
 
@@ -7947,6 +7952,11 @@ function buildClaimsInspectorData(meta) {
 function openClaimsInspectorWindow(meta = {}) {
   const payload = buildClaimsInspectorData(meta);
   payload.theme = (typeof document !== "undefined" && document.body?.getAttribute?.("data-theme")) || payload.theme || "slate";
+  payload._sidebarWindow = window;
+
+  if (typeof Zotero !== "undefined" && Zotero.Zocrates) {
+    Zotero.Zocrates._sidebarWindow = window;
+  }
 
   try {
     if (window.top) window.top._zocratesCurrentClaimsData = payload;
@@ -14975,6 +14985,16 @@ if (typeof window !== "undefined") {
   window.ensureClaimsInspectorBtn = ensureClaimsInspectorBtn;
   window.selectItemInLibrary = selectItemInLibrary;
   window.openItemInReader = openItemInReader;
+  try {
+    Object.defineProperty(window, "sessions", {
+      get: () => sessions,
+      set: (val) => { sessions = val; },
+      configurable: true,
+      enumerable: true
+    });
+  } catch (_) {
+    window.sessions = sessions;
+  }
 }
 
 if (typeof module !== "undefined" && module.exports) {

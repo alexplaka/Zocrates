@@ -45,7 +45,209 @@
     return esc(html);
   }
 
-  function renderRichContent(rawText) {
+  function getSidebarWindow() {
+    try {
+      if (currentClaimsData?._sidebarWindow && !currentClaimsData._sidebarWindow.closed) {
+        return currentClaimsData._sidebarWindow;
+      }
+    } catch (_) {}
+
+    try {
+      const zot = (typeof Zotero !== "undefined" ? Zotero : null) ||
+                  (typeof window !== "undefined" ? (window.Zotero || window.opener?.Zotero || window.top?.Zotero) : null);
+      if (zot?.Zocrates?._sidebarWindow && !zot.Zocrates._sidebarWindow.closed) {
+        return zot.Zocrates._sidebarWindow;
+      }
+    } catch (_) {}
+
+    const opener = (typeof window !== "undefined" ? (window.opener || window.top?.opener || window.parent) : null);
+    try {
+      if (opener?.document) {
+        const iframe = opener.document.querySelector("iframe[src*='sidebar.html']") ||
+                       opener.document.getElementById("zocrates-sidebar-iframe");
+        if (iframe?.contentWindow && !iframe.contentWindow.closed) {
+          return iframe.contentWindow;
+        }
+      }
+    } catch (_) {}
+
+    try {
+      if (opener && (typeof opener.openItemInReader === "function" || opener.document?.querySelector("#chat-messages"))) {
+        return opener;
+      }
+    } catch (_) {}
+
+    return opener || null;
+  }
+
+  function getBackendUrl() {
+    try {
+      const zot = (typeof Zotero !== "undefined" ? Zotero : null) ||
+                  (typeof window !== "undefined" ? (window.Zotero || window.opener?.Zotero || window.top?.Zotero) : null);
+      if (zot?.Zocrates?.getBackendUrl) {
+        return zot.Zocrates.getBackendUrl();
+      }
+    } catch (_) {}
+    try {
+      const sidebarWin = getSidebarWindow();
+      if (sidebarWin?.API_BASE) return sidebarWin.API_BASE;
+      if (window.opener?.API_BASE) return window.opener.API_BASE;
+      if (window.top?.opener?.API_BASE) return window.top.opener.API_BASE;
+    } catch (_) {}
+    return "http://127.0.0.1:8765";
+  }
+
+  function getAuthHeaders(extraHeaders = {}) {
+    try {
+      const zot = (typeof Zotero !== "undefined" ? Zotero : null) ||
+                  (typeof window !== "undefined" ? (window.Zotero || window.opener?.Zotero || window.top?.Zotero) : null);
+      if (zot?.Zocrates?.getAuthHeaders) {
+        return zot.Zocrates.getAuthHeaders(extraHeaders);
+      }
+    } catch (_) {}
+    try {
+      const sidebarWin = getSidebarWindow();
+      const openerFn = sidebarWin?.getAuthHeaders || window.opener?.getAuthHeaders || window.top?.opener?.getAuthHeaders;
+      if (typeof openerFn === "function") {
+        return openerFn(extraHeaders);
+      }
+    } catch (_) {}
+    return Object.assign({}, extraHeaders);
+  }
+
+  function buildHighlightedPassage(sourceText, spans, supportingIndices) {
+    if (!sourceText || !Array.isArray(spans) || spans.length === 0) {
+      return sourceText || "";
+    }
+    const supSet = new Set((supportingIndices || []).map(Number));
+    let output = "";
+    let cursor = 0;
+
+    for (let i = 0; i < spans.length; i++) {
+      const span = spans[i];
+      if (!span || typeof span !== "string") continue;
+      const spanNum = i + 1;
+      let idx = sourceText.indexOf(span, cursor);
+      let matchLen = span.length;
+
+      if (idx === -1) {
+        const trimmed = span.trim();
+        if (trimmed) {
+          const trimIdx = sourceText.indexOf(trimmed, cursor);
+          if (trimIdx !== -1) {
+            idx = trimIdx;
+            matchLen = trimmed.length;
+          }
+        }
+      }
+
+      if (idx === -1) {
+        // Span cannot be located in sourceText at or after cursor;
+        // skip without outputting or advancing cursor to prevent duplication/misalignment
+        continue;
+      }
+
+      output += sourceText.substring(cursor, idx);
+      const matchedText = sourceText.substring(idx, idx + matchLen);
+      cursor = idx + matchLen;
+
+      if (supSet.has(spanNum)) {
+        const trimmed = matchedText.trim();
+        if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
+          output += matchedText.replace(/^(\s*\|\s*)/, "$1<span data-attr-highlight-tr=\"true\"></span>");
+        } else {
+          output += `<span class="sentence-attr-highlight">${matchedText}</span>`;
+        }
+      } else {
+        output += matchedText;
+      }
+    }
+    output += sourceText.substring(cursor);
+    return output;
+  }
+
+  function syncSentenceAttribution(item, result) {
+    item.sentence_attribution = result;
+
+    // 1. Sync to currentClaimsData
+    if (currentClaimsData && Array.isArray(currentClaimsData.assessments)) {
+      const target = currentClaimsData.assessments.find(a =>
+        (item.chunk_index && a.chunk_index === item.chunk_index && item.occurrence && a.occurrence === item.occurrence) ||
+        (a.claim === item.claim && a.source_text === item.source_text)
+      );
+      if (target) {
+        target.sentence_attribution = result;
+      }
+    }
+
+    const sidebarWin = getSidebarWindow();
+
+    // 2. Sync to opener's / sidebarWin's _zocratesCurrentClaimsData
+    try {
+      const targets = [
+        sidebarWin?._zocratesCurrentClaimsData,
+        window.opener?._zocratesCurrentClaimsData,
+        window.top?.opener?._zocratesCurrentClaimsData,
+      ];
+      targets.forEach(cd => {
+        if (cd && Array.isArray(cd.assessments)) {
+          const match = cd.assessments.find(a =>
+            (item.chunk_index && a.chunk_index === item.chunk_index && item.occurrence && a.occurrence === item.occurrence) ||
+            (a.claim === item.claim && a.source_text === item.source_text)
+          );
+          if (match) {
+            match.sentence_attribution = result;
+          }
+        }
+      });
+    } catch (_) {}
+
+    // 3. Sync to message bubble._metadata on sidebarWin document
+    try {
+      const doc = sidebarWin?.document || window.opener?.document || window.top?.opener?.document;
+      if (doc) {
+        const bubbles = doc.querySelectorAll(".message-bubble");
+        bubbles.forEach(b => {
+          if (!b._metadata) return;
+          const ver = b._metadata.citation_verification || b._metadata.citation_verification_telemetry;
+          if (ver && Array.isArray(ver.assessments)) {
+            const match = ver.assessments.find(a =>
+              (item.chunk_index && a.chunk_index === item.chunk_index && item.occurrence && a.occurrence === item.occurrence) ||
+              (a.claim === item.claim && a.source_text === item.source_text)
+            );
+            if (match) {
+              match.sentence_attribution = result;
+            }
+          }
+        });
+      }
+    } catch (_) {}
+
+    // 4. Sync to matching session message in sidebarWin.sessions if present
+    try {
+      const sessionsList = sidebarWin?.sessions || (typeof sidebarWin?.getSessions === "function" ? sidebarWin.getSessions() : null);
+      if (Array.isArray(sessionsList)) {
+        sessionsList.forEach(s => {
+          if (!s || !Array.isArray(s.messages)) return;
+          s.messages.forEach(m => {
+            if (!m) return;
+            const ver = m.citation_verification || m.metadata?.citation_verification || m.citation_verification_telemetry;
+            if (ver && Array.isArray(ver.assessments)) {
+              const match = ver.assessments.find(a =>
+                (item.chunk_index && a.chunk_index === item.chunk_index && item.occurrence && a.occurrence === item.occurrence) ||
+                (a.claim === item.claim && a.source_text === item.source_text)
+              );
+              if (match) {
+                match.sentence_attribution = result;
+              }
+            }
+          });
+        });
+      }
+    } catch (_) {}
+  }
+
+  function renderRichContent(rawText, isBlock = false) {
     if (!rawText && rawText !== 0) return "";
     let text = String(rawText).trim();
 
@@ -73,9 +275,14 @@
     // 2. Parse Markdown if marked is available
     let html = "";
     const markedLib = typeof marked !== "undefined" ? marked : (window.marked || window.opener?.marked);
+    const hasTable = /\|[^\n\r]+\|/.test(processed);
+    const useBlock = Boolean(isBlock || hasTable);
+
     if (markedLib) {
       try {
-        if (typeof markedLib.parseInline === "function") {
+        if (useBlock && typeof markedLib.parse === "function") {
+          html = markedLib.parse(processed);
+        } else if (typeof markedLib.parseInline === "function") {
           html = markedLib.parseInline(processed);
         } else if (typeof markedLib.parse === "function") {
           html = markedLib.parse(processed);
@@ -141,6 +348,34 @@
     } catch (_) {
       return false;
     }
+  }
+
+  function formatAttributionNoteHtml(attr) {
+    if (!attr) return "";
+    const status = String(attr.status || "").toLowerCase();
+    const unsupp = attr.unsupported_aspects ? String(attr.unsupported_aspects).trim() : "";
+    const supportingIndices = Array.isArray(attr.supporting_indices) ? attr.supporting_indices : [];
+
+    if (status === "error") {
+      const errMsg = attr.error || attr.unsupported_aspects || "Service unavailable";
+      return `<div class="sentence-attr-note error"><div>⚠️ Attribution Error: ${esc(errMsg)}</div></div>`;
+    }
+    if (supportingIndices.length > 0) {
+      const count = supportingIndices.length;
+      const cls = unsupp ? "sentence-attr-note partial" : "sentence-attr-note full";
+      let html = `<div class="${cls}"><div>🎯 ${count} supporting sentence${count === 1 ? "" : "s"} highlighted above</div>`;
+      if (unsupp) {
+        html += `<div class="sentence-attr-missing"><strong>Not found in this passage:</strong> ${esc(unsupp)}</div>`;
+      }
+      html += `</div>`;
+      return html;
+    }
+    let html = `<div class="sentence-attr-note none"><div>❌ No direct supporting sentences found in this passage</div>`;
+    if (unsupp) {
+      html += `<div class="sentence-attr-missing"><strong>Missing from passage:</strong> ${esc(unsupp)}</div>`;
+    }
+    html += `</div>`;
+    return html;
   }
 
   function formatSourceAuthorYear(item) {
@@ -582,34 +817,24 @@
 
         const readerBtn = document.createElement("button");
         readerBtn.className = "source-action-btn";
-        readerBtn.innerHTML = `📖 Reader`;
+        readerBtn.innerHTML = `📖 Open in Reader`;
         readerBtn.title = "Open paper at this section in Zotero PDF Reader";
         readerBtn.addEventListener("click", (e) => {
           e.stopPropagation();
           const targetKey = attKey || itemKey;
-          const opener = window.opener || window.top?.opener || window.parent;
-          const fn = opener?.openItemInReader || window.top?.openItemInReader || window.parent?.openItemInReader;
-          if (typeof fn === "function") {
-            fn(targetKey, sectionText);
-          } else {
-            console.warn("Zocrates Claims: openItemInReader not found on opener window");
-          }
+          const sidebarWin = getSidebarWindow();
+          sidebarWin?.openItemInReader(targetKey, sectionText);
         });
         actionsDiv.appendChild(readerBtn);
 
         const libBtn = document.createElement("button");
         libBtn.className = "source-action-btn";
-        libBtn.innerHTML = `📁 Library`;
+        libBtn.innerHTML = `📁 Select in Library`;
         libBtn.title = "Select paper in Zotero Library collection tree";
         libBtn.addEventListener("click", (e) => {
           e.stopPropagation();
-          const opener = window.opener || window.top?.opener || window.parent;
-          const fn = opener?.selectItemInLibrary || opener?.selectItemInZotero || window.top?.selectItemInLibrary || window.top?.selectItemInZotero;
-          if (typeof fn === "function") {
-            fn(itemKey || attKey);
-          } else {
-            console.warn("Zocrates Claims: selectItemInLibrary not found on opener window");
-          }
+          const sidebarWin = getSidebarWindow();
+          sidebarWin?.selectItemInLibrary(itemKey || attKey);
         });
         actionsDiv.appendChild(libBtn);
 
@@ -626,24 +851,191 @@
       const passageBox = document.createElement("div");
       passageBox.className = allPassagesExpanded ? "passage-box expanded" : "passage-box clamped";
       const textContent = (item.source_text || item.quote || item.text || "").trim();
-      if (textContent) {
-        passageBox.innerHTML = renderRichContent(textContent);
-      } else {
-        passageBox.innerHTML = '<span class="empty-passage" style="font-style: italic; opacity: 0.6;">— (No passage captured) —</span>';
-      }
       passageBox.title = "Click to toggle expanded view";
+
+      function updatePassageDisplay() {
+        if (!textContent) {
+          passageBox.innerHTML = '<span class="empty-passage" style="font-style: italic; opacity: 0.6;">— (No passage captured) —</span>';
+          return;
+        }
+
+        const attr = item.sentence_attribution;
+        const showAttr = item._showSentenceAttribution !== false && attr && attr.status !== "error" && Array.isArray(attr.spans);
+
+        if (showAttr) {
+          const highlightedMd = buildHighlightedPassage(textContent, attr.spans, attr.supporting_indices || []);
+          passageBox.innerHTML = renderRichContent(highlightedMd, true);
+          // Highlight table rows matching marker
+          passageBox.querySelectorAll("span[data-attr-highlight-tr]").forEach(marker => {
+            const trEl = marker.closest("tr");
+            if (trEl) trEl.classList.add("sentence-attr-highlight");
+            marker.remove();
+          });
+        } else {
+          passageBox.innerHTML = renderRichContent(textContent, true);
+        }
+      }
+
+      // If attribution already exists, render highlighted immediately
+      if (item.sentence_attribution && item._showSentenceAttribution === undefined) {
+        item._showSentenceAttribution = true;
+      }
+      updatePassageDisplay();
+
+      // Actions Bar beneath passageBox
+      const actionsBar = document.createElement("div");
+      actionsBar.className = "passage-actions-bar";
+
+      const attrBtn = document.createElement("button");
+      attrBtn.className = "btn-sentence-attr sentence-attr-btn";
+      attrBtn.type = "button";
+
+      const toggleBtn = document.createElement("button");
+      toggleBtn.className = "btn-passage-toggle";
+      toggleBtn.type = "button";
+      toggleBtn.textContent = passageBox.classList.contains("expanded") ? "↕ Collapse" : "↕ Expand";
+      toggleBtn.title = "Toggle expanded passage view";
+
+      toggleBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (passageBox.classList.contains("clamped")) {
+          passageBox.classList.remove("clamped");
+          passageBox.classList.add("expanded");
+          toggleBtn.textContent = "↕ Collapse";
+        } else {
+          passageBox.classList.remove("expanded");
+          passageBox.classList.add("clamped");
+          toggleBtn.textContent = "↕ Expand";
+        }
+      });
 
       passageBox.addEventListener("click", () => {
         if (passageBox.classList.contains("clamped")) {
           passageBox.classList.remove("clamped");
           passageBox.classList.add("expanded");
+          toggleBtn.textContent = "↕ Collapse";
         } else {
           passageBox.classList.remove("expanded");
           passageBox.classList.add("clamped");
+          toggleBtn.textContent = "↕ Expand";
         }
       });
 
+      const noteWrap = document.createElement("div");
+      noteWrap.className = "sentence-attr-note-wrap";
+
+      function updateNoteDisplay() {
+        noteWrap.innerHTML = "";
+        const attr = item.sentence_attribution;
+        if (!attr || item._showSentenceAttribution === false) {
+          noteWrap.style.display = "none";
+          return;
+        }
+
+        noteWrap.style.display = "block";
+        noteWrap.innerHTML = formatAttributionNoteHtml(attr);
+      }
+
+      function updateBtnState() {
+        if (!item.sentence_attribution) {
+          attrBtn.textContent = "🔍 Obtain Sentence-Level Attribution";
+          attrBtn.classList.remove("active");
+          attrBtn.title = "Identify exact sentences supporting this claim using Nemotron-3.5-Lightning";
+        } else if (item.sentence_attribution.status === "error") {
+          attrBtn.textContent = "⚠️ Retry Sentence Attribution";
+          attrBtn.classList.remove("active");
+          attrBtn.title = `Attribution error: ${item.sentence_attribution.error || item.sentence_attribution.unsupported_aspects || "Click to retry"}`;
+        } else if (item._showSentenceAttribution !== false) {
+          attrBtn.textContent = "✨ Attribution: Shown";
+          attrBtn.classList.add("active");
+          attrBtn.title = "Click to toggle attribution highlights off";
+        } else {
+          attrBtn.textContent = "🔍 Attribution: Hidden";
+          attrBtn.classList.remove("active");
+          attrBtn.title = "Click to toggle attribution highlights on";
+        }
+      }
+
+      updateBtnState();
+      updateNoteDisplay();
+
+      attrBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        if (item.sentence_attribution && item.sentence_attribution.status !== "error") {
+          // Toggle on/off
+          item._showSentenceAttribution = !item._showSentenceAttribution;
+          updateBtnState();
+          updatePassageDisplay();
+          updateNoteDisplay();
+          return;
+        }
+
+        if (!textContent) {
+          showToast("No passage text available to evaluate attribution");
+          return;
+        }
+
+        attrBtn.disabled = true;
+        attrBtn.textContent = "⏳ Identifying supporting sentences…";
+
+        try {
+          const backendUrl = getBackendUrl();
+          const authHeaders = getAuthHeaders({ "Content-Type": "application/json" });
+          const payload = {
+            claim: item.claim || "",
+            source_text: textContent,
+            session_id: currentClaimsData?.sessionId || currentClaimsData?.session_id || null,
+            invocation_id: currentClaimsData?.invocationId || currentClaimsData?.invocation_id || null,
+            chunk_index: item.chunk_index || 0,
+            occurrence: item.occurrence || 0,
+          };
+
+          const res = await fetch(`${backendUrl}/citations/sentence_attribution`, {
+            method: "POST",
+            headers: authHeaders,
+            body: JSON.stringify(payload),
+          });
+
+          if (!res.ok) {
+            const errBody = await res.json().catch(() => ({}));
+            throw new Error(errBody.detail || `Server returned ${res.status}`);
+          }
+
+          const result = await res.json();
+          item.sentence_attribution = result;
+          item._showSentenceAttribution = true;
+
+          // Auto-expand passage
+          passageBox.classList.remove("clamped");
+          passageBox.classList.add("expanded");
+          toggleBtn.textContent = "↕ Collapse";
+
+          updateBtnState();
+          updatePassageDisplay();
+          updateNoteDisplay();
+
+          syncSentenceAttribution(item, result);
+        } catch (err) {
+          console.error("Zocrates Claims: Sentence attribution error:", err);
+          showToast(`Attribution failed: ${err.message || err}`);
+          item.sentence_attribution = {
+            status: "error",
+            error: err.message || String(err),
+          };
+          item._showSentenceAttribution = true;
+          updateBtnState();
+          updatePassageDisplay();
+          updateNoteDisplay();
+        } finally {
+          attrBtn.disabled = false;
+        }
+      });
+
+      actionsBar.appendChild(attrBtn);
+      actionsBar.appendChild(toggleBtn);
       tdPassage.appendChild(passageBox);
+      tdPassage.appendChild(actionsBar);
+      tdPassage.appendChild(noteWrap);
       tr.appendChild(tdPassage);
 
       // 5. Probability & Status Column
@@ -950,5 +1342,18 @@
     document.addEventListener("DOMContentLoaded", init);
   } else {
     init();
+  }
+
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = {
+      buildHighlightedPassage,
+      renderRichContent,
+      sanitizeHTML,
+      formatSourceAuthorYear,
+      formatAttributionNoteHtml,
+      syncSentenceAttribution,
+      getSidebarWindow,
+      updateClaimsData: (typeof window !== "undefined" ? window.updateClaimsData : null),
+    };
   }
 })();

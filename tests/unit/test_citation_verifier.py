@@ -885,6 +885,24 @@ def test_claim_extraction_markdown_header_boundary():
     assert "Key Finding" not in claim
 
 
+def test_claim_extraction_in_sentence_author_references_intact():
+    """Verify in-sentence author reference numbers (e.g. [44, 69]) are not treated as boundaries or stripped."""
+    text = (
+        "- **Validation strategy:** qualitative comparison against published experiments, "
+        "especially Chang et al. (their refs. [44, 69]), rather than fitting to a new dataset [3, 4]."
+    )
+    occurrences = extract_claim_occurrences(text, total_chunks=4)
+    assert len(occurrences) == 2
+    for occ in occurrences:
+        assert occ["chunk_index"] in (3, 4)
+        assert occ["is_compound"] is True
+        assert not occ["claim"].startswith(")")
+        assert occ["claim"] == (
+            "Validation strategy: qualitative comparison against published experiments, "
+            "especially Chang et al. (their refs. [44, 69]), rather than fitting to a new dataset."
+        )
+
+
 @pytest.mark.asyncio
 async def test_compound_citation_prompt_instruction_dispatch():
     """Verify single citations receive single instruction and compound citations receive compound instruction."""

@@ -114,6 +114,7 @@ from zocrates.schemas.session_request import CreateSessionRequest, RewindSession
 from zocrates.schemas.discover_request import DiscoverSearchRequest, DiscoverResolveRequest, DiscoverPrepareBatchRequest, \
     DiscoverCleanupBatchRequest
 from zocrates.schemas.mcp_request import MCPSearchRequest, MCPReadRequest
+from zocrates.schemas.citation_request import SentenceAttributionRequest
 from zocrates.rag.graph_engine import evaluate_and_persist_edges
 from zocrates.discovery.engine import get_default_discovery_engine
 from zocrates.discovery.staging import (
@@ -5360,6 +5361,76 @@ async def suggest_next_prompt(session_id: str, request: SuggestPromptRequest) ->
         return {"status": "no_suggestion", "suggested_prompt": None, "telemetry": telemetry or None}
 
     return {"status": "success", "suggested_prompt": suggestion, "telemetry": telemetry or None}
+
+
+@app.post("/citations/sentence_attribution", dependencies=[Depends(verify_auth)])
+async def sentence_attribution_endpoint(request: SentenceAttributionRequest) -> dict[str, Any]:
+    """Evaluate sentence-level attribution for a claim against source text.
+
+    Uses Option B (Pre-Segmented Numbered Spans) with nvidia/nemotron-3.5-lightning:free.
+    When session_id is provided, updates matching assessment in sessions.db.
+
+    Args:
+        request: Sentence attribution request body.
+
+    Returns:
+        Dictionary with status, supporting_indices, spans,
+        unsupported_aspects, model, and latency_ms.
+    """
+    from zocrates.agents.library_search.sentence_attribution import (
+        compute_sentence_attribution,
+        persist_sentence_attribution_to_session,
+    )
+    from zocrates.config import get_secure_api_key
+
+    try:
+        syncer = get_syncer()
+        zot_dir = getattr(syncer, "_zotero_data_dir", None)
+    except Exception:
+        zot_dir = None
+
+    api_key = get_secure_api_key(
+        "openrouter_api_key", ("OPENROUTER_API_KEY", "OPEN_ROUTER_API_KEY")
+    )
+    if not api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="OpenRouter API key is not configured. Please configure it in Zotero Preferences -> Zocrates.",
+        )
+
+    result = await compute_sentence_attribution(
+        claim=request.claim,
+        source_text=request.source_text,
+        api_key=api_key,
+    )
+
+    if request.session_id:
+        try:
+            runner: Runner | None = getattr(app.state, "runner", None)
+            session_service = (
+                getattr(runner, "session_service", None)
+                if runner
+                else services.get_session_service(zot_dir)
+            )
+            app_name = getattr(app.state, "agent_app_name", "zocrates")
+            await persist_sentence_attribution_to_session(
+                session_id=request.session_id,
+                invocation_id=request.invocation_id,
+                chunk_index=request.chunk_index,
+                occurrence=request.occurrence,
+                claim=request.claim,
+                attribution_data=result,
+                session_service=session_service,
+                app_name=app_name,
+            )
+        except Exception as persist_exc:
+            logger.debug(
+                "Could not persist sentence attribution to session %s: %s",
+                request.session_id,
+                persist_exc,
+            )
+
+    return result
 
 
 @app.post("/sessions/{session_id}/rewind", dependencies=[Depends(verify_auth)])

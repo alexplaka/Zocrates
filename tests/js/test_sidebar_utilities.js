@@ -1541,6 +1541,7 @@ async function runTests() {
       assert.ok(openedDialogPayload, "Payload must be passed to openDialog");
       assert.strictEqual(openedDialogPayload.assessments.length, 1);
       assert.strictEqual(openedDialogPayload.assessments[0].claim, "Test Claim");
+      assert.strictEqual(openedDialogPayload._sidebarWindow, window, "Payload must have _sidebarWindow reference");
     } finally {
       window.top = origTop;
     }

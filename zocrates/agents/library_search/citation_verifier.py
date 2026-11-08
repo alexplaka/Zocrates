@@ -268,11 +268,16 @@ def _find_forward_sentence_boundary(suffix: str) -> int:
     return max_search
 
 
-def _find_backward_claim_boundary(prefix: str, max_chars: int = MAX_CLAIM_CHARS) -> int:
+def _find_backward_claim_boundary(
+    prefix: str,
+    total_chunks: int = 0,
+    max_chars: int = MAX_CLAIM_CHARS,
+) -> int:
     """Find start index of the paragraph/block preceding a citation token.
 
-    Step 1: Scans prefix for earlier citation tokens; if found, min_boundary is the
-    end of the last citation match so citations in the same block do not bleed.
+    Step 1: Scans prefix for earlier valid citation tokens (1 <= idx <= total_chunks);
+    if found, min_boundary is the end of the last citation match so citations in the
+    same block do not bleed. Out-of-range author references (e.g. [44, 69]) are ignored.
     Step 2: In search_region = prefix[min_boundary:], searches for the latest structural
     boundary (paragraph breaks, list bullets, numbered items, or markdown headers).
     Step 3: Bounds backward claim length to max_chars, advancing past the first
@@ -282,10 +287,16 @@ def _find_backward_claim_boundary(prefix: str, max_chars: int = MAX_CLAIM_CHARS)
     if n == 0:
         return 0
 
-    # Step 1: Find the last in-text citation match in prefix
+    # Step 1: Find the last valid in-text citation match in prefix
     min_boundary = 0
-    for m in _IN_TEXT_CITATION_TOKEN_RE.finditer(prefix):
-        min_boundary = m.end()
+    if total_chunks > 0:
+        for m in _IN_TEXT_CITATION_TOKEN_RE.finditer(prefix):
+            raw_content = m.group(1) if m.group(1) is not None else m.group(2)
+            if not raw_content:
+                continue
+            parts = [p.strip() for p in re.split(r"[,;]", raw_content) if p.strip()]
+            if any(p.isascii() and p.isdigit() and 1 <= int(p) <= total_chunks for p in parts):
+                min_boundary = m.end()
 
     # Step 2: Search for the latest structural boundary end in search_region
     search_region = prefix[min_boundary:]
@@ -308,7 +319,7 @@ def _find_backward_claim_boundary(prefix: str, max_chars: int = MAX_CLAIM_CHARS)
     return start_idx
 
 
-def _clean_and_join_spans(backward: str, forward: str) -> str:
+def _clean_and_join_spans(backward: str, forward: str, total_chunks: int = 0) -> str:
     """Join backward and forward spans into a clean, complete claim."""
     backward = backward.strip()
     forward = forward.strip()
@@ -334,9 +345,23 @@ def _clean_and_join_spans(backward: str, forward: str) -> str:
     claim = claim.replace("**", "").replace("__", "").replace("`", "")
 
     claim = re.sub(r"\s+", " ", claim).strip()
-    claim = _IN_TEXT_CITATION_TOKEN_RE.sub("", claim)
+
+    def _strip_valid_citation(m: re.Match) -> str:
+        if total_chunks <= 0:
+            return ""
+        raw_content = m.group(1) if m.group(1) is not None else m.group(2)
+        if not raw_content:
+            return ""
+        parts = [p.strip() for p in re.split(r"[,;]", raw_content) if p.strip()]
+        if any(p.isascii() and p.isdigit() and 1 <= int(p) <= total_chunks for p in parts):
+            return ""
+        return m.group(0)
+
+    claim = _IN_TEXT_CITATION_TOKEN_RE.sub(_strip_valid_citation, claim)
+    claim = re.sub(r"\(\s*\)", "", claim)
+    claim = re.sub(r"\[\s*\]", "", claim)
     claim = re.sub(r"\s+", " ", claim).strip()
-    claim = re.sub(r"^(?:[\.\,\;\:\!\?\*\-\#\>\s]|\d+\.\s*)+", "", claim).strip()
+    claim = re.sub(r"^(?:[\.\,\;\:\!\?\*\-\#\>\)\}\]\s]|\d+\.\s*)+", "", claim).strip()
 
     if claim and not claim.endswith((".", "!", "?")):
         claim = claim + "."
@@ -387,7 +412,7 @@ def extract_claim_occurrences(
 
         # Backward scan
         prefix = masked_text[:token_start]
-        b_idx = _find_backward_claim_boundary(prefix)
+        b_idx = _find_backward_claim_boundary(prefix, total_chunks=total_chunks)
         backward_span = prefix[b_idx:].strip()
 
         # Forward scan check
@@ -397,12 +422,12 @@ def extract_claim_occurrences(
             f_idx = _find_forward_sentence_boundary(suffix)
             forward_span = suffix[:f_idx].strip()
 
-        claim = _clean_and_join_spans(backward_span, forward_span)
+        claim = _clean_and_join_spans(backward_span, forward_span, total_chunks=total_chunks)
         if len(claim) < 15:
             start_w = max(0, token_start - 100)
             end_w = min(len(masked_text), token_end + 100)
             fallback_span = masked_text[start_w:end_w].strip()
-            claim = _clean_and_join_spans(fallback_span, "")
+            claim = _clean_and_join_spans(fallback_span, "", total_chunks=total_chunks)
 
         claim = unmask_text(claim, placeholders)
 
