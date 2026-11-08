@@ -1536,12 +1536,17 @@ async function runTests() {
 
       assert.strictEqual(openedDialogUrl, "chrome://zocrates/content/claims.html");
       assert.strictEqual(openedDialogName, "zocrates-claims-window");
-      assert.ok(openedDialogFeatures.includes("width=1180"));
-      assert.ok(openedDialogFeatures.includes("height=760"));
+      assert.ok(/width=\d+/.test(openedDialogFeatures));
+      assert.ok(openedDialogFeatures.includes("width=1344") || openedDialogFeatures.includes("width=1200"));
+      assert.ok(/height=\d+/.test(openedDialogFeatures));
       assert.ok(openedDialogPayload, "Payload must be passed to openDialog");
       assert.strictEqual(openedDialogPayload.assessments.length, 1);
       assert.strictEqual(openedDialogPayload.assessments[0].claim, "Test Claim");
       assert.strictEqual(openedDialogPayload._sidebarWindow, window, "Payload must have _sidebarWindow reference");
+
+      mockWin.innerWidth = 2000;
+      sidebar.openClaimsInspectorWindow(sampleMeta);
+      assert.ok(openedDialogFeatures.includes("width=1400"));
     } finally {
       window.top = origTop;
     }

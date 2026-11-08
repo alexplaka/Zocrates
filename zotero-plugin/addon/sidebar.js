@@ -7990,11 +7990,33 @@ function openClaimsInspectorWindow(meta = {}) {
 
   try {
     const mainWin = window.top || window.parent || window;
+    let dialogWidth = 1344;
+    let dialogHeight = 780;
+    try {
+      const availW = (mainWin && typeof mainWin.innerWidth === "number" && mainWin.innerWidth > 0)
+        ? mainWin.innerWidth
+        : (window.screen && typeof window.screen.availWidth === "number" && window.screen.availWidth > 0
+          ? window.screen.availWidth
+          : 1920);
+      dialogWidth = Math.round(availW * 0.70);
+      const screenMaxW = (window.screen && typeof window.screen.availWidth === "number" && window.screen.availWidth > 0)
+        ? Math.round(window.screen.availWidth * 0.95)
+        : 2560;
+      dialogWidth = Math.max(1200, Math.min(dialogWidth, screenMaxW));
+
+      const availH = (mainWin && typeof mainWin.innerHeight === "number" && mainWin.innerHeight > 0)
+        ? mainWin.innerHeight
+        : (window.screen && typeof window.screen.availHeight === "number" && window.screen.availHeight > 0
+          ? window.screen.availHeight
+          : 1080);
+      dialogHeight = Math.max(720, Math.min(840, Math.round(availH * 0.75)));
+    } catch (_) {}
+
     if (mainWin && typeof mainWin.openDialog === "function") {
       const win = mainWin.openDialog(
         "chrome://zocrates/content/claims.html",
         "zocrates-claims-window",
-        "chrome,centerscreen,resizable=yes,width=1180,height=760",
+        `chrome,centerscreen,resizable=yes,width=${dialogWidth},height=${dialogHeight}`,
         payload
       );
       if (win) {
