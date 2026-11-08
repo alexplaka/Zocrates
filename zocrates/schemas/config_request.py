@@ -36,6 +36,7 @@ class ConfigRequest(BaseModel):
     openalex_api_key: str | None = None
     enable_predictive_ghost_input: bool | None = None
     predictive_prompt_model: str | None = None
+    sentence_attribution_model: str | None = None
     user_research_profile: str | None = None
     enable_adaptive_compaction: bool | None = None
     adaptive_compaction_retention_turns: int | None = None

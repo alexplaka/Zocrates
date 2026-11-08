@@ -238,6 +238,36 @@ def test_vlm_max_images_per_doc_backfilled_from_defaults(tmp_path):
     assert reloaded["vlm_max_images_per_doc"] == custom_val
 
 
+def test_sentence_attribution_model_in_default_config_and_backfilled(tmp_path):
+    """Verify sentence_attribution_model is in DEFAULT_CONFIG and is backfilled to disk when missing."""
+    from zocrates.config import DEFAULT_SENTENCE_ATTRIBUTION_MODEL
+
+    assert "sentence_attribution_model" in DEFAULT_CONFIG
+    assert DEFAULT_CONFIG["sentence_attribution_model"] == DEFAULT_SENTENCE_ATTRIBUTION_MODEL
+    assert DEFAULT_SENTENCE_ATTRIBUTION_MODEL == ""
+
+    config_path = tmp_path / "zocrates-data" / "zocrates_config.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(config_path, "w") as f:
+        json.dump({"llm_model": "openrouter/~z-ai/glm-flash-latest"}, f)
+
+    loaded = load_zocrates_config(tmp_path)
+    assert loaded["sentence_attribution_model"] == DEFAULT_SENTENCE_ATTRIBUTION_MODEL
+
+    # Verify physically written to disk
+    with open(config_path) as f:
+        disk = json.load(f)
+    assert disk["sentence_attribution_model"] == DEFAULT_SENTENCE_ATTRIBUTION_MODEL
+
+    # User-specified value is preserved without overwrite
+    custom_model = "openrouter/nvidia/nemotron-3.5-lightning:free"
+    with open(config_path, "w") as f:
+        json.dump({"sentence_attribution_model": custom_model}, f)
+
+    reloaded = load_zocrates_config(tmp_path)
+    assert reloaded["sentence_attribution_model"] == custom_model
+
+
 # ---------------------------------------------------------------------------
 # §12.4 write-path verification: override_agent_models is accepted by the
 # existing config-update endpoint contract (ConfigRequest → POST /config

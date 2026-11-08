@@ -112,6 +112,17 @@ class TestAttributionParser:
         assert res["supporting_indices"] == [1, 2]
         assert res["unsupported_aspects"] == ""
 
+    def test_think_tag_stripping(self):
+        raw = (
+            "<think>Analyzing sentences against claim assertions...</think>\n"
+            "```json\n"
+            '{\n  "supporting_indices": [1],\n  "unsupported_aspects": ""\n}\n'
+            "```"
+        )
+        res = parse_attribution_response(raw, total_spans=2)
+        assert res["supporting_indices"] == [1]
+        assert res["unsupported_aspects"] == ""
+
     def test_code_fence_stripping(self):
         raw = (
             "```json\n"
@@ -150,6 +161,8 @@ class TestComputeSentenceAttribution:
 
     @pytest.mark.asyncio
     async def test_successful_evaluation(self):
+        from zocrates.config import get_sentence_attribution_model
+
         mock_choice = MagicMock()
         mock_choice.message.content = '{"supporting_indices": [1], "unsupported_aspects": ""}'
         mock_resp = MagicMock()
@@ -167,7 +180,7 @@ class TestComputeSentenceAttribution:
             assert res["supporting_indices"] == [1]
             assert res["unsupported_aspects"] == ""
             assert len(res["spans"]) == 1
-            assert res["model"] == SENTENCE_ATTRIBUTION_MODEL
+            assert res["model"] == get_sentence_attribution_model()
 
     @pytest.mark.asyncio
     async def test_llm_exception_handled(self):
@@ -309,6 +322,164 @@ class TestSentenceAttributionEndpoint:
             assert data["status"] == "ok"
             assert "support_level" not in data
             assert data["supporting_indices"] == [1]
-            assert data["model"] == SENTENCE_ATTRIBUTION_MODEL
             assert "spans" in data
             assert len(data["spans"]) == 1
+
+    def test_local_model_does_not_require_api_key(self, monkeypatch):
+        from zocrates.config import get_auth_token
+
+        token = get_auth_token()
+        monkeypatch.setattr("zocrates.config.get_secure_api_key", lambda *args, **kwargs: None)
+
+        mock_choice = MagicMock()
+        mock_choice.message.content = '{"supporting_indices": [1], "unsupported_aspects": ""}'
+        mock_resp = MagicMock()
+        mock_resp.choices = [mock_choice]
+
+        with patch("zocrates.config.load_zocrates_config", return_value={"sentence_attribution_model": "ollama/llama3", "llm_provider": "ollama"}), \
+             patch("litellm.acompletion", new_callable=AsyncMock) as mock_llm:
+            mock_llm.return_value = mock_resp
+            client = TestClient(app)
+            res = client.post(
+                "/citations/sentence_attribution",
+                json={"claim": "Test", "source_text": "Passage text"},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            assert res.status_code == 200
+            data = res.json()
+            assert data["status"] == "ok"
+            assert data["model"] == "ollama_chat/llama3"
+
+    @pytest.mark.parametrize(
+        ("provider", "model_conf", "expected_model"),
+        [
+            ("vllm", "meta-llama/Llama-3-8B", "openai/meta-llama/Llama-3-8B"),
+            ("openai_compatible", "local-model", "openai/local-model"),
+        ],
+    )
+    def test_local_provider_or_prefix_does_not_require_api_key(
+        self, monkeypatch, provider, model_conf, expected_model
+    ):
+        from zocrates.config import get_auth_token
+
+        token = get_auth_token()
+        monkeypatch.setattr("zocrates.config.get_secure_api_key", lambda *args, **kwargs: None)
+
+        mock_choice = MagicMock()
+        mock_choice.message.content = '{"supporting_indices": [1], "unsupported_aspects": ""}'
+        mock_resp = MagicMock()
+        mock_resp.choices = [mock_choice]
+
+        with patch(
+            "zocrates.config.load_zocrates_config",
+            return_value={"sentence_attribution_model": model_conf, "llm_provider": provider},
+        ), patch("litellm.acompletion", new_callable=AsyncMock) as mock_llm:
+            mock_llm.return_value = mock_resp
+            client = TestClient(app)
+            res = client.post(
+                "/citations/sentence_attribution",
+                json={"claim": "Test", "source_text": "Passage text"},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            assert res.status_code == 200
+            data = res.json()
+            assert data["status"] == "ok"
+            assert data["model"] == expected_model
+
+
+class TestSentenceAttributionModelConfig:
+    """Tests for get_sentence_attribution_model and get_coordinator_model."""
+
+    def test_inherits_coordinator_model_when_empty_or_none(self):
+        from zocrates.config import get_sentence_attribution_model
+
+        # 1. When coordinator_agent.model is active
+        mock_coord = MagicMock()
+        mock_coord.model = "openrouter/anthropic/claude-3.5-sonnet"
+        with patch("zocrates.agents.app.coordinator_agent", mock_coord):
+            cfg = {"sentence_attribution_model": "", "llm_provider": "openrouter_llm"}
+            assert get_sentence_attribution_model(cfg) == "openrouter/anthropic/claude-3.5-sonnet"
+
+            cfg_none = {"sentence_attribution_model": None, "llm_provider": "openrouter_llm"}
+            assert get_sentence_attribution_model(cfg_none) == "openrouter/anthropic/claude-3.5-sonnet"
+
+        # 2. When coordinator_agent.model is not set, falls back to override_agent_models
+        with patch("zocrates.agents.app.coordinator_agent", None):
+            cfg_override = {
+                "sentence_attribution_model": "",
+                "override_agent_models": {"coordinator": {"model": "meta-llama/llama-3-70b"}},
+                "llm_provider": "openrouter_llm",
+            }
+            assert get_sentence_attribution_model(cfg_override) == "openrouter/meta-llama/llama-3-70b"
+
+            # 3. Falls back to llm_model
+            cfg_llm = {
+                "sentence_attribution_model": "",
+                "llm_model": "deepseek/deepseek-chat",
+                "llm_provider": "openrouter_llm",
+            }
+            assert get_sentence_attribution_model(cfg_llm) == "openrouter/deepseek/deepseek-chat"
+
+    def test_uses_explicit_override_when_configured(self):
+        from zocrates.config import get_sentence_attribution_model
+
+        cfg = {
+            "sentence_attribution_model": "openrouter/nvidia/nemotron-3.5-lightning:free",
+            "llm_provider": "openrouter_llm",
+        }
+        assert get_sentence_attribution_model(cfg) == "openrouter/nvidia/nemotron-3.5-lightning:free"
+
+        # Provider slug resolution
+        cfg_slug = {
+            "sentence_attribution_model": "nvidia/nemotron-3.5-lightning:free",
+            "llm_provider": "openrouter_llm",
+        }
+        assert get_sentence_attribution_model(cfg_slug) == "openrouter/nvidia/nemotron-3.5-lightning:free"
+
+        cfg_ollama = {
+            "sentence_attribution_model": "llama3.2:3b",
+            "llm_provider": "ollama",
+        }
+        assert get_sentence_attribution_model(cfg_ollama) == "ollama_chat/llama3.2:3b"
+
+    @pytest.mark.asyncio
+    async def test_compute_sentence_attribution_passes_model_and_options(self):
+        mock_choice = MagicMock()
+        mock_choice.message.content = '{"supporting_indices": [1], "unsupported_aspects": ""}'
+        mock_resp = MagicMock()
+        mock_resp.choices = [mock_choice]
+
+        with patch("litellm.acompletion", new_callable=AsyncMock) as mock_llm:
+            mock_llm.return_value = mock_resp
+            res = await compute_sentence_attribution(
+                claim="Model achieves 95% accuracy.",
+                source_text="The model achieves 95% accuracy.",
+                api_key="sk-test",
+                model="openrouter/custom/model",
+                base_url="http://localhost:11434",
+            )
+            assert res["status"] == "ok"
+            assert res["model"] == "openrouter/custom/model"
+            mock_llm.assert_called_once()
+            call_kwargs = mock_llm.call_args.kwargs
+            assert call_kwargs["model"] == "openrouter/custom/model"
+            assert call_kwargs["max_tokens"] == 600
+            assert call_kwargs["api_key"] == "sk-test"
+            assert call_kwargs["api_base"] == "http://localhost:11434"
+            assert call_kwargs["extra_body"] == {"reasoning": {"effort": "none"}}
+            assert call_kwargs["extra_headers"] == {"X-OpenRouter-Title": "Zocrates"}
+
+        # Non-openrouter model should not include extra_body/extra_headers
+        with patch("litellm.acompletion", new_callable=AsyncMock) as mock_llm:
+            mock_llm.return_value = mock_resp
+            res = await compute_sentence_attribution(
+                claim="Model achieves 95% accuracy.",
+                source_text="The model achieves 95% accuracy.",
+                model="ollama_chat/llama3.2:3b",
+                base_url="http://localhost:11434",
+            )
+            assert res["model"] == "ollama_chat/llama3.2:3b"
+            call_kwargs = mock_llm.call_args.kwargs
+            assert call_kwargs["model"] == "ollama_chat/llama3.2:3b"
+            assert "extra_body" not in call_kwargs
+            assert "extra_headers" not in call_kwargs

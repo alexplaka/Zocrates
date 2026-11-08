@@ -1110,6 +1110,19 @@ class TestLLMEndpoints:
             assert client.get("/llm/config").status_code == 404
             assert client.post("/llm/config", json=post_payload).status_code == 404
 
+    def test_post_config_returns_sentence_attribution_model(self, client, tmp_path) -> None:
+        """POST /config returns sentence_attribution_model in the returned config dictionary."""
+        with patch("zocrates.config.resolve_zotero_data_dir", return_value=tmp_path), \
+             patch("zocrates.agents.app.set_agent_models"):
+            post_payload = {
+                "sentence_attribution_model": "custom/attribution-model",
+            }
+            post_res = client.post("/config", json=post_payload)
+            assert post_res.status_code == 200
+            assert post_res.json()["status"] == "success"
+            cfg_out = post_res.json()["config"]
+            assert cfg_out.get("sentence_attribution_model") == "custom/attribution-model"
+
     def test_post_config_updates_datalab_api_key(self, client, tmp_path) -> None:
         """POST /config updates datalab_api_key in memory via save_datalab_api_key."""
         from zocrates.config import get_datalab_api_key

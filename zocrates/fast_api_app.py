@@ -82,6 +82,7 @@ from zocrates.config import (
     DEFAULT_LLM_TEMPERATURE,
     DEFAULT_ENABLE_PREDICTIVE_GHOST_INPUT,
     DEFAULT_PREDICTIVE_PROMPT_MODEL,
+    DEFAULT_SENTENCE_ATTRIBUTION_MODEL,
     _write_auth_sidecar,
     check_config_freshness,
     get_auth_token,
@@ -759,6 +760,7 @@ async def status(request: Request) -> dict:
     hw_info["docling_assessment"] = get_docling_hardware_assessment()
 
     from zocrates.config import (
+        DEFAULT_SENTENCE_ATTRIBUTION_MODEL,
         get_auto_render_mermaid_diagrams,
         get_auto_spawn_backend,
         get_backend_port,
@@ -858,6 +860,7 @@ async def status(request: Request) -> dict:
             "backend_port": get_backend_port(syncer._zotero_data_dir, cfg=cfg),
             "enable_mcp_server": is_mcp_server_enabled(syncer._zotero_data_dir, cfg=cfg),
             "scholar_polite_email": get_scholar_polite_email(syncer._zotero_data_dir, cfg=cfg),
+            "sentence_attribution_model": cfg.get("sentence_attribution_model", DEFAULT_SENTENCE_ATTRIBUTION_MODEL),
             "user_research_profile": str(cfg.get("user_research_profile") or ""),
             "ollama_num_ctx": get_ollama_num_ctx(syncer._zotero_data_dir, cfg=cfg),
             "citation_verification_enabled": bool(cfg.get("citation_verification_enabled", False)),
@@ -926,6 +929,7 @@ async def status(request: Request) -> dict:
             "backend_port": get_backend_port(cfg=cfg),
             "enable_mcp_server": is_mcp_server_enabled(cfg=cfg),
             "scholar_polite_email": get_scholar_polite_email(cfg=cfg),
+            "sentence_attribution_model": cfg.get("sentence_attribution_model", DEFAULT_SENTENCE_ATTRIBUTION_MODEL),
             "user_research_profile": str(cfg.get("user_research_profile") or ""),
             "ollama_num_ctx": get_ollama_num_ctx(cfg=cfg),
             "citation_verification_enabled": bool(cfg.get("citation_verification_enabled", False)),
@@ -3745,6 +3749,7 @@ async def get_config() -> dict:
         DEFAULT_ENABLE_MCP_SERVER,
         DEFAULT_OVERRIDE_AGENT_MODELS,
         DEFAULT_REFERENCES_SECTION_ENABLED,
+        DEFAULT_SENTENCE_ATTRIBUTION_MODEL,
         get_auto_spawn_backend,
         get_compaction_config,
         get_datalab_api_key,
@@ -3815,6 +3820,7 @@ async def get_config() -> dict:
         "user_research_profile": str(cfg.get("user_research_profile") or ""),
         "enable_predictive_ghost_input": bool(cfg.get("enable_predictive_ghost_input", DEFAULT_ENABLE_PREDICTIVE_GHOST_INPUT)),
         "predictive_prompt_model": str(cfg.get("predictive_prompt_model") or DEFAULT_PREDICTIVE_PROMPT_MODEL),
+        "sentence_attribution_model": cfg.get("sentence_attribution_model", DEFAULT_SENTENCE_ATTRIBUTION_MODEL),
         "citation_verification_enabled": bool(cfg.get("citation_verification_enabled", False)),
         "citation_verification_provider": str(cfg.get("citation_verification_provider", "openrouter")),
         "citation_verification_model": str(cfg.get("citation_verification_model", DEFAULT_CITATION_VERIFICATION_MODEL)),
@@ -3836,6 +3842,7 @@ async def update_config(request: ConfigRequest) -> dict:
     from zocrates.agents.app import set_agent_models
     from zocrates.llm import get_llm_model
     from zocrates.config import (
+        DEFAULT_SENTENCE_ATTRIBUTION_MODEL,
         get_secure_api_key,
         load_zocrates_config,
         save_openalex_api_key,
@@ -3899,6 +3906,8 @@ async def update_config(request: ConfigRequest) -> dict:
         updates["predictive_prompt_model"] = (
             request.predictive_prompt_model.strip() or DEFAULT_PREDICTIVE_PROMPT_MODEL
         )
+    if request.sentence_attribution_model is not None:
+        updates["sentence_attribution_model"] = request.sentence_attribution_model.strip()
     if request.citation_verification_enabled is not None:
         updates["citation_verification_enabled"] = request.citation_verification_enabled
     if request.citation_verification_provider is not None:
@@ -4032,6 +4041,7 @@ async def update_config(request: ConfigRequest) -> dict:
             "enable_mcp_server": cfg.get("enable_mcp_server"),
             "enable_predictive_ghost_input": cfg.get("enable_predictive_ghost_input"),
             "predictive_prompt_model": cfg.get("predictive_prompt_model"),
+            "sentence_attribution_model": cfg.get("sentence_attribution_model", DEFAULT_SENTENCE_ATTRIBUTION_MODEL),
             "datalab_merge_cross_page": cfg.get("datalab_merge_cross_page"),
             "user_research_profile": cfg.get("user_research_profile", ""),
             "citation_verification_enabled": cfg.get("citation_verification_enabled"),
@@ -5381,7 +5391,11 @@ async def sentence_attribution_endpoint(request: SentenceAttributionRequest) -> 
         compute_sentence_attribution,
         persist_sentence_attribution_to_session,
     )
-    from zocrates.config import get_secure_api_key
+    from zocrates.config import (
+        get_secure_api_key,
+        get_sentence_attribution_model,
+        load_zocrates_config,
+    )
 
     try:
         syncer = get_syncer()
@@ -5389,10 +5403,18 @@ async def sentence_attribution_endpoint(request: SentenceAttributionRequest) -> 
     except Exception:
         zot_dir = None
 
+    cfg = load_zocrates_config(zot_dir)
+    model = get_sentence_attribution_model(cfg, zotero_data_dir=zot_dir)
+    provider = cfg.get("llm_provider", "openrouter_llm")
+    is_local = (
+        provider in ("ollama", "vllm", "openai_compatible")
+        or model.startswith(("ollama/", "ollama_chat/", "vllm/", "local/", "openai/"))
+    )
+
     api_key = get_secure_api_key(
         "openrouter_api_key", ("OPENROUTER_API_KEY", "OPEN_ROUTER_API_KEY")
     )
-    if not api_key:
+    if not is_local and not api_key:
         raise HTTPException(
             status_code=400,
             detail="OpenRouter API key is not configured. Please configure it in Zotero Preferences -> Zocrates.",
@@ -5402,6 +5424,8 @@ async def sentence_attribution_endpoint(request: SentenceAttributionRequest) -> 
         claim=request.claim,
         source_text=request.source_text,
         api_key=api_key,
+        model=model,
+        base_url=cfg.get("llm_base_url") if is_local else None,
     )
 
     if request.session_id:

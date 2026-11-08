@@ -184,6 +184,9 @@ def parse_attribution_response(raw_text: str, total_spans: int) -> dict[str, Any
     """
     text = (raw_text or "").strip()
 
+    # Strip thinking tags (e.g. from reasoning models)
+    text = re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.IGNORECASE).strip()
+
     # Strip code fences if present
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
@@ -233,19 +236,28 @@ async def compute_sentence_attribution(
     source_text: str,
     api_key: str | None = None,
     timeout: float = SENTENCE_ATTRIBUTION_TIMEOUT_SEC,
+    model: str | None = None,
+    base_url: str | None = None,
 ) -> dict[str, Any]:
     """Compute sentence-level attribution for a claim against source text.
 
     Args:
         claim: Target claim statement to verify.
         source_text: Grounding source excerpt or chunk.
-        api_key: OpenRouter API key.
+        api_key: API key for remote providers.
         timeout: Timeout in seconds for model completion.
+        model: Optional model identifier override.
+        base_url: Optional API base URL for local providers.
 
     Returns:
         Attribution result dictionary.
     """
     import litellm
+
+    if not model:
+        from zocrates.config import get_sentence_attribution_model
+
+        model = get_sentence_attribution_model()
 
     spans = segment_source_text(source_text)
     if not spans:
@@ -254,7 +266,7 @@ async def compute_sentence_attribution(
             "supporting_indices": [],
             "spans": [],
             "unsupported_aspects": "Source passage is empty",
-            "model": SENTENCE_ATTRIBUTION_MODEL,
+            "model": model,
             "latency_ms": 0.0,
         }
 
@@ -267,16 +279,19 @@ async def compute_sentence_attribution(
         },
     ]
 
-    openrouter_model = f"openrouter/{SENTENCE_ATTRIBUTION_MODEL}"
     kwargs: dict[str, Any] = {
-        "model": openrouter_model,
+        "model": model,
         "messages": messages,
         "temperature": 0.0,
-        "max_tokens": 300,
-        "extra_body": {"reasoning": {"effort": "none"}},
+        "max_tokens": 600,
     }
     if api_key:
         kwargs["api_key"] = api_key
+    if base_url:
+        kwargs["api_base"] = base_url
+    if model.startswith("openrouter/"):
+        kwargs["extra_body"] = {"reasoning": {"effort": "none"}}
+        kwargs["extra_headers"] = {"X-OpenRouter-Title": "Zocrates"}
 
     t0 = time.perf_counter()
     try:
@@ -300,7 +315,7 @@ async def compute_sentence_attribution(
             "supporting_indices": parsed["supporting_indices"],
             "spans": spans,
             "unsupported_aspects": parsed["unsupported_aspects"],
-            "model": SENTENCE_ATTRIBUTION_MODEL,
+            "model": model,
             "latency_ms": round(elapsed_ms, 2),
         }
     except Exception as exc:
@@ -311,7 +326,7 @@ async def compute_sentence_attribution(
             "supporting_indices": [],
             "spans": spans,
             "unsupported_aspects": f"Evaluation error: {exc}",
-            "model": SENTENCE_ATTRIBUTION_MODEL,
+            "model": model,
             "latency_ms": round(elapsed_ms, 2),
         }
 

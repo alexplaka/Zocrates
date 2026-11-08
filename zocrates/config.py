@@ -304,6 +304,11 @@ DEFAULT_ENABLE_PREDICTIVE_GHOST_INPUT: bool = True
 DEFAULT_PREDICTIVE_PROMPT_MODEL: str = "openrouter/~deepseek/deepseek-flash-latest"
 
 # ---------------------------------------------------------------------------
+# Sentence Attribution Defaults
+# ---------------------------------------------------------------------------
+DEFAULT_SENTENCE_ATTRIBUTION_MODEL: str = ""
+
+# ---------------------------------------------------------------------------
 # Adaptive Context Compaction Defaults (Post-Turn Decision Model)
 # ---------------------------------------------------------------------------
 DEFAULT_ENABLE_ADAPTIVE_COMPACTION: bool = True
@@ -398,6 +403,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "auto_spawn_backend": DEFAULT_AUTO_SPAWN_BACKEND,
     "enable_predictive_ghost_input": DEFAULT_ENABLE_PREDICTIVE_GHOST_INPUT,
     "predictive_prompt_model": DEFAULT_PREDICTIVE_PROMPT_MODEL,
+    "sentence_attribution_model": DEFAULT_SENTENCE_ATTRIBUTION_MODEL,
     "scholar_polite_email": DEFAULT_SCHOLAR_POLITE_EMAIL,
     "user_research_profile": DEFAULT_USER_RESEARCH_PROFILE,
     "max_research_profile_chars": DEFAULT_MAX_RESEARCH_PROFILE_CHARS,
@@ -873,6 +879,9 @@ def load_zocrates_config(zotero_data_dir: Path | str | None = None) -> dict:
                 if "predictive_prompt_model" not in loaded:
                     loaded["predictive_prompt_model"] = DEFAULT_PREDICTIVE_PROMPT_MODEL
                     needs_save = True
+                if "sentence_attribution_model" not in loaded:
+                    loaded["sentence_attribution_model"] = DEFAULT_SENTENCE_ATTRIBUTION_MODEL
+                    needs_save = True
                 if "scholar_polite_email" not in loaded:
                     loaded["scholar_polite_email"] = DEFAULT_SCHOLAR_POLITE_EMAIL
                     needs_save = True
@@ -1124,6 +1133,10 @@ def save_zocrates_config(config: dict, zotero_data_dir: Path | None = None) -> N
                     else:
                         base_overrides[role] = role_cfg
                 config_copy["override_agent_models"] = base_overrides
+            if "sentence_attribution_model" in config_copy:
+                existing["sentence_attribution_model"] = config_copy["sentence_attribution_model"]
+            elif "sentence_attribution_model" not in existing:
+                existing["sentence_attribution_model"] = DEFAULT_SENTENCE_ATTRIBUTION_MODEL
             existing.update(config_copy)
             with open(config_path, "w") as f:
                 json.dump(existing, f, indent=2)
@@ -2032,6 +2045,79 @@ def get_ollama_num_ctx(
         except (ValueError, TypeError):
             pass
     return DEFAULT_OLLAMA_NUM_CTX
+
+
+def get_coordinator_model(
+    cfg: dict[str, Any] | None = None,
+    zotero_data_dir: Path | str | None = None,
+) -> str:
+    """Return the resolved coordinator model identifier.
+
+    Checks coordinator_agent.model at runtime if available; otherwise falls back to
+    (cfg.get("override_agent_models") or {}).get("coordinator", {}).get("model"),
+    then cfg.get("llm_model"), then DEFAULT_LLM_MODEL. Resolves with
+    _resolve_model_name(coord_model, provider).
+    """
+    if cfg is None:
+        cfg = load_zocrates_config(zotero_data_dir)
+
+    coord_model = None
+    try:
+        from zocrates.agents.app import coordinator_agent
+
+        if coordinator_agent is not None and getattr(coordinator_agent, "model", None) is not None:
+            c_model = coordinator_agent.model
+            if isinstance(c_model, str) and c_model.strip():
+                coord_model = c_model.strip()
+            elif hasattr(c_model, "model") and isinstance(c_model.model, str) and c_model.model.strip():
+                coord_model = c_model.model.strip()
+            elif hasattr(c_model, "model") and c_model.model:
+                coord_model = str(c_model.model).strip()
+    except Exception:
+        pass
+
+    if not coord_model:
+        override_entry = (cfg.get("override_agent_models") or {}).get("coordinator")
+        coord_override = None
+        if isinstance(override_entry, dict):
+            coord_override = override_entry.get("model")
+        elif isinstance(override_entry, str):
+            coord_override = override_entry
+
+        if coord_override:
+            coord_model = str(coord_override).strip()
+        elif cfg.get("llm_model"):
+            coord_model = str(cfg.get("llm_model")).strip()
+        else:
+            coord_model = DEFAULT_LLM_MODEL
+
+    provider = cfg.get("llm_provider") or "openrouter_llm"
+    from zocrates.llm import _resolve_model_name
+
+    return _resolve_model_name(coord_model, provider)
+
+
+def get_sentence_attribution_model(
+    cfg: dict[str, Any] | None = None,
+    zotero_data_dir: Path | str | None = None,
+) -> str:
+    """Return the resolved model identifier for sentence attribution.
+
+    If cfg.get("sentence_attribution_model") is set and non-empty, resolves it
+    with _resolve_model_name(custom_model, provider). If empty, null, or unset,
+    delegates to get_coordinator_model(cfg, zotero_data_dir).
+    """
+    if cfg is None:
+        cfg = load_zocrates_config(zotero_data_dir)
+
+    custom_model = cfg.get("sentence_attribution_model")
+    if custom_model is not None and isinstance(custom_model, str) and custom_model.strip():
+        provider = cfg.get("llm_provider") or "openrouter_llm"
+        from zocrates.llm import _resolve_model_name
+
+        return _resolve_model_name(custom_model.strip(), provider)
+
+    return get_coordinator_model(cfg, zotero_data_dir)
 
 
 def get_collection_name(model_name: str, dimension: int) -> str:
