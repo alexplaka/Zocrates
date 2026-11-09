@@ -150,27 +150,6 @@
       color: var(--text-main);
     }
 
-    .stat-badge.count-verified {
-      background: rgba(16, 185, 129, 0.15);
-      border-color: rgba(16, 185, 129, 0.35);
-      color: #34d399;
-      font-weight: 600;
-    }
-
-    .stat-badge.count-rejected {
-      background: rgba(239, 68, 68, 0.15);
-      border-color: rgba(239, 68, 68, 0.35);
-      color: #f87171;
-      font-weight: 600;
-    }
-
-    .stat-badge.count-fail-open {
-      background: rgba(245, 158, 11, 0.15);
-      border-color: rgba(245, 158, 11, 0.35);
-      color: #fbbf24;
-      font-weight: 600;
-    }
-
     .stat-badge.attr-cost {
       background: rgba(168, 85, 247, 0.12);
       color: #c084fc;
@@ -213,29 +192,11 @@
       border-color: var(--text-muted);
     }
 
-    .btn-close {
-      background: rgba(125, 125, 125, 0.12);
-      border: 1px solid var(--border);
-      color: var(--text-main);
-      padding: 5px 12px;
-      border-radius: 6px;
-      font-size: 12px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: all 0.15s ease;
-    }
-
-    .btn-close:hover {
-      background: rgba(239, 68, 68, 0.2);
-      border-color: rgba(239, 68, 68, 0.4);
-      color: #fca5a5;
-    }
-
     /* Copy menu dropdown */
     .copy-menu-dropdown {
       position: absolute;
       top: calc(100% + 4px);
-      right: 70px;
+      right: 0;
       background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: 8px;
@@ -1067,12 +1028,9 @@
         <h1 class="header-title">🛡️ Claim Verification Inspector</h1>
         <div class="header-stats">
           <span class="stat-badge model" id="claims-model-badge">decision-model</span>
-          <span class="stat-badge thresh" id="claims-thresh-badge">τ = 0.600</span>
+          <span class="stat-badge thresh" id="claims-thresh-badge">Threshold p = 0.600</span>
           <span class="stat-badge mean" id="claims-mean-badge">Mean p: --</span>
           <span class="stat-badge count-total" id="badge-total">0 Total</span>
-          <span class="stat-badge count-verified" id="badge-verified">0 Verified</span>
-          <span class="stat-badge count-rejected" id="badge-rejected">0 Rejected</span>
-          <span class="stat-badge count-fail-open" id="badge-fail-open">0 Fail-open</span>
           <span class="stat-badge attr-cost" id="badge-attr-cost" style="display:none;" title="Sentence Attribution Cost & Tokens">🔍 Attribution: 0 tokens</span>
         </div>
       </div>
@@ -1084,7 +1042,6 @@
           <button id="btn-copy-markdown" class="copy-menu-item">📝 Copy Markdown Table</button>
           <button id="btn-copy-json" class="copy-menu-item">📦 Copy Raw JSON Data</button>
         </div>
-        <button id="btn-close" class="btn-close" title="Close window">✕ Close</button>
       </div>
     </header>
 

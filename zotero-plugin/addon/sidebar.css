@@ -1608,6 +1608,10 @@ body[data-theme="sepia"] .message-wrapper.assistant {
 }
 
 .citation-toggle-btn {
+  appearance: none;
+  -moz-appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -1655,6 +1659,10 @@ body[data-theme="sepia"] .citation-toggle-btn:hover {
 }
 
 .claims-inspector-btn {
+  appearance: none;
+  -moz-appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -1682,6 +1690,13 @@ body[data-theme="sepia"] .citation-toggle-btn:hover {
 body[data-theme="zotero-light"] .claims-inspector-btn:hover,
 body[data-theme="sepia"] .claims-inspector-btn:hover {
   background-color: rgba(0, 0, 0, 0.06);
+}
+
+.claims-inspector-btn svg {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+  flex-shrink: 0;
 }
 
 /* Sentence-Level Attribution in Claims Inspector & Popovers */
