@@ -5420,12 +5420,24 @@ async def sentence_attribution_endpoint(request: SentenceAttributionRequest) -> 
             detail="OpenRouter API key is not configured. Please configure it in Zotero Preferences -> Zocrates.",
         )
 
+    base_url = None
+    if is_local:
+        from zocrates.llm import _format_base_url
+
+        raw_url = cfg.get("llm_base_url")
+        if provider == "ollama":
+            base_url = _format_base_url(raw_url or "http://localhost:11434", "ollama")
+        elif provider in ("vllm", "openai_compatible"):
+            base_url = _format_base_url(raw_url or "http://localhost:8000/v1", provider)
+        else:
+            base_url = _format_base_url(raw_url or "http://localhost:11434", "ollama")
+
     result = await compute_sentence_attribution(
         claim=request.claim,
         source_text=request.source_text,
         api_key=api_key,
         model=model,
-        base_url=cfg.get("llm_base_url") if is_local else None,
+        base_url=base_url,
         zotero_data_dir=zot_dir,
     )
 

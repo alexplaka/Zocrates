@@ -622,7 +622,7 @@
     const threshBadge = document.getElementById("claims-thresh-badge");
     if (threshBadge) {
       const thresh = data?.threshold !== undefined ? data.threshold : (summary.threshold !== undefined ? summary.threshold : 0.60);
-      threshBadge.textContent = `τ = ${Number(thresh).toFixed(3)}`;
+      threshBadge.textContent = `Threshold p = ${Number(thresh).toFixed(3)}`;
       threshBadge.title = `Verification cutoff threshold: ${Number(thresh).toFixed(3)}`;
     }
 
@@ -651,18 +651,6 @@
     // Counts badges
     const bTotal = document.getElementById("badge-total");
     if (bTotal) bTotal.textContent = `${total} Total`;
-
-    const bVerified = document.getElementById("badge-verified");
-    if (bVerified) bVerified.textContent = `${kept} Verified`;
-
-    const bRejected = document.getElementById("badge-rejected");
-    if (bRejected) bRejected.textContent = `${demoted} Rejected`;
-
-    const bFailOpen = document.getElementById("badge-fail-open");
-    if (bFailOpen) {
-      bFailOpen.textContent = `${failOpen} Fail-open`;
-      bFailOpen.style.display = failOpen > 0 ? "inline-flex" : "none";
-    }
 
     // Update filter tab counts
     const tabAllCount = document.querySelector("#tab-all .tab-count");
@@ -812,7 +800,7 @@
 
       const rowNum = document.createElement("span");
       rowNum.className = "row-num";
-      rowNum.textContent = `#${item._originalIndex}`;
+      rowNum.textContent = `${item._originalIndex}`;
       idxCell.appendChild(rowNum);
 
       tdIdx.appendChild(idxCell);
@@ -1142,11 +1130,6 @@
       }
       probCell.appendChild(statusBadge);
 
-      const threshNote = document.createElement("span");
-      threshNote.className = "thresh-note";
-      threshNote.textContent = `τ = ${threshVal.toFixed(3)}`;
-      probCell.appendChild(threshNote);
-
       tdProb.appendChild(probCell);
       tr.appendChild(tdProb);
 
@@ -1338,14 +1321,6 @@
         const jsonStr = buildJsonExport();
         const ok = await copyToClipboard(jsonStr);
         if (ok) showToast("JSON data copied to clipboard!");
-      });
-    }
-
-    // 9. Close Button
-    const closeBtn = document.getElementById("btn-close");
-    if (closeBtn) {
-      closeBtn.addEventListener("click", () => {
-        window.close();
       });
     }
 

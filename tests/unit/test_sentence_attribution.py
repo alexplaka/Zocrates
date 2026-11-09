@@ -11,7 +11,9 @@ from fastapi.testclient import TestClient
 from zocrates.agents.common.state_keys import RETRIEVED_EVIDENCE
 from zocrates.agents.library_search.sentence_attribution import (
     ATTRIBUTION_SYSTEM_PROMPT,
+    SENTENCE_ATTRIBUTION_LOCAL_TIMEOUT_SEC,
     SENTENCE_ATTRIBUTION_MODEL,
+    SENTENCE_ATTRIBUTION_TIMEOUT_SEC,
     compute_sentence_attribution,
     format_spans_for_prompt,
     parse_attribution_response,
@@ -228,9 +230,164 @@ class TestComputeSentenceAttribution:
             assert res["status"] == "error"
             assert "support_level" not in res
             assert res["supporting_indices"] == []
-            assert "error" in res["unsupported_aspects"].lower()
+            assert res["unsupported_aspects"] == "Evaluation error (RuntimeError): OpenRouter API error"
             assert res["usage"] == {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
             assert res["cost_usd"] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_timeout_error_produces_descriptive_message(self):
+        with patch("litellm.acompletion", new_callable=AsyncMock) as mock_llm:
+            mock_llm.side_effect = asyncio.TimeoutError()
+            res = await compute_sentence_attribution(
+                claim="Claim",
+                source_text="Some valid source text.",
+                model="ollama_chat/llama3",
+            )
+            assert res["status"] == "error"
+            assert res["supporting_indices"] == []
+            assert res["unsupported_aspects"] == f"Evaluation timed out after {SENTENCE_ATTRIBUTION_LOCAL_TIMEOUT_SEC:.0f}s"
+            assert res["usage"] == {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+            assert res["cost_usd"] == 0.0
+
+        with patch("litellm.acompletion", new_callable=AsyncMock) as mock_llm:
+            mock_llm.side_effect = asyncio.TimeoutError()
+            res = await compute_sentence_attribution(
+                claim="Claim",
+                source_text="Some valid source text.",
+                model="openrouter/test/model",
+                api_key="test-key",
+            )
+            assert res["status"] == "error"
+            assert res["supporting_indices"] == []
+            assert res["unsupported_aspects"] == f"Evaluation timed out after {SENTENCE_ATTRIBUTION_TIMEOUT_SEC:.0f}s"
+
+    @pytest.mark.asyncio
+    async def test_local_model_uses_2048_max_tokens(self):
+        mock_choice = MagicMock()
+        mock_choice.message.content = '{"supporting_indices": [1], "unsupported_aspects": ""}'
+        mock_resp = MagicMock(choices=[mock_choice], usage=None)
+
+        with patch("litellm.acompletion", new_callable=AsyncMock) as mock_llm:
+            mock_llm.return_value = mock_resp
+            await compute_sentence_attribution(
+                claim="Claim",
+                source_text="Some valid source text.",
+                model="ollama_chat/qwen2.5:7b",
+            )
+            assert mock_llm.call_args.kwargs["max_tokens"] == 2048
+
+        with patch("litellm.acompletion", new_callable=AsyncMock) as mock_llm:
+            mock_llm.return_value = mock_resp
+            await compute_sentence_attribution(
+                claim="Claim",
+                source_text="Some valid source text.",
+                model="vllm/meta-llama/Llama-3-8B",
+            )
+            assert mock_llm.call_args.kwargs["max_tokens"] == 2048
+
+        with patch("litellm.acompletion", new_callable=AsyncMock) as mock_llm:
+            mock_llm.return_value = mock_resp
+            await compute_sentence_attribution(
+                claim="Claim",
+                source_text="Some valid source text.",
+                model="local/deepseek-r1",
+            )
+            assert mock_llm.call_args.kwargs["max_tokens"] == 2048
+
+        with patch("litellm.acompletion", new_callable=AsyncMock) as mock_llm:
+            mock_llm.return_value = mock_resp
+            await compute_sentence_attribution(
+                claim="Claim",
+                source_text="Some valid source text.",
+                model="custom-model",
+                base_url="http://localhost:11434",
+            )
+            assert mock_llm.call_args.kwargs["max_tokens"] == 2048
+
+    @pytest.mark.asyncio
+    async def test_local_model_inherits_local_timeout_sec(self):
+        mock_choice = MagicMock()
+        mock_choice.message.content = '{"supporting_indices": [1], "unsupported_aspects": ""}'
+        mock_resp = MagicMock(choices=[mock_choice], usage=None)
+
+        # 1. Local model with default timeout inherits SENTENCE_ATTRIBUTION_LOCAL_TIMEOUT_SEC
+        with patch("litellm.acompletion", new_callable=AsyncMock) as mock_llm, \
+             patch("asyncio.wait_for", new_callable=AsyncMock) as mock_wait_for:
+            mock_wait_for.return_value = mock_resp
+            await compute_sentence_attribution(
+                claim="Claim",
+                source_text="Some valid source text.",
+                model="ollama_chat/llama3",
+            )
+            assert mock_wait_for.call_args.kwargs["timeout"] == SENTENCE_ATTRIBUTION_LOCAL_TIMEOUT_SEC
+
+        # 2. Local model with base_url inherits SENTENCE_ATTRIBUTION_LOCAL_TIMEOUT_SEC
+        with patch("litellm.acompletion", new_callable=AsyncMock) as mock_llm, \
+             patch("asyncio.wait_for", new_callable=AsyncMock) as mock_wait_for:
+            mock_wait_for.return_value = mock_resp
+            await compute_sentence_attribution(
+                claim="Claim",
+                source_text="Some valid source text.",
+                model="openai/custom-model",
+                base_url="http://localhost:8000/v1",
+            )
+            assert mock_wait_for.call_args.kwargs["timeout"] == SENTENCE_ATTRIBUTION_LOCAL_TIMEOUT_SEC
+
+        # 3. Remote model with default timeout keeps SENTENCE_ATTRIBUTION_TIMEOUT_SEC
+        with patch("litellm.acompletion", new_callable=AsyncMock) as mock_llm, \
+             patch("asyncio.wait_for", new_callable=AsyncMock) as mock_wait_for:
+            mock_wait_for.return_value = mock_resp
+            await compute_sentence_attribution(
+                claim="Claim",
+                source_text="Some valid source text.",
+                model="openrouter/test/model",
+                api_key="test-key",
+            )
+            assert mock_wait_for.call_args.kwargs["timeout"] == SENTENCE_ATTRIBUTION_TIMEOUT_SEC
+
+        # 4. Explicit non-default timeout is preserved
+        with patch("litellm.acompletion", new_callable=AsyncMock) as mock_llm, \
+             patch("asyncio.wait_for", new_callable=AsyncMock) as mock_wait_for:
+            mock_wait_for.return_value = mock_resp
+            await compute_sentence_attribution(
+                claim="Claim",
+                source_text="Some valid source text.",
+                model="ollama_chat/llama3",
+                timeout=45.0,
+            )
+            assert mock_wait_for.call_args.kwargs["timeout"] == 45.0
+
+    @pytest.mark.asyncio
+    async def test_litellm_drop_params_set_for_local_models(self):
+        import litellm
+
+        mock_choice = MagicMock()
+        mock_choice.message.content = '{"supporting_indices": [1], "unsupported_aspects": ""}'
+        mock_resp = MagicMock(choices=[mock_choice], usage=None)
+
+        # Reset drop_params to False
+        litellm.drop_params = False
+
+        # Calling with remote model does not enable drop_params
+        with patch("litellm.acompletion", new_callable=AsyncMock) as mock_llm:
+            mock_llm.return_value = mock_resp
+            await compute_sentence_attribution(
+                claim="Claim",
+                source_text="Some valid source text.",
+                model="openrouter/test/model",
+                api_key="test-key",
+            )
+            assert litellm.drop_params is False
+
+        # Calling with local model enables drop_params
+        with patch("litellm.acompletion", new_callable=AsyncMock) as mock_llm:
+            mock_llm.return_value = mock_resp
+            await compute_sentence_attribution(
+                claim="Claim",
+                source_text="Some valid source text.",
+                model="ollama_chat/llama3",
+            )
+            assert litellm.drop_params is True
 
 
 class TestSessionPersistence:
@@ -422,6 +579,46 @@ class TestSentenceAttributionEndpoint:
             assert data["status"] == "ok"
             assert data["model"] == expected_model
 
+    @pytest.mark.parametrize(
+        ("provider", "model_conf", "raw_url", "expected_base_url"),
+        [
+            ("ollama", "llama3", None, "http://localhost:11434"),
+            ("ollama", "llama3", "http://localhost:11434/v1", "http://localhost:11434"),
+            ("vllm", "meta-llama/Llama-3-8B", None, "http://localhost:8000/v1"),
+            ("vllm", "meta-llama/Llama-3-8B", "http://custom:9000", "http://custom:9000/v1"),
+            ("openai_compatible", "local-model", "https://api.local/v1/", "https://api.local/v1"),
+            ("other_provider", "local/custom-model", None, "http://localhost:11434"),
+        ],
+    )
+    def test_endpoint_formats_base_url_for_local_providers(
+        self, monkeypatch, provider, model_conf, raw_url, expected_base_url
+    ):
+        from zocrates.config import get_auth_token
+
+        token = get_auth_token()
+        monkeypatch.setattr("zocrates.config.get_secure_api_key", lambda *args, **kwargs: None)
+
+        mock_choice = MagicMock()
+        mock_choice.message.content = '{"supporting_indices": [1], "unsupported_aspects": ""}'
+        mock_resp = MagicMock()
+        mock_resp.choices = [mock_choice]
+
+        cfg = {"sentence_attribution_model": model_conf, "llm_provider": provider}
+        if raw_url is not None:
+            cfg["llm_base_url"] = raw_url
+
+        with patch("zocrates.config.load_zocrates_config", return_value=cfg), \
+             patch("litellm.acompletion", new_callable=AsyncMock) as mock_llm:
+            mock_llm.return_value = mock_resp
+            client = TestClient(app)
+            res = client.post(
+                "/citations/sentence_attribution",
+                json={"claim": "Test", "source_text": "Passage text"},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            assert res.status_code == 200
+            assert mock_llm.call_args.kwargs.get("api_base") == expected_base_url
+
 
 class TestSentenceAttributionModelConfig:
     """Tests for get_sentence_attribution_model and get_coordinator_model."""
@@ -499,7 +696,7 @@ class TestSentenceAttributionModelConfig:
             mock_llm.assert_called_once()
             call_kwargs = mock_llm.call_args.kwargs
             assert call_kwargs["model"] == "openrouter/custom/model"
-            assert call_kwargs["max_tokens"] == 600
+            assert call_kwargs["max_tokens"] == 2048
             assert call_kwargs["api_key"] == "sk-test"
             assert call_kwargs["api_base"] == "http://localhost:11434"
             assert call_kwargs["extra_body"] == {"reasoning": {"effort": "none"}}

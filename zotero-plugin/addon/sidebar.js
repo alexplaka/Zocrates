@@ -6929,7 +6929,7 @@ function openMessageInfoModal(meta) {
 
       const countsBox = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
       countsBox.className = "citation-support-counts";
-      countsBox.textContent = `${total} claims evaluated: ${kept} verified (p ≥ ${threshFmt}), ${demoted} rejected (p < ${threshFmt})${failOpen > 0 ? `, ${failOpen} unverified` : ""}`;
+      countsBox.textContent = `${total} claims evaluated: ${kept} verified, ${demoted} rejected${failOpen > 0 ? `, ${failOpen} unverified` : ""} (threshold p = ${threshFmt})`;
       statsBox.appendChild(countsBox);
 
       if (Array.isArray(verif?.assessments)) {
@@ -8050,7 +8050,7 @@ function createClaimsInspectorBtn(wrapperDiv) {
   const btn = document.createElementNS("http://www.w3.org/1999/xhtml", "button");
   btn.className = "claims-inspector-btn";
   btn.setAttribute("type", "button");
-  btn.textContent = "🛡️ Claim Verification Inspector";
+  btn.innerHTML = `<svg class="claims-inspector-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="currentColor" d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg><span class="claims-inspector-label">Claim Verification Inspector</span>`;
   btn.setAttribute(
     "title",
     total > 0
@@ -8095,14 +8095,15 @@ function ensureClaimsInspectorBtn(wrapperDiv) {
   const total = summary.batch_size !== undefined ? summary.batch_size : data.assessments.length;
   const verified = summary.kept !== undefined ? summary.kept : data.assessments.filter(a => a.verdict === "KEPT").length;
   const demoted = summary.demoted !== undefined ? summary.demoted : data.assessments.filter(a => a.verdict === "DEMOTED").length;
-  const btnLabel = "🛡️ Claim Verification Inspector";
   const btnTitle = total > 0
     ? `Inspect claim verification table (${verified} verified, ${demoted} rejected of ${total} total)`
     : "Inspect claim verification table";
 
   const existingBtn = leftContainer.querySelector(".claims-inspector-btn");
   if (existingBtn) {
-    existingBtn.textContent = btnLabel;
+    if (!existingBtn.querySelector(".claims-inspector-icon")) {
+      existingBtn.innerHTML = `<svg class="claims-inspector-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="currentColor" d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg><span class="claims-inspector-label">Claim Verification Inspector</span>`;
+    }
     existingBtn.setAttribute("title", btnTitle);
     return;
   }
