@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 SENTENCE_ATTRIBUTION_MODEL = "nvidia/nemotron-3.5-lightning:free"
 SENTENCE_ATTRIBUTION_TIMEOUT_SEC = 20.0
+SENTENCE_ATTRIBUTION_LOCAL_TIMEOUT_SEC = 90.0
 
 _TABLE_ROW_RE = re.compile(r"^\s*\|.*\|\s*$")
 _TABLE_SEP_RE = re.compile(r"^\s*\|(?:\s*:?-+:?\s*\|)+\s*$")
@@ -262,6 +263,13 @@ async def compute_sentence_attribution(
 
         model = get_sentence_attribution_model()
 
+    is_local = any(model.startswith(p) for p in ("ollama/", "ollama_chat/", "vllm/", "local/")) or bool(base_url)
+    if is_local and timeout == SENTENCE_ATTRIBUTION_TIMEOUT_SEC:
+        timeout = SENTENCE_ATTRIBUTION_LOCAL_TIMEOUT_SEC
+
+    if is_local:
+        litellm.drop_params = True
+
     spans = segment_source_text(source_text)
     if not spans:
         return {
@@ -288,7 +296,7 @@ async def compute_sentence_attribution(
         "model": model,
         "messages": messages,
         "temperature": 0.0,
-        "max_tokens": 600,
+        "max_tokens": 2048,
     }
     if api_key:
         kwargs["api_key"] = api_key
@@ -379,14 +387,33 @@ async def compute_sentence_attribution(
             },
             "cost_usd": round(cost_usd, 6),
         }
-    except Exception as exc:
+    except asyncio.TimeoutError:
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
-        logger.warning("Sentence attribution completion failed: %s", exc)
+        logger.warning(
+            "Sentence attribution timed out after %.1fs (model=%s, spans=%d)",
+            timeout,
+            model,
+            len(spans),
+        )
         return {
             "status": "error",
             "supporting_indices": [],
             "spans": spans,
-            "unsupported_aspects": f"Evaluation error: {exc}",
+            "unsupported_aspects": f"Evaluation timed out after {timeout:.0f}s",
+            "model": model,
+            "latency_ms": round(elapsed_ms, 2),
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            "cost_usd": 0.0,
+        }
+    except Exception as exc:
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        err_msg = str(exc).strip() or type(exc).__name__
+        logger.warning("Sentence attribution completion failed (%s): %s", type(exc).__name__, exc)
+        return {
+            "status": "error",
+            "supporting_indices": [],
+            "spans": spans,
+            "unsupported_aspects": f"Evaluation error ({type(exc).__name__}): {err_msg}",
             "model": model,
             "latency_ms": round(elapsed_ms, 2),
             "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
