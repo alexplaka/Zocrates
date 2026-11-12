@@ -586,6 +586,12 @@ async def test_sync_item_dispatches_notes_and_attachments(tmp_path: Path):
     syncer._ingest_standalone_note.assert_awaited_once()
     syncer._ingest_item.assert_not_awaited()
 
+    # Attachment item returned by get_attachment_by_key
+    mock_db.get_attachment_by_key.return_value = MagicMock(item_id=2, item_key="ATT1")
+    res_att = await LibrarySyncer.sync_item(syncer, "ATT1")
+    assert res_att == "att_processed"
+    syncer._ingest_standalone_attachment.assert_awaited_once()
+
 
 def test_resolve_bundle_dir_metadata_on_demand_and_notices(tmp_path: Path):
     """Verify _resolve_bundle_dir materializes metadata bundle on demand and attaches note notices."""
@@ -625,4 +631,481 @@ def test_resolve_bundle_dir_metadata_on_demand_and_notices(tmp_path: Path):
         assert notice is not None
         assert "Child Note 1" in notice
         assert (bundle_dir / "document.md").exists()
+
+        # Call a second time when bundle already exists to verify Step 3 fast-path returns fresh bundle
+        b2, k2, n2 = _resolve_bundle_dir("BARE_ITEM")
+        assert b2 == bundle_dir
+        assert k2 == resolved_key
+        assert n2 is not None
+        assert "Child Note 1" in n2
+
+        # Step 3 exception branch when materialize_item_metadata_bundle fails
+        with patch("zocrates.rag.document_processor.materialize_item_metadata_bundle", side_effect=Exception("Bundle fail")):
+            res3 = _resolve_bundle_dir("BARE_ITEM_FAIL")
+            assert res3 is None
+
+
+# ---------------------------------------------------------------------------
+# 8. Diff Coverage Edge Cases Tests
+# ---------------------------------------------------------------------------
+
+
+def test_post_items_ingest_edge_cases():
+    """Verify POST /items/ingest error branches: not registered, blank keys, exceptions."""
+    from zocrates.fast_api_app import app, verify_auth
+
+    client = TestClient(app)
+    app.dependency_overrides[verify_auth] = lambda: True
+    try:
+        # 1. Not registered -> 400
+        with patch("zocrates.fast_api_app.get_syncer", side_effect=RuntimeError("Not registered")):
+            resp = client.post("/items/ingest", json={"item_keys": ["KEY_A"]})
+            assert resp.status_code == 400
+            assert "Zocrates backend is not registered" in resp.json()["detail"]
+
+        # 2. Blank keys and sync_item exception
+        mock_syncer = MagicMock()
+        mock_syncer.sync_item = AsyncMock(side_effect=Exception("Disk full"))
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            resp = client.post("/items/ingest", json={"item_keys": ["   ", "KEY_ERR"]})
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "   " not in data["results"]
+            assert data["results"]["KEY_ERR"] == "error: Disk full"
+    finally:
+        app.dependency_overrides.pop(verify_auth, None)
+
+
+def test_convert_item_regular_item_without_attachments():
+    """Verify POST /convert/{item_key} handles regular items with no attachments on disk."""
+    from zocrates.fast_api_app import app, verify_auth
+
+    client = TestClient(app)
+    mock_syncer = MagicMock()
+    mock_syncer.db.get_attachment_by_key.return_value = None
+    mock_item = MagicMock(item_id=42, item_key="REG_ITEM", item_type="journalArticle")
+    mock_syncer.db.get_item_by_key.return_value = mock_item
+    mock_syncer.db.get_attachments.return_value = []
+    mock_syncer.sync_item = AsyncMock(return_value="processed")
+
+    app.dependency_overrides[verify_auth] = lambda: True
+    try:
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            resp = client.post("/convert/REG_ITEM")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["status"] == "processed"
+            assert data["converter_id"] == "zotero_metadata"
+            assert data["content_type"] == "text/zotero-metadata"
+            mock_syncer.sync_item.assert_awaited_once_with(item_key="REG_ITEM", force=False)
+    finally:
+        app.dependency_overrides.pop(verify_auth, None)
+
+
+def test_batch_convert_skips_and_supersedes(tmp_path: Path):
+    """Verify batch_convert supersedes parent metadata bundle when skipping an already converted item."""
+    from zocrates.fast_api_app import app, verify_auth
+    from zocrates.rag.document_processor import _file_sha256
+    from zocrates.rag.zotero_db import ZoteroAttachment
+
+    mock_syncer = MagicMock()
+    att_file = tmp_path / "doc.pdf"
+    att_file.write_bytes(b"%PDF-1.4 test")
+    att = ZoteroAttachment(
+        item_id=1,
+        item_key="ATT_1",
+        parent_item_id=10,
+        parent_item_key="PARENT_P1",
+        content_type="application/pdf",
+        path=att_file,
+    )
+    mock_syncer.db.get_all_attachments.return_value = [att]
+    mock_syncer.db.get_attachment_by_key.return_value = att
+    mock_syncer.db.get_item_title.return_value = "Paper 1"
+    mock_syncer.db.get_item.return_value = MagicMock(
+        title="Paper 1", creators=None, year=None, publication=None, doi=None, url=None, abstract=None
+    )
+    file_hash = _file_sha256(att_file)
+    mock_syncer.processor.get_metadata.return_value = {
+        "converter_id": "markitdown",
+        "source_hash": file_hash,
+    }
+    mock_syncer.processor._document_converter_id = "markitdown"
+    mock_syncer.processor.datalab_non_pdf_fallback = None
+
+    client = TestClient(app)
+    app.dependency_overrides[verify_auth] = lambda: True
+    try:
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            with patch("zocrates.rag.library_syncer.supersede_metadata_bundle_if_needed") as mock_super:
+                resp = client.post(
+                    "/batch-convert",
+                    json={"item_keys": ["ATT_1"], "converter_id": "markitdown", "force": False},
+                )
+                assert resp.status_code == 200
+                mock_super.assert_called_once_with("PARENT_P1", mock_syncer)
+    finally:
+        app.dependency_overrides.pop(verify_auth, None)
+
+
+def test_convert_item_attachment_supersedes_metadata(tmp_path: Path):
+    """Verify POST /convert/{item_key} calls supersede_metadata_bundle_if_needed when converting attachment."""
+    from zocrates.fast_api_app import app, verify_auth
+    from zocrates.rag.zotero_db import ZoteroAttachment
+
+    client = TestClient(app)
+    mock_syncer = MagicMock()
+    att_file = tmp_path / "paper.pdf"
+    att_file.write_bytes(b"%PDF-1.4 file")
+    att = ZoteroAttachment(
+        item_id=10,
+        item_key="ATT_KEY_1",
+        parent_item_id=5,
+        parent_item_key="PARENT_P5",
+        content_type="application/pdf",
+        path=att_file,
+    )
+    mock_syncer.db.get_attachment_by_key.return_value = att
+    mock_syncer.processor.convert_with.return_value = "# Markdown\n\nBody content."
+    mock_syncer.processor._document_converter_id = "markitdown"
+    mock_syncer.processor.datalab_non_pdf_fallback = None
+
+    app.dependency_overrides[verify_auth] = lambda: True
+    try:
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            with patch("zocrates.fast_api_app._dispatch_edge_evaluation"):
+                with patch("zocrates.rag.library_syncer.supersede_metadata_bundle_if_needed") as mock_super:
+                    resp = client.post("/convert/ATT_KEY_1")
+                    assert resp.status_code == 200
+                    mock_super.assert_called_once_with("PARENT_P5", mock_syncer)
+    finally:
+        app.dependency_overrides.pop(verify_auth, None)
+
+
+def test_batch_convert_full_conversion_supersedes(tmp_path: Path):
+    """Verify batch_convert supersedes parent metadata bundle when completing conversion with force=True."""
+    from sse_starlette.sse import AppStatus
+    from zocrates.fast_api_app import app, verify_auth
+    from zocrates.rag.zotero_db import ZoteroAttachment
+
+    AppStatus.should_exit_event = None
+
+    mock_syncer = MagicMock()
+    att_file = tmp_path / "doc.pdf"
+    att_file.write_bytes(b"%PDF-1.4 test")
+    att = ZoteroAttachment(
+        item_id=1,
+        item_key="ATT_FORCE",
+        parent_item_id=10,
+        parent_item_key="PARENT_FORCE",
+        content_type="application/pdf",
+        path=att_file,
+    )
+    mock_syncer.db.get_attachment_by_key.return_value = att
+    mock_syncer.db.get_item_title.return_value = "Paper Force"
+    mock_syncer.db.get_item.return_value = MagicMock(
+        title="Paper Force", creators=None, year=None, publication=None, doi=None, url=None, abstract=None
+    )
+    corpus_dir = tmp_path / "corpus"
+    (corpus_dir / "ATT_FORCE").mkdir(parents=True, exist_ok=True)
+    mock_syncer.processor._cache_dir = corpus_dir
+    mock_syncer.processor.convert_with.return_value = (
+        "# Heading\n\n"
+        "This is a substantive paragraph with ample text describing scientific findings "
+        "in thorough detail so that the chunk markdown utility generates valid chunk objects."
+    )
+    mock_syncer.processor.get_metadata.return_value = {"keywords": []}
+    mock_syncer.processor._document_converter_id = "markitdown"
+    mock_syncer.processor.datalab_non_pdf_fallback = None
+
+    client = TestClient(app)
+    app.dependency_overrides[verify_auth] = lambda: True
+    try:
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            with patch("zocrates.fast_api_app._dispatch_edge_evaluation"):
+                with patch("zocrates.rag.library_syncer.supersede_metadata_bundle_if_needed") as mock_super:
+                    resp = client.post(
+                        "/batch-convert",
+                        json={"item_keys": ["ATT_FORCE"], "converter_id": "markitdown", "force": True},
+                    )
+                    assert resp.status_code == 200
+                    mock_super.assert_called_once_with("PARENT_FORCE", mock_syncer)
+    finally:
+        app.dependency_overrides.pop(verify_auth, None)
+
+
+@pytest.mark.asyncio
+async def test_library_syncer_metadata_edge_evaluation_failure(tmp_path: Path):
+    """Verify _ingest_item handles edge evaluation failures and already ingested attachments gracefully."""
+    cache_dir = tmp_path / "corpus"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    syncer = LibrarySyncer.__new__(LibrarySyncer)
+    syncer._zotero_data_dir = tmp_path
+    syncer.processor = DocumentProcessor(cache_dir)
+    syncer.store = MagicMock()
+    syncer.db = MagicMock()
+
+    # 1. Edge evaluation failure during metadata item ingestion
+    item = ZoteroItem(
+        item_id=505,
+        item_key="META_FAIL_EDGE",
+        item_type="journalArticle",
+        title="Meta Edge Fail",
+        abstract="Some abstract text",
+        creators=["Author E"],
+        year=2024,
+        publication=None,
+        doi=None,
+        url=None,
+        tags=[],
+        collections=[],
+        relations=[],
+    )
+    syncer.db.get_item.return_value = item
+    syncer.db.get_attachments.return_value = []
+    syncer.db.get_notes_for_item.return_value = []
+    syncer.store.is_ingested.return_value = False
+
+    with patch("zocrates.rag.graph_engine.evaluate_and_persist_edges", side_effect=Exception("Edge fail")):
+        res = await syncer._ingest_item(505, "META_FAIL_EDGE", "Meta Edge Fail", force=True, evaluate_edges=True)
+        assert res == "processed"
+
+    # 2. Already ingested attachment supersedes metadata bundle
+    att_file = tmp_path / "existing.pdf"
+    att_file.write_bytes(b"%PDF-1.4 file")
+    from zocrates.rag.zotero_db import ZoteroAttachment
+    att = ZoteroAttachment(
+        item_id=606,
+        item_key="ATT_EXISTING",
+        parent_item_id=505,
+        parent_item_key="META_FAIL_EDGE",
+        content_type="application/pdf",
+        path=att_file,
+    )
+    syncer.db.get_attachments.return_value = [att]
+    syncer.store.is_ingested.return_value = True
+    with patch("zocrates.rag.library_syncer.supersede_metadata_bundle_if_needed") as mock_super:
+        res_att = await syncer._ingest_item(505, "META_FAIL_EDGE", "Meta Edge Fail", force=False)
+        assert res_att == "skipped"
+        mock_super.assert_called_once_with("META_FAIL_EDGE", syncer)
+
+
+def test_document_processor_metadata_edge_cases(tmp_path: Path):
+    """Verify document processor edge cases: empty parent_item_key, pre-existing tmp_dir, failed ToC/relation generation."""
+    cache_dir = tmp_path / "corpus"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    processor = DocumentProcessor(cache_dir)
+    assert processor.has_child_attachments("") is False
+
+    item = ZoteroItem(
+        item_id=1,
+        item_key="EDGE_ITEM",
+        item_type="journalArticle",
+        title="Edge Title",
+        abstract="Some abstract text",
+        creators=["Author X"],
+        year=2025,
+        publication=None,
+        doi=None,
+        url=None,
+        tags=[],
+        collections=[],
+        relations=[],
+    )
+    syncer = DummySyncer(cache_dir)
+
+    # Pre-create tmp_dir to trigger if tmp_dir.exists(): shutil.rmtree
+    tmp_dir = cache_dir / ".tmp_EDGE_ITEM"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    (tmp_dir / "stale.txt").write_text("stale", encoding="utf-8")
+
+    # Fast path re-check test: call once, then call again with force=False
+    b_dir1, k1 = materialize_item_metadata_bundle(item, syncer)
+    assert b_dir1.exists()
+    assert (b_dir1 / "document.md").exists()
+
+    b_dir2, k2 = materialize_item_metadata_bundle(item, syncer, force=False)
+    assert b_dir1 == b_dir2
+    assert k1 == k2
+
+    # Exceptions during keyword extraction, ToC, and item_relations generation
+    with patch("zocrates.rag.keyword_extractor.extract_statistical_keywords", side_effect=Exception("KW fail")):
+        with patch("zocrates.rag.toc_generator.generate_toc", side_effect=Exception("ToC fail")):
+            with patch("zocrates.rag.bundle_catalog.regenerate_item_relations_md", side_effect=Exception("Relations fail")):
+                b_dir3, _ = materialize_item_metadata_bundle(item, syncer, force=True)
+                assert (b_dir3 / "document.md").exists()
+
+
+def test_sync_shared_tags_target_key_and_primary_fallback(tmp_path: Path):
+    """Verify sync_shared_tags with target_key, empty src_tags, and fallback to primary attachment key for tags."""
+    cache_dir = tmp_path / "corpus"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "zotero.sqlite").touch()
+
+    with _open_meta_db(cache_dir) as conn:
+        conn.execute(
+            """
+            INSERT INTO conversion_meta (item_key, parent_item_key, content_type, converter_id, converter_version, source_path, source_hash, converted_at, char_count)
+            VALUES ('ATT_KEY', 'PARENT_P1', 'application/pdf', 'markitdown', '1.0', 'storage/ATT_KEY/doc.pdf', 'h1', '2026-01-01', 100),
+                   ('ITEM_B', NULL, 'text/zotero-metadata', 'zotero_metadata', '1.0', 'zotero://item/ITEM_B', 'h2', '2026-01-01', 100)
+            """
+        )
+
+        def mock_get_tags(zot_dir, item_key, tag_type=None):
+            # PARENT_P1 has no tags directly, but ATT_KEY has tags
+            if item_key == "ATT_KEY":
+                return ["shared_tag_1", "shared_tag_2"]
+            if item_key == "ITEM_B":
+                return ["shared_tag_1", "shared_tag_2"]
+            return []
+
+        with patch("zocrates.rag.graph_engine.get_item_tags", side_effect=mock_get_tags):
+            with patch("zocrates.rag.graph_engine.get_graph_relations_config") as mock_cfg:
+                mock_cfg.return_value = {
+                    "enabled": True,
+                    "include_automatic_tags_in_shared_tags": True,
+                    "min_shared_tags": 2,
+                    "shared_tags_score": 0.70,
+                }
+                # 1. target_key is parent key PARENT_P1 -> resolves to ATT_KEY
+                n = sync_shared_tags(conn=conn, zotero_dir=tmp_path, target_key="PARENT_P1", min_shared_tags=2)
+                assert n >= 1
+
+                # 2. target_key with no tags -> returns 0
+                n_zero = sync_shared_tags(conn=conn, zotero_dir=tmp_path, target_key="NON_EXISTENT", min_shared_tags=2)
+                assert n_zero == 0
+
+
+def test_evaluate_and_persist_edges_abstract_less_ground_truth(tmp_path: Path):
+    """Verify evaluate_and_persist_edges for abstract-less metadata item with ground truth and bundle files."""
+    cache_dir = tmp_path / "corpus"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    item_dir = cache_dir / "NO_ABS"
+    item_dir.mkdir(parents=True, exist_ok=True)
+    (item_dir / "document.md").write_text("# Doc\n\nNo abstract", encoding="utf-8")
+
+    with _open_meta_db(cache_dir) as conn:
+        conn.execute(
+            """
+            INSERT INTO conversion_meta (item_key, title, content_type, converter_id, converter_version, source_path, source_hash, converted_at, char_count, abstract, abstract_source)
+            VALUES ('NO_ABS', 'No Abstract Item', 'text/zotero-metadata', 'zotero_metadata', '1.0', 'zotero://item/NO_ABS', 'h_no_abs', '2026-01-01', 50, NULL, 'none')
+            """
+        )
+
+    syncer = DummySyncer(cache_dir)
+    syncer.store = MagicMock()
+
+    with patch("zocrates.rag.graph_engine.get_graph_relations_config") as mock_cfg:
+        mock_cfg.return_value = {
+            "enabled": True,
+            "include_human_curated": True,
+            "include_shared_tags": True,
+            "min_shared_tags": 2,
+            "sync_bundle_files": True,
+        }
+        with patch("zocrates.rag.graph_engine.sync_manual_relations", return_value=0) as mock_man:
+            with patch("zocrates.rag.graph_engine.sync_shared_tags", return_value=0) as mock_tags:
+                res = evaluate_and_persist_edges("NO_ABS", syncer, sync_bundle_files=True, sync_ground_truth=True)
+                mock_man.assert_called_once()
+                mock_tags.assert_called_once()
+                assert (item_dir / "item_relations.md").exists()
+
+        # Exception during regenerate_item_relations_md
+        with patch("zocrates.rag.bundle_catalog.regenerate_item_relations_md", side_effect=Exception("Regen fail")):
+            res_fail = evaluate_and_persist_edges("NO_ABS", syncer, sync_bundle_files=True, sync_ground_truth=False)
+            assert isinstance(res_fail, list)
+
+
+@pytest.mark.asyncio
+async def test_library_syncer_ingest_item_and_standalone_attachment(tmp_path: Path):
+    """Verify LibrarySyncer._ingest_item for metadata item and _ingest_standalone_attachment supersession."""
+    cache_dir = tmp_path / "corpus"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. Empty parent_key in supersede_metadata_bundle_if_needed
+    supersede_metadata_bundle_if_needed("", None)
+
+    # 2. _ingest_item for metadata-only item (with abstract)
+    syncer = LibrarySyncer.__new__(LibrarySyncer)
+    syncer._zotero_data_dir = tmp_path
+    syncer.processor = DocumentProcessor(cache_dir)
+    syncer.store = MagicMock()
+    syncer.store.is_ingested.return_value = False
+    syncer.db = MagicMock()
+
+    # Abstract-less item to test chunk_type = "metadata"
+    item_no_abs = ZoteroItem(
+        item_id=100,
+        item_key="META_NO_ABS",
+        item_type="journalArticle",
+        title="No Abstract Item",
+        abstract=None,
+        creators=["Author Z"],
+        year=2024,
+        publication=None,
+        doi=None,
+        url=None,
+        tags=[],
+        collections=[],
+        relations=[],
+    )
+    syncer.db.get_item.return_value = item_no_abs
+    syncer.db.get_attachments.return_value = []
+    syncer.db.get_notes_for_item.return_value = []
+    res_no_abs = await syncer._ingest_item(100, "META_NO_ABS", "No Abstract Item", force=True, evaluate_edges=False)
+    assert res_no_abs == "processed"
+    chunks_passed = syncer.store.ingest_document.call_args[0][2]
+    non_fm_chunks = [c for c in chunks_passed if c.chunk_type != "frontmatter"]
+    assert len(non_fm_chunks) > 0
+    assert all(c.chunk_type == "metadata" for c in non_fm_chunks)
+
+    # Abstract-bearing item
+    item = ZoteroItem(
+        item_id=101,
+        item_key="META_101",
+        item_type="journalArticle",
+        title="Meta Item Title",
+        abstract="Substantive abstract here.",
+        creators=["Author A"],
+        year=2024,
+        publication=None,
+        doi=None,
+        url=None,
+        tags=[],
+        collections=[],
+        relations=[],
+    )
+    syncer.db.get_item.return_value = item
+    res = await syncer._ingest_item(101, "META_101", "Meta Item Title", force=False, evaluate_edges=True)
+    assert res == "processed"
+    syncer.store.ingest_document.assert_called()
+    assert (cache_dir / "META_101" / "document.md").exists()
+
+    # 3. Call again when already fresh -> metadata_already_fresh
+    syncer.store.is_ingested.return_value = True
+    # Ensure indexed_at is in metadata
+    syncer.processor.update_indexed_at("META_101")
+    syncer.store.ingest_document.reset_mock()
+    res2 = await syncer._ingest_item(101, "META_101", "Meta Item Title", force=False, evaluate_edges=False)
+    assert res2 == "skipped"
+    syncer.store.ingest_document.assert_not_called()
+
+    # 4. _ingest_standalone_attachment supersedes metadata bundle
+    att_file = tmp_path / "doc2.pdf"
+    att_file.write_bytes(b"%PDF-1.4 file")
+    from zocrates.rag.zotero_db import ZoteroAttachment
+    attachment = ZoteroAttachment(
+        item_id=202,
+        item_key="ATT_202",
+        parent_item_id=101,
+        parent_item_key="META_101",
+        content_type="application/pdf",
+        path=att_file,
+    )
+    with patch("zocrates.rag.library_syncer.supersede_metadata_bundle_if_needed") as mock_super:
+        with patch.object(syncer.processor, "get_or_convert", return_value="converted markdown"):
+            res_att = await syncer._ingest_standalone_attachment(attachment, force=True)
+            assert res_att == "processed"
+            mock_super.assert_called_once_with("META_101", syncer)
+
 

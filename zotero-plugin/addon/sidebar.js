@@ -8749,15 +8749,17 @@ function renderCandidatePapersGroup(wrapperDiv, candidates, invocationId) {
           const paperUrl = (res && res.oaUrl) || cand.oa_pdf_url || cand.landing_page_url || cand.url || "";
 
           const badgesEl = card.querySelector(".candidate-card-badges");
-          if (badgesEl && !badgesEl.querySelector(".candidate-badge.imported")) {
+          if (badgesEl && !badgesEl.querySelector(".candidate-badge.imported, .candidate-badge.imported-no-pdf")) {
             const impBadge = document.createElementNS("http://www.w3.org/1999/xhtml", "span");
             if (hasAtt) {
               impBadge.className = "candidate-badge imported";
               impBadge.textContent = "✓ Imported";
             } else {
-              impBadge.className = "candidate-badge imported-no-pdf";
+              impBadge.className = "candidate-badge imported imported-no-pdf";
               impBadge.textContent = "✓ Imported (No PDF)";
-              impBadge.title = "Metadata saved, but PDF download was blocked by repository anti-bot protection (Cloudflare).";
+              impBadge.title = cand.oa_pdf_url
+                ? "Metadata saved, but PDF download was blocked by repository anti-bot protection (Cloudflare)."
+                : "Metadata saved to library (no open-access PDF was available for automatic download).";
               countWithoutPdf++;
             }
             badgesEl.appendChild(impBadge);
@@ -9003,7 +9005,7 @@ async function syncCandidatesWithLibrary(groupDiv, candidates) {
 
         const badgesEl = card.querySelector(".candidate-card-badges");
         if (badgesEl) {
-          let impBadge = badgesEl.querySelector(".candidate-badge.imported");
+          let impBadge = badgesEl.querySelector(".candidate-badge.imported, .candidate-badge.imported-no-pdf");
           if (!impBadge) {
             impBadge = document.createElementNS("http://www.w3.org/1999/xhtml", "span");
             badgesEl.appendChild(impBadge);
@@ -9012,7 +9014,7 @@ async function syncCandidatesWithLibrary(groupDiv, candidates) {
             impBadge.className = "candidate-badge imported";
             impBadge.textContent = "✓ Imported";
           } else {
-            impBadge.className = "candidate-badge imported-no-pdf";
+            impBadge.className = "candidate-badge imported imported-no-pdf";
             impBadge.textContent = "✓ Imported (No PDF)";
             impBadge.title = "Paper metadata present in library, but no PDF attachment found.";
           }

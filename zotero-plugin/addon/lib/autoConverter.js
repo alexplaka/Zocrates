@@ -530,7 +530,15 @@ var AutoConverter = {
 
     if (typeof attItem.isRegularItem === "function" && attItem.isRegularItem()) {
       let atts = attItem.getAttachments ? attItem.getAttachments() : [];
-      if (!atts || atts.length === 0) {
+      let hasConvertibleFile = false;
+      for (let attID of atts) {
+        let att = Zotero.Items.get(attID);
+        if (att && !att.deleted && isConvertibleAttachment(att) && att.attachmentLinkMode !== 3) {
+          hasConvertibleFile = true;
+          break;
+        }
+      }
+      if (!hasConvertibleFile) {
         let fetchFn = _resolveAutoConverterFetch();
         if (!fetchFn) return;
         if (Zotero.DB && typeof Zotero.DB.queryAsync === "function") {
@@ -544,9 +552,11 @@ var AutoConverter = {
           headers: this.getAuthHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({ item_keys: [key] }),
         }).catch((err) => {
+          this._convertedCache.delete(key);
           Zotero.debug("Zocrates: AutoConverter failed to ingest metadata item " + key + ": " + err);
         });
         Zotero.debug("Zocrates: AutoConverter ingested metadata-only item " + key);
+        setTimeout(() => this._convertedCache.delete(key), 60000);
       }
       return;
     }

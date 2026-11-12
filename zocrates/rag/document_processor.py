@@ -1708,10 +1708,10 @@ def materialize_item_metadata_bundle(
         raw_title = (getattr(item, "title", None) or "").strip()
         if not raw_title:
             effective_title = (
-                getattr(item, "doi", None)
-                or getattr(item, "url", None)
+                (getattr(item, "doi", None) or "").strip()
+                or (getattr(item, "url", None) or "").strip()
                 or f"Untitled Item ({item.item_key})"
-            ).strip()
+            )
         else:
             effective_title = raw_title
 
@@ -1719,18 +1719,24 @@ def materialize_item_metadata_bundle(
         raw_abstract = (getattr(item, "abstract", None) or "").strip()
         cleaned_abstract: str | None = None
         if raw_abstract:
-            # Normalize block tags to newlines then strip all HTML/JATS tags
-            abs_text = re.sub(r"</(?:jats:[^>]+|p|div|sec|title)>", "\n", raw_abstract, flags=re.IGNORECASE)
+            # Replace block and heading HTML/JATS tags with newlines
+            abs_text = re.sub(
+                r"</?(?:jats:[^>]+|p|div|sec|title|h[1-6])\b[^>]*>",
+                "\n",
+                raw_abstract,
+                flags=re.IGNORECASE,
+            )
+            # Strip remaining inline tags
             abs_text = re.sub(r"<[^>]+>", " ", abs_text)
             abs_text = html_module.unescape(abs_text)
-            # Demote or strip raw markdown headings or YAML fences
+            # Demote line-leading markdown headings and strip YAML fences
             abs_lines = []
             for line in abs_text.splitlines():
                 stripped_line = line.strip()
                 if stripped_line.startswith("---"):
                     continue
+                # Only strip line-leading ATX heading hashes (e.g. '### Header')
                 line = re.sub(r"^\s*#+\s*", "", line)
-                line = re.sub(r"(?<=\s)#+\s*", "", line)
                 abs_lines.append(line.rstrip())
             clean_str = "\n".join(abs_lines).strip()
             cleaned_abstract = re.sub(r"\n{3,}", "\n\n", clean_str).strip() or None

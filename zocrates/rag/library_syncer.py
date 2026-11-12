@@ -488,7 +488,8 @@ class LibrarySyncer:
         item_processed = False
 
         # 1. Ingest paper PDF/HTML/all attachments present
-        if attachments:
+        valid_attachments = [a for a in attachments if a.path and a.path.exists()]
+        if valid_attachments:
             p_type = parent_item.item_type if parent_item else None
             p_title = parent_item.title if parent_item else document_title
             p_colls = parent_item.collections if parent_item else None
@@ -499,9 +500,7 @@ class LibrarySyncer:
             p_url = parent_item.url if parent_item else None
             p_abstract = parent_item.abstract if parent_item else None
 
-            for attachment in attachments:
-                if not attachment.path or not attachment.path.exists():
-                    continue
+            for attachment in valid_attachments:
 
                 if not force and self.store.is_ingested(attachment.item_key):
                     if item_key:
@@ -654,7 +653,7 @@ class LibrarySyncer:
                                     attachment.item_key,
                                     exc,
                                 )
-        elif len(attachments) == 0:
+        elif len(valid_attachments) == 0:
             is_valid_item = (
                 parent_item
                 and parent_item.item_type not in {"attachment", "note", "annotation"}
