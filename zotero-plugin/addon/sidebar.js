@@ -1333,6 +1333,30 @@ function cleanupActivityListeners() {
   _activityListenersInstalled = false;
 }
 
+function syncWarmBackendCredentials(statusData) {
+  if (!statusData || statusData.status !== "ready") return null;
+  const missingKeys = {};
+  const datalabKey = loadStoredApiKey("datalab_api_key");
+  if (statusData.has_datalab_key === false && datalabKey) {
+    missingKeys.datalab_api_key = datalabKey;
+  }
+  const openalexKey = loadStoredApiKey("openalex_api_key");
+  if (statusData.has_openalex_api_key === false && openalexKey) {
+    missingKeys.openalex_api_key = openalexKey;
+  }
+  if (Object.keys(missingKeys).length > 0) {
+    return fetch(`${BACKEND_URL}/config`, {
+      method: "POST",
+      headers: getAuthHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(missingKeys),
+    }).catch((e) => {
+      try { Zotero.debug("Zocrates sidebar: failed to sync warm credentials: " + e); } catch (_) {}
+      return null;
+    });
+  }
+  return null;
+}
+
 function checkBackendStatus() {
   if (_backendCheckInFlight) {
     return _backendCheckInFlight;
@@ -1372,8 +1396,29 @@ function checkBackendStatus() {
         if (_lastBackendOnline === false || sessions.length === 0 || (sessions.length === 1 && sessions[0].id && sessions[0].id.startsWith("session_"))) {
           loadSessions();
         }
+        const wasBackendOnline = _lastBackendOnline;
         _lastBackendOnline = true;
         _consecutiveBackendFailures = 0;
+
+        // Warm-backend credential synchronization: check once on connect/reconnect
+        // if Zotero holds vault credentials that a warm backend might be missing.
+        if (
+          wasBackendOnline !== true &&
+          (loadStoredApiKey("datalab_api_key") || loadStoredApiKey("openalex_api_key"))
+        ) {
+          if (data && typeof data.has_datalab_key === "boolean") {
+            syncWarmBackendCredentials(data);
+          } else {
+            fetch(`${BACKEND_URL}/status`, { headers: getAuthHeaders() })
+              .then((r) => (r.ok ? r.json() : null))
+              .then((statusData) => {
+                if (statusData && statusData.status === "ready") {
+                  syncWarmBackendCredentials(statusData);
+                }
+              })
+              .catch(() => {});
+          }
+        }
       } else {
         // Backend is online but not registered. Auto-register in the background.
         await autoRegister();
@@ -15111,6 +15156,7 @@ if (typeof module !== "undefined" && module.exports) {
     resolvePoliteEmail,
     loadStoredApiKey,
     saveStoredApiKey,
+    syncWarmBackendCredentials,
     autoRegister,
     formatMessageContent,
     syncCandidatesWithLibrary,

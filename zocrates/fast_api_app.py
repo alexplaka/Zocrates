@@ -4553,7 +4553,18 @@ async def update_active_converter(request: ConverterChangeRequest) -> dict:
         if target_datalab_merge_cross_page is not None:
             config_updates["datalab_merge_cross_page"] = target_datalab_merge_cross_page
         if target_datalab_key is not None:
-            config_updates["datalab_api_key"] = target_datalab_key
+            from pydantic import SecretStr
+
+            key_str = (
+                target_datalab_key.get_secret_value()
+                if isinstance(target_datalab_key, SecretStr)
+                else str(target_datalab_key)
+            )
+            if key_str.strip():
+                from zocrates.config import save_datalab_api_key
+
+                save_datalab_api_key(key_str.strip())
+                config_updates["datalab_api_key"] = key_str.strip()
         if target_conversion_timeout is not None:
             config_updates["conversion_timeout_seconds"] = max(30, int(target_conversion_timeout))
 
