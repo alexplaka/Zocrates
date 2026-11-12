@@ -105,7 +105,7 @@ def refresh_bundle_frontmatter(
     with _REFRESH_LOCK:
         for r in rows:
             item_key = r["item_key"]
-            if r["content_type"] == "text/note":
+            if r["content_type"] in ("text/note", "text/zotero-metadata"):
                 skipped += 1
                 continue
             parent_key = r["parent_item_key"]
@@ -195,7 +195,11 @@ def refresh_bundle_frontmatter(
             resolved_src = resolve_source_path(stored_path, zotero_dir)
             fm_source_path = (
                 stored_path
-                if stored_path.startswith("storage/") or stored_path.startswith("zotero://note/")
+                if (
+                    stored_path.startswith("storage/")
+                    or stored_path.startswith("zotero://note/")
+                    or stored_path.startswith("zotero://item/")
+                )
                 else (Path(resolved_src) if resolved_src else Path(stored_path))
             )
 

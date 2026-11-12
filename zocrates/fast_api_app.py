@@ -40,6 +40,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.adk.runners import Runner
 from google.genai import types
@@ -1420,6 +1421,35 @@ def get_library_conversion_status() -> dict:
     }
 
 
+class ItemIngestRequest(BaseModel):
+    item_keys: list[str]
+
+
+@app.post("/items/ingest", dependencies=[Depends(verify_auth)])
+async def ingest_items_endpoint(req: ItemIngestRequest) -> dict[str, Any]:
+    """Ingest attachment-free regular items or notes directly by key."""
+    try:
+        syncer = get_syncer()
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Zocrates backend is not registered. Call /register first.",
+        ) from exc
+
+    results: dict[str, Any] = {}
+    for key in req.item_keys:
+        clean_key = key.strip()
+        if not clean_key:
+            continue
+        try:
+            res = await syncer.sync_item(item_key=clean_key)
+            results[clean_key] = res
+        except Exception as exc:
+            logger.error("Error ingesting item %s: %s", clean_key, exc)
+            results[clean_key] = f"error: {exc}"
+    return {"status": "success", "results": results}
+
+
 @app.post("/convert/{item_key}", dependencies=[Depends(verify_auth)])
 async def convert_item(item_key: str, request: ConvertRequest | None = None) -> dict:
     """Convert a single item using the specified or active converter strategy.
@@ -1486,6 +1516,21 @@ async def convert_item(item_key: str, request: ConvertRequest | None = None) -> 
                 )
 
     if not attachment or not attachment.path or not attachment.path.exists():
+        # Fallback for regular items without attachments
+        item = syncer.db.get_item_by_key(item_key)
+        if item and item.item_type not in ("attachment", "note", "annotation"):
+            atts = syncer.db.get_attachments(item.item_id)
+            if not atts:
+                res = await syncer.sync_item(
+                    item_key=item_key, force=request.force if request else False
+                )
+                return {
+                    "status": res,
+                    "item_key": item_key,
+                    "converter_id": "zotero_metadata",
+                    "content_type": "text/zotero-metadata",
+                }
+
         raise HTTPException(
             status_code=404,
             detail=f"No valid attachment file found on disk for item key '{item_key}'",
@@ -1707,6 +1752,11 @@ async def convert_item(item_key: str, request: ConvertRequest | None = None) -> 
         )
         syncer.processor.update_indexed_at(attachment.item_key)
         _dispatch_edge_evaluation(attachment.item_key, syncer)
+
+        if attachment.parent_item_key:
+            from zocrates.rag.library_syncer import supersede_metadata_bundle_if_needed
+
+            supersede_metadata_bundle_if_needed(attachment.parent_item_key, syncer)
 
     return {
         "status": "success",
@@ -2110,6 +2160,12 @@ async def batch_convert(
                     try:
                         current_hash = _file_sha256(att.path)
                         if meta.get("source_hash") == current_hash:
+                            if att.parent_item_key:
+                                from zocrates.rag.library_syncer import (
+                                    supersede_metadata_bundle_if_needed,
+                                )
+
+                                supersede_metadata_bundle_if_needed(att.parent_item_key, syncer)
                             skipped += 1
                             logger.info("[%d/%d] Skipping already converted item %s ('%s') with %s", idx, total,
                                         att.item_key, title, effective_id)
@@ -2266,6 +2322,13 @@ async def batch_convert(
                     )
                     syncer.processor.update_indexed_at(att.item_key)
                     _dispatch_edge_evaluation(att.item_key, syncer)
+
+                    if att.parent_item_key:
+                        from zocrates.rag.library_syncer import (
+                            supersede_metadata_bundle_if_needed,
+                        )
+
+                        supersede_metadata_bundle_if_needed(att.parent_item_key, syncer)
 
                 processed += 1
                 logger.info(

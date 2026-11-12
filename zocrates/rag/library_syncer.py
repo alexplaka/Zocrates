@@ -11,6 +11,7 @@ import logging
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from zocrates.rag.chunker import chunk_markdown
 from zocrates.config import (
@@ -34,6 +35,20 @@ from zocrates.rag.vector_store import VectorStore
 from zocrates.rag.zotero_db import ZoteroAttachment, ZoteroDB, ZoteroNote
 
 logger = logging.getLogger(__name__)
+
+
+def supersede_metadata_bundle_if_needed(parent_key: str, syncer: Any) -> None:
+    """If a text/zotero-metadata bundle exists for parent_key, atomically purge it."""
+    if not parent_key:
+        return
+    existing_meta = syncer.processor.get_metadata(parent_key)
+    if existing_meta and existing_meta.get("content_type") == "text/zotero-metadata":
+        logger.info(
+            "Superseding metadata-only bundle for parent %s with newly converted attachment",
+            parent_key,
+        )
+        # Purge disk bundle, conversion_meta row, item_relations edges, and Chroma/FTS chunks
+        syncer.purge_item(parent_key, regenerate_index=False)
 
 
 class LibrarySyncer:
@@ -231,7 +246,7 @@ class LibrarySyncer:
         for item in items:
             try:
                 result = await self._ingest_item(
-                    item.item_id, item.item_key, item.title
+                    item.item_id, item.item_key, item.title, evaluate_edges=False
                 )
                 if result == "processed":
                     processed += 1
@@ -332,6 +347,24 @@ class LibrarySyncer:
                         return
 
                     with _open_meta_db(self.processor._cache_dir) as meta_conn:
+                        rows = meta_conn.execute("SELECT item_key FROM conversion_meta").fetchall()
+                        from zocrates.rag.graph_engine import evaluate_and_persist_edges
+
+                        for r in rows:
+                            try:
+                                evaluate_and_persist_edges(
+                                    r["item_key"],
+                                    self,
+                                    sync_bundle_files=False,
+                                    sync_ground_truth=False,
+                                )
+                            except Exception as exc_inner:
+                                logger.warning(
+                                    "Failed edge evaluation for %s in full_sync tail: %s",
+                                    r["item_key"],
+                                    exc_inner,
+                                )
+
                         n_manual = 0
                         n_tags = 0
                         if cfg.get("include_human_curated", True):
@@ -339,8 +372,7 @@ class LibrarySyncer:
                         if cfg.get("include_shared_tags", True):
                             n_tags = sync_shared_tags(meta_conn, self._zotero_data_dir)
 
-                        if (n_manual > 0 or n_tags > 0) and cfg.get("sync_bundle_files", True):
-                            rows = meta_conn.execute("SELECT item_key FROM conversion_meta").fetchall()
+                        if cfg.get("sync_bundle_files", True):
                             for r in rows:
                                 try:
                                     regenerate_item_relations_md(r["item_key"], self.processor._cache_dir)
@@ -440,21 +472,23 @@ class LibrarySyncer:
     # ---- private -----------------------------------------------------------
 
     async def _ingest_item(
-        self, item_id: int, item_key: str, document_title: str, force: bool = False
+        self,
+        item_id: int,
+        item_key: str,
+        document_title: str,
+        force: bool = False,
+        evaluate_edges: bool = True,
     ) -> str:
         """Convert and index one Zotero item along with its attached child notes."""
         attachments = self.db.get_attachments(item_id)
         child_notes = self.db.get_notes_for_item(item_id)
-
-        if not attachments and not child_notes:
-            return "skipped"
+        parent_item = self.db.get_item(item_id)
 
         loop = asyncio.get_event_loop()
         item_processed = False
 
         # 1. Ingest paper PDF/HTML/all attachments present
         if attachments:
-            parent_item = self.db.get_item(item_id)
             p_type = parent_item.item_type if parent_item else None
             p_title = parent_item.title if parent_item else document_title
             p_colls = parent_item.collections if parent_item else None
@@ -472,6 +506,7 @@ class LibrarySyncer:
                 if not force and self.store.is_ingested(attachment.item_key):
                     if item_key:
                         self.processor.ensure_parent_item_key(attachment.item_key, item_key)
+                        supersede_metadata_bundle_if_needed(item_key, self)
                     # Lazy backfill ToC files if missing from existing cached bundle
                     bundle_dir = self.processor._cache_dir / attachment.item_key
                     if bundle_dir.exists() and (bundle_dir / "document.md").exists():
@@ -598,24 +633,118 @@ class LibrarySyncer:
                             },
                         )
                         self.processor.update_indexed_at(attachment.item_key)
+                        if item_key:
+                            supersede_metadata_bundle_if_needed(item_key, self)
                         item_processed = True
 
-                        try:
-                            from zocrates.rag.graph_engine import evaluate_and_persist_edges
+                        if evaluate_edges:
+                            try:
+                                from zocrates.rag.graph_engine import evaluate_and_persist_edges
 
-                            await loop.run_in_executor(
-                                None,
-                                evaluate_and_persist_edges,
-                                attachment.item_key,
-                                self,
-                                True,
-                            )
-                        except Exception as exc:
-                            logger.warning(
-                                "Edge evaluation failed for %s: %s",
-                                attachment.item_key,
-                                exc,
-                            )
+                                await loop.run_in_executor(
+                                    None,
+                                    evaluate_and_persist_edges,
+                                    attachment.item_key,
+                                    self,
+                                    True,
+                                )
+                            except Exception as exc:
+                                logger.warning(
+                                    "Edge evaluation failed for %s: %s",
+                                    attachment.item_key,
+                                    exc,
+                                )
+        elif len(attachments) == 0:
+            is_valid_item = (
+                parent_item
+                and parent_item.item_type not in {"attachment", "note", "annotation"}
+                and not self.processor.has_child_attachments(item_key)
+            )
+            if is_valid_item:
+                from zocrates.rag.document_processor import (
+                    compute_item_content_hash,
+                    materialize_item_metadata_bundle,
+                )
+
+                curr_hash = compute_item_content_hash(parent_item)
+                bundle_dir = self.processor._cache_dir / item_key
+                meta = self.processor.get_metadata(item_key)
+
+                metadata_already_fresh = False
+                if not force and (bundle_dir / "document.md").exists() and meta:
+                    if (
+                        meta.get("source_hash") == curr_hash
+                        and meta.get("indexed_at")
+                        and self.store.is_ingested(item_key)
+                    ):
+                        metadata_already_fresh = True
+
+                if not metadata_already_fresh:
+                    await loop.run_in_executor(
+                        None,
+                        lambda p=parent_item, f=force: materialize_item_metadata_bundle(
+                            p, self, force=f
+                        ),
+                    )
+                    full_doc = (bundle_dir / "document.md").read_text(encoding="utf-8")
+                    meta_after = self.processor.get_metadata(item_key)
+                    effective_title = (
+                        (meta_after.get("title") if meta_after else None)
+                        or (parent_item.title or "").strip()
+                        or f"Untitled Item ({item_key})"
+                    )
+                    chunks = chunk_markdown(
+                        full_doc,
+                        max_chars=CHUNK_MAX_CHARS,
+                        overlap_chars=CHUNK_OVERLAP_CHARS,
+                        document_title=effective_title,
+                    )
+                    has_substantive_abstract = bool(
+                        meta_after
+                        and meta_after.get("abstract")
+                        and meta_after.get("abstract_source") != "none"
+                    )
+                    if not has_substantive_abstract:
+                        for c in chunks:
+                            if c.chunk_type != "frontmatter":
+                                c.chunk_type = "metadata"
+
+                    if chunks:
+                        await loop.run_in_executor(
+                            None,
+                            self.store.ingest_document,
+                            item_key,
+                            item_id,
+                            chunks,
+                            {
+                                "content_type": "text/zotero-metadata",
+                                "parent_item_key": None,
+                                "parent_item_id": item_id,
+                                "has_notes": bool(child_notes),
+                            },
+                        )
+                        self.processor.update_indexed_at(item_key)
+                        item_processed = True
+
+                        if evaluate_edges:
+                            try:
+                                from zocrates.rag.graph_engine import evaluate_and_persist_edges
+
+                                await loop.run_in_executor(
+                                    None,
+                                    evaluate_and_persist_edges,
+                                    item_key,
+                                    self,
+                                    True,
+                                )
+                            except Exception as exc:
+                                logger.warning(
+                                    "Edge evaluation failed for metadata item %s: %s",
+                                    item_key,
+                                    exc,
+                                )
+            elif not child_notes:
+                return "skipped"
 
         # 2. Ingest each attached child note under its own note_key
         notes_processed = False
@@ -656,22 +785,23 @@ class LibrarySyncer:
                 )
                 notes_processed = True
 
-                try:
-                    from zocrates.rag.graph_engine import evaluate_and_persist_edges
+                if evaluate_edges:
+                    try:
+                        from zocrates.rag.graph_engine import evaluate_and_persist_edges
 
-                    await loop.run_in_executor(
-                        None,
-                        evaluate_and_persist_edges,
-                        n.note_key,
-                        self,
-                        True,
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "Edge evaluation failed for child note %s: %s",
-                        n.note_key,
-                        exc,
-                    )
+                        await loop.run_in_executor(
+                            None,
+                            evaluate_and_persist_edges,
+                            n.note_key,
+                            self,
+                            True,
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "Edge evaluation failed for child note %s: %s",
+                            n.note_key,
+                            exc,
+                        )
 
         if item_processed or notes_processed:
             gc.collect()
@@ -886,6 +1016,9 @@ class LibrarySyncer:
             },
         )
 
+        if attachment.parent_item_key:
+            supersede_metadata_bundle_if_needed(attachment.parent_item_key, self)
+
         try:
             from zocrates.rag.graph_engine import evaluate_and_persist_edges
 
@@ -923,7 +1056,7 @@ class LibrarySyncer:
 
         if target_id is None and target_key is not None:
             item = self.db.get_item_by_key(target_key)
-            if item:
+            if item and item.item_type not in ("attachment", "note", "annotation"):
                 return await self._ingest_item(item.item_id, item.item_key, item.title, force=force)
             att = self.db.get_attachment_by_key(target_key)
             if att:
@@ -935,7 +1068,7 @@ class LibrarySyncer:
 
         if target_id is not None:
             item = self.db.get_item(target_id)
-            if item:
+            if item and item.item_type not in ("attachment", "note", "annotation"):
                 return await self._ingest_item(item.item_id, item.item_key, item.title, force=force)
             att = self.db.get_attachment_by_id(target_id)
             if att:

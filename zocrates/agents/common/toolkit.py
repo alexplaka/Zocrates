@@ -296,7 +296,25 @@ def _resolve_bundle_dir(item_key: str) -> tuple[Path, str, str | None] | None:
     # Step 2: Direct bundle check (attachment or already-resolved key).
     if (bundle_dir / "document.md").exists() or (bundle_dir / "toc.md").exists():
         if bundle_dir.resolve().is_relative_to(cache_dir.resolve()):
-            return bundle_dir, item_key, None
+            notice = None
+            if syncer.db:
+                try:
+                    item_obj = syncer.db.get_item_by_key(item_key)
+                    if item_obj and item_obj.item_type not in ("attachment", "note", "annotation"):
+                        notes = syncer.db.get_notes_for_item(item_obj.item_id)
+                        if notes:
+                            note_parts = [
+                                f"[Note Key: {n.note_key}] {(n.title or 'Note')!r} [text/note]"
+                                for n in notes
+                            ]
+                            notice = (
+                                f"Loaded bibliographic metadata for {(item_obj.title or item_key)!r}. "
+                                f"This item has child notes: {', '.join(note_parts)}. "
+                                f"Call get_document_toc with a specific key to inspect them."
+                            )
+                except Exception:
+                    pass
+            return bundle_dir, item_key, notice
 
     # Step 3: Parent key fallback.
     item = syncer.db.get_item_by_key(item_key)
@@ -340,6 +358,26 @@ def _resolve_bundle_dir(item_key: str) -> tuple[Path, str, str | None] | None:
             )
 
         return primary_dir, primary.item_key, notice
+
+    # No converted attachments: materialize metadata bundle if attachment-free
+    if item.item_type not in ("attachment", "note", "annotation") and not attachments:
+        try:
+            from zocrates.rag.document_processor import materialize_item_metadata_bundle
+            item_bundle_dir, resolved_item_key = materialize_item_metadata_bundle(item, syncer, cache_dir)
+            notice = None
+            if notes:
+                note_parts = [
+                    f"[Note Key: {n.note_key}] {(n.title or 'Note')!r} [text/note]"
+                    for n in notes
+                ]
+                notice = (
+                    f"Loaded bibliographic metadata for {(item.title or item_key)!r}. "
+                    f"This item has child notes: {', '.join(note_parts)}. "
+                    f"Call get_document_toc with a specific key to inspect them."
+                )
+            return item_bundle_dir, resolved_item_key, notice
+        except Exception as exc:
+            logger.error("Failed to materialize metadata bundle for %s: %s", item_key, exc)
 
     # No converted attachments: materialise the first note as last resort.
     if notes:

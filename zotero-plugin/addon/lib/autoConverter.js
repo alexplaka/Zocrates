@@ -277,6 +277,25 @@ var AutoConverter = {
         }
       }, delay);
     });
+
+    // 30-second debounced check for attachment-free regular items (allowing Zotero sync or PDF find to finish)
+    setTimeout(() => {
+      try {
+        if (this._suppressAll || this._suppressParentIDs.has(itemId)) return;
+        // Skip check if Zotero is currently syncing
+        if (typeof Zotero !== "undefined" && Zotero.Sync && Zotero.Sync.Runner && Zotero.Sync.Runner.syncInProgress) {
+          return;
+        }
+        let item = Zotero.Items.get(itemId);
+        if (!item || item.deleted || !item.isRegularItem()) return;
+        let attIDs = item.getAttachments ? item.getAttachments() : [];
+        if (!attIDs || attIDs.length === 0) {
+          this.enqueueMetadataItem(item.key);
+        }
+      } catch (e) {
+        Zotero.debug("Zocrates: AutoConverter 30s metadata check error for id " + itemId + ": " + e);
+      }
+    }, 30000);
   },
 
   notify(event, type, ids, extraData) {
@@ -451,6 +470,17 @@ var AutoConverter = {
     this.processQueue();
   },
 
+  enqueueMetadataItem(key) {
+    if (!key || this._suppressAll || this._suppressKeys.has(key)) return;
+    if (this._inQueue.has(key) || this._activeConversions.has(key) || this._convertedCache.has(key)) {
+      return;
+    }
+    this._inQueue.add(key);
+    this._queue.push(key);
+    Zotero.debug("Zocrates: AutoConverter enqueued metadata item " + key);
+    this.processQueue();
+  },
+
   async processQueue() {
     if (this._isProcessing) return;
     this._isProcessing = true;
@@ -497,6 +527,29 @@ var AutoConverter = {
     }
 
     if (!attItem || attItem.deleted) return;
+
+    if (typeof attItem.isRegularItem === "function" && attItem.isRegularItem()) {
+      let atts = attItem.getAttachments ? attItem.getAttachments() : [];
+      if (!atts || atts.length === 0) {
+        let fetchFn = _resolveAutoConverterFetch();
+        if (!fetchFn) return;
+        if (Zotero.DB && typeof Zotero.DB.queryAsync === "function") {
+          try {
+            await Zotero.DB.queryAsync("PRAGMA wal_checkpoint(TRUNCATE)");
+          } catch (e) {}
+        }
+        let serverUrl = this.getServerUrl();
+        await fetchFn(`${serverUrl}/items/ingest`, {
+          method: "POST",
+          headers: this.getAuthHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({ item_keys: [key] }),
+        }).catch((err) => {
+          Zotero.debug("Zocrates: AutoConverter failed to ingest metadata item " + key + ": " + err);
+        });
+        Zotero.debug("Zocrates: AutoConverter ingested metadata-only item " + key);
+      }
+      return;
+    }
 
     // Verify attachment file exists on disk & non-zero size with async retry backoff
     let file = await waitForAttachmentFile(attItem, 4, 500);

@@ -4556,7 +4556,10 @@ function openItemInReader(attachmentKey, rawSection) {
         }
       }
 
-      if (!targetItemID) return;
+      if (!targetItemID) {
+        selectItemInZotero(attachmentKey);
+        return;
+      }
 
       let isPdf = Boolean(
         targetAttachment?.attachmentReaderType === "pdf" ||
@@ -5717,6 +5720,43 @@ function closeEvidencePopover() {
   }
 }
 
+function checkItemHasAttachment(citationOrKey) {
+  if (!citationOrKey) return false;
+  const citation = typeof citationOrKey === "object" ? citationOrKey : null;
+  const key = citation ? (citation.attachment_key || citation.item_key) : citationOrKey;
+  if (!key) return false;
+  try {
+    const zot = resolveZotero();
+    if (!zot || !zot.Items) return true;
+    let item = null;
+    const userLibID = zot.Libraries?.userLibraryID;
+    if (userLibID !== undefined && typeof zot.Items.getByLibraryAndKey === "function") {
+      item = zot.Items.getByLibraryAndKey(userLibID, key);
+    }
+    if (!item && zot.Libraries?.getAll && typeof zot.Items.getByLibraryAndKey === "function") {
+      for (const lib of zot.Libraries.getAll()) {
+        const cand = zot.Items.getByLibraryAndKey(lib.id, key);
+        if (cand) {
+          item = cand;
+          break;
+        }
+      }
+    }
+    if (!item) {
+      if (citation && citation.attachment_key && citation.attachment_key !== citation.item_key) {
+        return true;
+      }
+      return false;
+    }
+    if (item.isAttachment?.()) return true;
+    if (typeof item.getAttachments === "function") {
+      const attIDs = item.getAttachments();
+      return Boolean(attIDs && attIDs.length > 0);
+    }
+  } catch (_) {}
+  return false;
+}
+
 function showEvidencePopover(pill, citation) {
   if (activeEvidencePopover) {
     const isSamePill = (activeEvidencePopover._targetPill === pill);
@@ -5900,7 +5940,8 @@ function showEvidencePopover(pill, citation) {
   const footerDiv = document.createElementNS(XHTMLNS, "div");
   footerDiv.className = "evidence-popover-footer";
 
-  if (attKey) {
+  const hasOpenableAttachment = checkItemHasAttachment(citation);
+  if (attKey && hasOpenableAttachment) {
     const readerBtn = document.createElementNS(XHTMLNS, "button");
     readerBtn.className = "evidence-popover-btn popover-open-reader-btn";
     readerBtn.setAttribute("data-attachment-key", attKey);
@@ -5912,10 +5953,11 @@ function showEvidencePopover(pill, citation) {
     footerDiv.appendChild(readerBtn);
   }
 
-  if (itemKey) {
+  const effectiveItemKey = itemKey || attKey;
+  if (effectiveItemKey) {
     const selectBtn = document.createElementNS(XHTMLNS, "button");
     selectBtn.className = "evidence-popover-btn popover-select-item-btn";
-    selectBtn.setAttribute("data-item-key", itemKey);
+    selectBtn.setAttribute("data-item-key", effectiveItemKey);
     selectBtn.setAttribute("type", "button");
     selectBtn.textContent = "Select in Library";
     footerDiv.appendChild(selectBtn);

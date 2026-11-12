@@ -445,15 +445,52 @@ var ScholarImport = {
         }
       }
 
-      // Hand off to BatchConverter if any attachments were imported
-      if (createdAttachmentKeys.length > 0) {
-        if (zot && zot.DB && typeof zot.DB.queryAsync === "function") {
-          try {
-            await zot.DB.queryAsync("PRAGMA wal_checkpoint(TRUNCATE)");
-          } catch (cpErr) {
-            if (zot.debug) zot.debug("Zocrates: ScholarImport wal_checkpoint error: " + cpErr);
+      // Collect regular items that had no OA PDF attachment
+      let metadataOnlyKeys = [];
+      for (let cand of importedItems) {
+        if (!cand.attachmentKey && cand.item && cand.item.key) {
+          metadataOnlyKeys.push(cand.item.key);
+        }
+      }
+
+      // Checkpoint WAL so SQLite changes are immediately visible to backend readers
+      if (zot && zot.DB && typeof zot.DB.queryAsync === "function") {
+        try {
+          await zot.DB.queryAsync("PRAGMA wal_checkpoint(TRUNCATE)");
+        } catch (cpErr) {
+          if (zot.debug) zot.debug("Zocrates: ScholarImport wal_checkpoint error: " + cpErr);
+        }
+      }
+
+      if (metadataOnlyKeys.length > 0) {
+        if (autoConv && autoConv._convertedCache) {
+          for (let k of metadataOnlyKeys) {
+            autoConv._convertedCache.add(k);
           }
         }
+        try {
+          let fetchFn = _resolveScholarFetch(window);
+          if (fetchFn) {
+            let serverUrl = this.getServerUrl(window);
+            let signal = (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function")
+              ? AbortSignal.timeout(10000)
+              : undefined;
+            await fetchFn(`${serverUrl}/items/ingest`, {
+              method: "POST",
+              headers: this.getAuthHeaders(window, { "Content-Type": "application/json" }),
+              body: JSON.stringify({ item_keys: metadataOnlyKeys }),
+              signal,
+            });
+          }
+        } catch (ingestErr) {
+          if (zot && zot.debug) {
+            zot.debug("Zocrates: ScholarImport metadata ingest handoff failed: " + ingestErr);
+          }
+        }
+      }
+
+      // Hand off to BatchConverter if any attachments were imported
+      if (createdAttachmentKeys.length > 0) {
 
         let activeConverterId = "markitdown";
         try {
