@@ -37,6 +37,7 @@ body[data-font-size="xlarge"] {
 }
 
 /* ---- Themes ---- */
+:root[data-theme="slate"],
 body[data-theme="slate"] {
   --bg-dark: #0f172a;
   --bg-card: #1e293b;
@@ -54,6 +55,7 @@ body[data-theme="slate"] {
   --header-text-gradient: linear-gradient(to right, #818cf8, #22d3ee);
 }
 
+:root[data-theme="amoled"],
 body[data-theme="amoled"] {
   --bg-dark: #000000;
   --bg-card: #0d0d0d;
@@ -71,6 +73,7 @@ body[data-theme="amoled"] {
   --header-text-gradient: linear-gradient(to right, #a5b4fc, #67e8f9);
 }
 
+:root[data-theme="zotero-light"],
 body[data-theme="zotero-light"] {
   --bg-dark: #f9f9fb;
   --bg-card: #ffffff;
@@ -91,6 +94,7 @@ body[data-theme="zotero-light"] {
   --header-text-gradient: linear-gradient(to right, #4f46e5, #0891b2);
 }
 
+:root[data-theme="zotero-dark"],
 body[data-theme="zotero-dark"] {
   --bg-dark: #1e1e1e;
   --bg-card: #2d2d2d;
@@ -108,6 +112,7 @@ body[data-theme="zotero-dark"] {
   --header-text-gradient: linear-gradient(to right, #818cf8, #22d3ee);
 }
 
+:root[data-theme="sepia"],
 body[data-theme="sepia"] {
   --bg-dark: #f4ecd8;
   --bg-card: #fdfbf7;
@@ -3881,6 +3886,32 @@ details.considered-sources li {
 
 .candidate-collection-select:focus {
   border-color: var(--primary);
+}
+
+.candidate-collection-select option,
+.onboarding-select option {
+  background-color: var(--bg-card);
+  color: var(--text-main);
+}
+
+/* Native <select> popup in detached chrome window */
+#ContentSelectDropdown > #ContentSelectDropdownPopup {
+  direction: ltr;
+  --panel-background: var(--bg-card, Menu);
+  --panel-color: var(--text-main, MenuText);
+  --panel-border-color: var(--border, ThreeDShadow);
+}
+
+#ContentSelectDropdown > #ContentSelectDropdownPopup::part(content) {
+  background: var(--panel-background);
+  color: var(--panel-color);
+  border: 1px solid var(--panel-border-color);
+  border-radius: 6px;
+}
+
+#ContentSelectDropdown > #ContentSelectDropdownPopup[customoptionstyling="true"]::part(arrowscrollbox) {
+  background-image: var(--content-select-background-image, none);
+  background-color: var(--bg-card, -moz-Combobox);
 }
 
 .candidate-new-collection-row {

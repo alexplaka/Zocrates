@@ -10779,6 +10779,7 @@ function applyTheme() {
     appliedTheme = "sepia";
   }
   
+  document.documentElement.setAttribute("data-theme", appliedTheme);
   document.body.setAttribute("data-theme", appliedTheme);
 
 
