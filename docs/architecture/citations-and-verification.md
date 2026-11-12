@@ -284,6 +284,7 @@ Surviving citations carry calibrated probabilities into the Zotero desktop UI:
      - *Source & Section*: Unified source paper title, author/year metadata, and clickable section breadcrumb.
      - *Supporting Evidence*: Exact passage evaluated by the decision model, with rendered KaTeX math, Markdown styling, and syntax highlighting.
      - *Probability & Verdict*: Exact calibrated support probability formatted to 3 decimal places ($p = 0.852$) alongside distinct `VERIFIED` (green) or `REJECTED` (red) status badges.
+     - *Adjustable Column Widths & Resizing*: Interactive resizer handles (`.col-resizer`) on header dividers with dynamic scroll-aware vertical guide lines (`.col-resize-guide`), adjacent-pair width compensation under `table-layout: fixed`, per-column minimum floor clamping (`50px / 140px / 130px / 160px / 120px`), sort-click collision shielding (`_isColumnResizing` / `_justResizedColumn`), lost-mouseup / blur recovery, and double-click to reset.
    - **Custom Dropdown Filter (`#claims-source-dropdown-wrap`)**: High-contrast, Gecko/GTK-immune custom DOM dropdown menu (`#claims-source-btn` + `#claims-source-menu`) allowing researchers to filter claims by specific cited paper without theme rendering glitches.
    - **Reader & Library Navigation**: Direct action buttons on each claim row (`📖 Open in Reader` and `📁 Select in Library`) jump directly to the target section in Zotero Reader or reveal the item in the collection tree via the `getSidebarWindow()` bridge.
    - **Opt-In Sentence-Level Micro-Attribution**:

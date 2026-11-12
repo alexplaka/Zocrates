@@ -489,7 +489,7 @@
       border-collapse: collapse;
       text-align: left;
       font-size: 12px;
-      min-width: 900px;
+      min-width: 600px;
     }
 
     table.claims-table thead {
@@ -502,6 +502,9 @@
     }
 
     table.claims-table th {
+      position: relative;
+      overflow: hidden;
+      text-overflow: ellipsis;
       padding: 9px 12px;
       font-weight: 600;
       color: var(--text-muted);
@@ -528,6 +531,39 @@
       margin-left: 4px;
       font-size: 10px;
       opacity: 0.8;
+    }
+
+    .col-resizer {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 7px;
+      height: 100%;
+      cursor: col-resize;
+      user-select: none;
+      z-index: 20;
+    }
+
+    .col-resizer:hover,
+    .col-resizer.is-resizing {
+      background: var(--primary, #818cf8);
+      opacity: 0.8;
+    }
+
+    .col-resize-guide {
+      position: absolute;
+      top: 0;
+      width: 2px;
+      background: var(--primary, #818cf8);
+      z-index: 30;
+      pointer-events: none;
+      display: none;
+    }
+
+    body.is-resizing-cols,
+    body.is-resizing-cols * {
+      cursor: col-resize !important;
+      user-select: none !important;
     }
 
     table.claims-table td {
@@ -577,7 +613,7 @@
     /* 2. Claim Column */
     .col-claim {
       width: 32%;
-      min-width: 250px;
+      min-width: 140px;
     }
 
     .claim-cell {
@@ -620,7 +656,7 @@
     /* 3. Source & Section Column */
     .col-source {
       width: 22%;
-      min-width: 180px;
+      min-width: 130px;
     }
 
     .source-cell {
@@ -682,7 +718,7 @@
     /* 4. Supporting Text Column */
     .col-passage {
       width: 32%;
-      min-width: 250px;
+      min-width: 160px;
     }
 
     .passage-box {
@@ -902,7 +938,7 @@
     /* 5. Probability & Status Column */
     .col-prob {
       width: 140px;
-      min-width: 130px;
+      min-width: 120px;
     }
 
     .prob-status-cell {

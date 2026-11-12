@@ -396,8 +396,11 @@ function createMockElement(tag, ns) {
     _focused: false,
     offsetWidth: 300,
     offsetHeight: 200,
+    clientWidth: 300,
+    clientHeight: 200,
     offsetLeft: 0,
     offsetTop: 0,
+    scrollLeft: 0,
     scrollTop: 0,
     scrollHeight: 200,
     isConnected: true,
@@ -647,6 +650,15 @@ function createMockElement(tag, ns) {
         if (sel.includes(":not(:disabled)")) {
           const base = sel.replace(":not(:disabled)", "");
           return match(node, base) && !node.disabled;
+        }
+        if (sel.includes(".") && !sel.startsWith(".")) {
+          const dotIdx = sel.indexOf(".");
+          const tagPart = sel.slice(0, dotIdx);
+          const classPart = sel.slice(dotIdx);
+          if (tagPart && (node.tagName || "").toLowerCase() !== tagPart.toLowerCase()) {
+            return false;
+          }
+          return match(node, classPart);
         }
         if (sel.includes("[") && !sel.startsWith("[")) {
           const tagPart = sel.slice(0, sel.indexOf("["));

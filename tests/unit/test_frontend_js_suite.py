@@ -30,6 +30,7 @@ def test_frontend_javascript_unit_suite():
         root_dir / "zotero-plugin/addon/sidebar.js",
         root_dir / "zotero-plugin/addon/preferences.js",
         root_dir / "zotero-plugin/addon/graph.js",
+        root_dir / "zotero-plugin/addon/claims.js",
     ]
 
     for js_path in js_files:

@@ -8,6 +8,8 @@
   let activeSortField = "index";
   let activeSortOrder = "asc"; // 'asc' or 'desc'
   let allPassagesExpanded = false;
+  let _isColumnResizing = false;
+  let _justResizedColumn = false;
 
   function esc(s) {
     if (!s && s !== 0) return "";
@@ -1206,6 +1208,138 @@
     return JSON.stringify(payload, null, 2);
   }
 
+  function initColumnResizing() {
+    if (typeof document === "undefined" || !document.querySelector("table.claims-table")) {
+      return;
+    }
+    const table = document.querySelector("table.claims-table");
+    const ths = table.querySelectorAll("thead tr th");
+    const container = document.getElementById("claims-table-container") || table.parentElement;
+
+    let guide = container ? container.querySelector("#col-resize-guide") : null;
+    if (!guide && container) {
+      guide = document.createElement("div");
+      guide.id = "col-resize-guide";
+      guide.className = "col-resize-guide";
+      container.appendChild(guide);
+    }
+
+    const MIN_COL_WIDTHS = [50, 140, 130, 160, 120];
+
+    for (let i = 0; i <= ths.length - 2; i++) {
+      const th = ths[i];
+      let resizer = th.querySelector(".col-resizer");
+      if (!resizer) {
+        resizer = document.createElement("div");
+        resizer.className = "col-resizer";
+        resizer.setAttribute("data-col-index", String(i));
+        resizer.title = "Drag to resize column (double-click to reset)";
+        th.appendChild(resizer);
+      }
+
+      resizer.addEventListener("click", (e) => {
+        e.stopPropagation();
+      });
+
+      resizer.addEventListener("dblclick", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (ths.length >= 5) {
+          ths[0].style.width = "50px";
+          ths[1].style.width = "32%";
+          ths[2].style.width = "22%";
+          ths[3].style.width = "32%";
+          ths[4].style.width = "140px";
+        }
+        table.style.tableLayout = "";
+      });
+
+      resizer.addEventListener("mousedown", (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+
+        ths.forEach((t) => {
+          t.style.width = t.getBoundingClientRect().width + "px";
+        });
+        table.style.tableLayout = "fixed";
+
+        const colIdx = i;
+        const colA = ths[colIdx];
+        const colB = ths[colIdx + 1];
+        const startX = e.clientX;
+        const startWidthA = colA.getBoundingClientRect().width;
+        const startWidthB = colB.getBoundingClientRect().width;
+        const minA = MIN_COL_WIDTHS[colIdx] ?? 50;
+        const minB = MIN_COL_WIDTHS[colIdx + 1] ?? 50;
+
+        _isColumnResizing = true;
+        resizer.classList.add("is-resizing");
+        if (document.body) {
+          document.body.classList.add("is-resizing-cols");
+        }
+
+        const updateGuidePosition = () => {
+          if (!guide || !container) return;
+          const containerRect = container.getBoundingClientRect();
+          const leftPos = colA.getBoundingClientRect().right - containerRect.left + container.scrollLeft;
+          guide.style.left = leftPos + "px";
+          guide.style.top = container.scrollTop + "px";
+          guide.style.height = container.clientHeight + "px";
+          guide.style.display = "block";
+        };
+
+        updateGuidePosition();
+
+        const onMouseMove = (moveEvent) => {
+          if (moveEvent.buttons === 0) {
+            onMouseUp();
+            return;
+          }
+          const deltaX = moveEvent.clientX - startX;
+          let newWidthA = startWidthA + deltaX;
+          let newWidthB = startWidthB - deltaX;
+
+          if (newWidthA < minA) {
+            newWidthA = minA;
+            newWidthB = startWidthA + startWidthB - minA;
+          }
+          if (newWidthB < minB) {
+            newWidthB = minB;
+            newWidthA = startWidthA + startWidthB - minB;
+          }
+
+          colA.style.width = newWidthA + "px";
+          colB.style.width = newWidthB + "px";
+
+          updateGuidePosition();
+        };
+
+        const onMouseUp = () => {
+          window.removeEventListener("mousemove", onMouseMove);
+          window.removeEventListener("mouseup", onMouseUp);
+          window.removeEventListener("blur", onMouseUp);
+          _isColumnResizing = false;
+          _justResizedColumn = true;
+          setTimeout(() => {
+            _justResizedColumn = false;
+          }, 100);
+          resizer.classList.remove("is-resizing");
+          if (document.body) {
+            document.body.classList.remove("is-resizing-cols");
+          }
+          if (guide) {
+            guide.style.display = "none";
+          }
+        };
+
+        window.addEventListener("mousemove", onMouseMove);
+        window.addEventListener("mouseup", onMouseUp);
+        window.addEventListener("blur", onMouseUp);
+      });
+    }
+  }
+
   function setupEventListeners() {
     // 1. Status Filter Tabs
     document.querySelectorAll(".filter-tab").forEach(tab => {
@@ -1274,6 +1408,7 @@
     // 5. Table Header Sort Controls
     document.querySelectorAll("table.claims-table th.sortable").forEach(th => {
       th.addEventListener("click", () => {
+        if (_isColumnResizing || _justResizedColumn) return;
         const field = th.getAttribute("data-sort");
         if (field === activeSortField) {
           activeSortOrder = activeSortOrder === "asc" ? "desc" : "asc";
@@ -1323,6 +1458,9 @@
         if (ok) showToast("JSON data copied to clipboard!");
       });
     }
+
+    // 9. Column Resizing
+    initColumnResizing();
 
     // Escape key to close
     window.addEventListener("keydown", (e) => {
@@ -1395,6 +1533,12 @@
       updateAttributionHeaderStats,
       getSidebarWindow,
       updateClaimsData: (typeof window !== "undefined" ? window.updateClaimsData : null),
+      initColumnResizing,
+      setupEventListeners,
+      renderSortIndicators,
+      resetSortingState: () => { activeSortField = "index"; activeSortOrder = "asc"; },
+      getIsColumnResizing: () => _isColumnResizing,
+      getJustResizedColumn: () => _justResizedColumn,
     };
   }
 })();

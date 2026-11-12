@@ -26,11 +26,12 @@ const testSuites = [
   { name: "ReaderContext", runner: require("./test_reader_context.js") },
   { name: "XssSanitization", runner: require("./test_xss_sanitization.js") },
   { name: "Preferences", runner: require("./test_preferences.js") },
+  { name: "ClaimsColumnResizing", runner: require("./test_claims_column_resizing.js") },
 ];
 
 async function runAllSuites() {
   console.log("========================================================");
-  console.log("Starting Zocrates Front-End JavaScript Test Suite (21 modules)");
+  console.log("Starting Zocrates Front-End JavaScript Test Suite (22 modules)");
   console.log("========================================================");
 
   resetTestStats();
