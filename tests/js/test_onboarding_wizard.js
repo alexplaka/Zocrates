@@ -1480,6 +1480,91 @@ async function runTests() {
       sidebar.cleanupOnboardingResources();
     }
   });
+
+  await testAsync("sidebar: Microsoft Visual C++ missing error renders prerequisite card with docUrl link, architecture, Check & Continue button, and no .exe link", async () => {
+    const existing = global.document.getElementById("bootstrap-progress-card");
+    if (existing) existing.remove();
+
+    const docUrl = "https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170#latest-supported-redistributable-version";
+    sidebar.handleBootstrapProgressEvent({
+      state: "error",
+      stepKey: "error",
+      detail: {
+        state: "error",
+        code: "VCRUNTIME_MISSING",
+        arch: "X64",
+        docUrl: docUrl,
+        message: "Microsoft Visual C++ 2015–2022 Redistributable (X64) is required on Windows to run the local Python engine. Please visit " + docUrl + " and download and install the X64 version.",
+      },
+    });
+
+    const card = global.document.getElementById("bootstrap-progress-card");
+    assert.ok(card !== null, "Bootstrap card must exist");
+
+    const errBox = card.querySelector("#bootstrap-card-error");
+    assert.ok(errBox !== null, "Error box must exist");
+    assert.ok(!errBox.classList.contains("hidden"), "Error box must be visible");
+
+    const msg = card.querySelector("#bootstrap-error-message");
+    assert.ok(msg !== null, "Error message container must exist");
+
+    // Title
+    const title = msg.querySelector(".vc-redist-title");
+    assert.ok(title !== null, "VC redist title element must exist");
+    assert.strictEqual(title.textContent, "Microsoft Visual C++ Runtime Required");
+
+    // Architecture instruction specifying detected architecture
+    const archInst = msg.querySelector(".vc-redist-arch-inst");
+    assert.ok(archInst !== null, "Architecture instruction must exist");
+    assert.ok(archInst.textContent.includes("X64"), "Must mention X64 architecture");
+    assert.ok(archInst.textContent.includes("Detected architecture: X64"), "Must specify detected architecture");
+
+    // Primary link to documentation page
+    const link = msg.querySelector("a.onboarding-link");
+    assert.ok(link !== null, "Primary link must exist with class onboarding-link");
+    assert.strictEqual(link.href, docUrl);
+    assert.strictEqual(link.getAttribute("target"), "_blank");
+    assert.ok(link.textContent.includes("Microsoft Visual C++ Redistributable Documentation & Downloads"));
+
+    // Check & Continue button
+    const retryBtn = errBox.querySelector(".bootstrap-retry-btn");
+    assert.ok(retryBtn !== null, "Retry button must exist");
+    assert.strictEqual(retryBtn.textContent, "Check & Continue", "Button text must be updated to Check & Continue");
+
+    // Next step instruction
+    const nextStep = msg.querySelector(".vc-redist-next-step");
+    assert.ok(nextStep !== null, "Next step instruction must exist");
+    assert.ok(nextStep.textContent.includes("Check & Continue"));
+
+    // Omission of direct .exe link
+    const allLinks = Array.from(card.querySelectorAll("a"));
+    for (const a of allLinks) {
+      assert.ok(!a.href.toLowerCase().endsWith(".exe"), "Must not link directly to .exe file: " + a.href);
+      assert.ok(!a.href.includes("vc_redist"), "Must not link to vc_redist installer directly: " + a.href);
+    }
+    assert.ok(!card.textContent.includes(".exe"), "Card text must not contain .exe file name");
+
+    // Verify background polling triggers retryBackendLaunch when installed
+    let retryCalled = false;
+    env.zotero.Zocrates = env.zotero.Zocrates || {};
+    env.zotero.Zocrates.isVcRedistInstalledWindows = async () => true;
+    env.zotero.Zocrates.retryBackendLaunch = () => {
+      retryCalled = true;
+    };
+
+    // Clean up timer and card
+    if (sidebar.clearVcRedistCheckTimer) {
+      sidebar.clearVcRedistCheckTimer();
+    }
+    sidebar.handleBootstrapProgressEvent({
+      state: "active",
+      stepKey: "preparing",
+      detail: { state: "active" },
+    });
+    assert.strictEqual(retryBtn.textContent, "Retry", "Non-error event resets retry button to Retry");
+
+    if (card) card.remove();
+  });
 }
 
 if (require.main === module) {

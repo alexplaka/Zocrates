@@ -4342,6 +4342,25 @@ details.considered-sources li {
   word-break: break-word;
 }
 
+.vc-redist-title {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 4px;
+  color: #ef4444;
+}
+
+.vc-redist-desc,
+.vc-redist-arch-inst,
+.vc-redist-next-step {
+  margin-bottom: 6px;
+  line-height: 1.4;
+  color: var(--text-main);
+}
+
+.vc-redist-link-wrap {
+  margin: 6px 0 8px 0;
+}
+
 .bootstrap-retry-btn {
   padding: 6px 14px;
   border-radius: 6px;

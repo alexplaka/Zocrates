@@ -21,8 +21,10 @@ async function runTests() {
     setSubprocessForTesting,
     setBackendStatus,
     injectToolbarButton,
+    getWindowsArchitecture,
     isVcRedistInstalledWindows,
     ensureVcRedistWindows,
+    VC_REDIST_DOC_URL,
   } = require("../../zotero-plugin/addon/bootstrap.js");
 
   // 1. Zotero.Zocrates.Notifier
@@ -1750,6 +1752,28 @@ async function runTests() {
     }
   });
 
+  test("getWindowsArchitecture: resolves arm64, x86, and x64 correctly with fallback", () => {
+    const prevAppInfo = global.Services.appinfo;
+    try {
+      global.Services.appinfo = { XPCOMABI: "x86_64-gcc3" };
+      assert.strictEqual(getWindowsArchitecture(), "x64");
+
+      global.Services.appinfo = { XPCOMABI: "aarch64-unknown-linux" };
+      assert.strictEqual(getWindowsArchitecture(), "arm64");
+
+      global.Services.appinfo = { XPCOMABI: "arm64-gcc3" };
+      assert.strictEqual(getWindowsArchitecture(), "arm64");
+
+      global.Services.appinfo = { XPCOMABI: "x86-msvc" };
+      assert.strictEqual(getWindowsArchitecture(), "x86");
+
+      global.Services.appinfo = null;
+      assert.strictEqual(getWindowsArchitecture(), "x64");
+    } finally {
+      global.Services.appinfo = prevAppInfo;
+    }
+  });
+
   await testAsync("ensureVcRedistWindows: returns true immediately if not Windows or already installed", async () => {
     const prevAppInfo = global.Services.appinfo;
     const prevZoteroIsWin = env.zotero.isWin;
@@ -1783,155 +1807,48 @@ async function runTests() {
     }
   });
 
-  await testAsync("ensureVcRedistWindows: downloads, validates MZ, runs PowerShell with UAC elevation, and cleans up", async () => {
+  await testAsync("ensureVcRedistWindows: on Windows when missing throws VCRUNTIME_MISSING with arch and docUrl and adds warning notification", async () => {
     const prevAppInfo = global.Services.appinfo;
     const prevZoteroIsWin = env.zotero.isWin;
     const prevEnv = global.Services.env;
     const prevIOUtils = global.IOUtils;
+    let fetchCalled = false;
     const prevFetch = global.fetch;
-
-    const files = new Map();
-    let removedInstaller = false;
-    const progressEvents = [];
-    const installerPath = "C:\\zocrates-data\\bin\\vc_redist.x64.exe";
-
-    const prevNotify = env.zotero.Zocrates?.notifyBootstrapProgress;
-    if (!env.zotero.Zocrates) env.zotero.Zocrates = {};
-    env.zotero.Zocrates.notifyBootstrapProgress = (step, detail) => {
-      progressEvents.push({ step, detail });
-    };
-
-    let powershellCommandExecuted = null;
-    let powershellArgsExecuted = null;
-
-    bootstrap.setSubprocessForTesting({
-      async pathSearch(cmd) { return cmd; },
-      async call(opts) {
-        powershellCommandExecuted = opts.command;
-        powershellArgsExecuted = opts.arguments;
-        // Simulate installer run: mark DLL as installed
-        files.set("c:\\windows\\system32\\vcruntime140_1.dll", true);
-        return {
-          stdout: null,
-          stderr: null,
-          async wait() { return { exitCode: 0 }; },
-        };
-      },
-    });
-
-    // Valid PE payload > 5MB starting with MZ
-    const validPayload = new Uint8Array(6 * 1024 * 1024);
-    validPayload[0] = 0x4d; // 'M'
-    validPayload[1] = 0x5a; // 'Z'
-
-    global.fetch = async (url) => {
-      assert.strictEqual(url, "https://aka.ms/vs/17/release/vc_redist.x64.exe");
-      return {
-        ok: true,
-        status: 200,
-        async arrayBuffer() { return validPayload.buffer; },
-      };
-    };
-
-    global.IOUtils = {
-      async makeDirectory(p) { files.set(p, "<dir>"); },
-      async write(p, bytes) { files.set(p, bytes); },
-      async exists(p) { return files.has(p.toLowerCase()); },
-      async remove(p, opts) {
-        if (p === installerPath) removedInstaller = true;
-        files.delete(p.toLowerCase());
-      },
-    };
-
-    try {
-      global.Services.appinfo = { OS: "WINNT" };
-      env.zotero.isWin = true;
-      global.Services.env = {
-        get(key) { return key === "SystemRoot" ? "C:\\Windows" : null; },
-      };
-
-      const result = await ensureVcRedistWindows("C:\\zocrates-data", "\\");
-
-      assert.strictEqual(result, true, "ensureVcRedistWindows must return true upon successful install");
-      assert.strictEqual(removedInstaller, true, "Installer binary must be removed in finally block");
-      assert.ok(progressEvents.some(e => e.step === "preparing" && e.detail && e.detail.label.includes("Visual C++")));
-
-      assert.ok(powershellCommandExecuted, "PowerShell must be called");
-      assert.ok(powershellArgsExecuted.includes("-NoProfile"), "Must include -NoProfile");
-      assert.ok(powershellArgsExecuted.includes("-NonInteractive"), "Must include -NonInteractive");
-      const cmdStr = powershellArgsExecuted[powershellArgsExecuted.indexOf("-Command") + 1];
-      assert.ok(cmdStr.includes("Start-Process"), "Command must invoke Start-Process");
-      assert.ok(cmdStr.includes("-Verb RunAs"), "Command must request UAC elevation (-Verb RunAs)");
-      assert.ok(cmdStr.includes("'/install','/passive','/norestart'"), "Command must pass required argument list");
-      assert.ok(cmdStr.includes("exit $p.ExitCode"), "Command must exit with process exit code");
-    } finally {
-      bootstrap.setSubprocessForTesting(null);
-      global.Services.appinfo = prevAppInfo;
-      env.zotero.isWin = prevZoteroIsWin;
-      global.Services.env = prevEnv;
-      global.IOUtils = prevIOUtils;
-      global.fetch = prevFetch;
-      if (prevNotify) {
-        env.zotero.Zocrates.notifyBootstrapProgress = prevNotify;
-      } else if (env.zotero.Zocrates) {
-        delete env.zotero.Zocrates.notifyBootstrapProgress;
-      }
-    }
-  });
-
-  await testAsync("ensureVcRedistWindows: handles invalid download without throwing and adds warning notification", async () => {
-    const prevAppInfo = global.Services.appinfo;
-    const prevZoteroIsWin = env.zotero.isWin;
-    const prevEnv = global.Services.env;
-    const prevIOUtils = global.IOUtils;
-    const prevFetch = global.fetch;
-
-    const files = new Map();
-    let removedInstaller = false;
-    const installerPath = "C:\\zocrates-data\\bin\\vc_redist.x64.exe";
+    global.fetch = async () => { fetchCalled = true; throw new Error("fetch must not be called"); };
 
     const notifier = initNotifier(env.zotero);
     notifier.clear();
 
-    // Payload too small (<5MB)
-    const smallPayload = new Uint8Array(1024);
-    smallPayload[0] = 0x4d;
-    smallPayload[1] = 0x5a;
-
-    global.fetch = async (url) => {
-      return {
-        ok: true,
-        status: 200,
-        async arrayBuffer() { return smallPayload.buffer; },
-      };
-    };
-
-    global.IOUtils = {
-      async makeDirectory(p) { files.set(p, "<dir>"); },
-      async write(p, bytes) { files.set(p, bytes); },
-      async exists(p) { return false; },
-      async remove(p, opts) {
-        if (p === installerPath) removedInstaller = true;
-        files.delete(p.toLowerCase());
-      },
-    };
-
     try {
-      global.Services.appinfo = { OS: "WINNT" };
+      global.Services.appinfo = { OS: "WINNT", XPCOMABI: "x86_64-gcc3" };
       env.zotero.isWin = true;
       global.Services.env = {
         get(key) { return key === "SystemRoot" ? "C:\\Windows" : null; },
       };
+      global.IOUtils = {
+        async exists(p) { return false; },
+      };
 
-      const result = await ensureVcRedistWindows("C:\\zocrates-data", "\\");
-
-      assert.strictEqual(result, false, "Must return false when download validation fails");
-      assert.strictEqual(removedInstaller, true, "Installer must be removed in finally");
+      let threw = false;
+      try {
+        await ensureVcRedistWindows("C:\\zocrates-data", "\\");
+      } catch (err) {
+        threw = true;
+        assert.strictEqual(err.code, "VCRUNTIME_MISSING");
+        assert.strictEqual(err.arch, "X64");
+        assert.strictEqual(err.docUrl, VC_REDIST_DOC_URL);
+        assert.ok(err.message.includes("Microsoft Visual C++ 2015–2022 Redistributable (X64)"));
+        assert.ok(err.message.includes(VC_REDIST_DOC_URL));
+      }
+      assert.strictEqual(threw, true, "ensureVcRedistWindows must throw VCRUNTIME_MISSING when runtime is missing on Windows");
+      assert.strictEqual(fetchCalled, false, "Must not attempt automatic downloading");
 
       const notifications = notifier.getAll();
       assert.strictEqual(notifications.length, 1, "Must add 1 warning notification");
       assert.strictEqual(notifications[0].type, "warning");
-      assert.ok(notifications[0].text.includes("vc_redist.x64.exe"));
+      assert.ok(notifications[0].text.includes("Microsoft Visual C++ 2015–2022 Redistributable (X64)"));
+      assert.ok(notifications[0].text.includes(VC_REDIST_DOC_URL));
+      assert.ok(!notifications[0].text.includes(".exe"), "Notification must link to documentation page, not direct .exe");
     } finally {
       global.Services.appinfo = prevAppInfo;
       env.zotero.isWin = prevZoteroIsWin;
@@ -1941,75 +1858,45 @@ async function runTests() {
     }
   });
 
-  await testAsync("ensureVcRedistWindows: handles UAC elevation decline without throwing and adds warning notification", async () => {
+  await testAsync("ensureVcRedistWindows: detects ARM64 architecture and specifies ARM64 in error and notification", async () => {
     const prevAppInfo = global.Services.appinfo;
     const prevZoteroIsWin = env.zotero.isWin;
     const prevEnv = global.Services.env;
     const prevIOUtils = global.IOUtils;
-    const prevFetch = global.fetch;
-
-    const files = new Map();
-    let removedInstaller = false;
-    const installerPath = "C:\\zocrates-data\\bin\\vc_redist.x64.exe";
 
     const notifier = initNotifier(env.zotero);
     notifier.clear();
 
-    const validPayload = new Uint8Array(6 * 1024 * 1024);
-    validPayload[0] = 0x4d;
-    validPayload[1] = 0x5a;
-
-    global.fetch = async () => ({
-      ok: true,
-      status: 200,
-      async arrayBuffer() { return validPayload.buffer; },
-    });
-
-    global.IOUtils = {
-      async makeDirectory(p) { files.set(p, "<dir>"); },
-      async write(p, bytes) { files.set(p, bytes); },
-      async exists(p) { return false; },
-      async remove(p, opts) {
-        if (p === installerPath) removedInstaller = true;
-        files.delete(p.toLowerCase());
-      },
-    };
-
-    // Subprocess fails (UAC canceled or exit code non-zero)
-    bootstrap.setSubprocessForTesting({
-      async pathSearch(cmd) { return cmd; },
-      async call(opts) {
-        return {
-          stdout: null,
-          stderr: null,
-          async wait() { return { exitCode: 1223 }; }, // ERROR_CANCELLED
-        };
-      },
-    });
-
     try {
-      global.Services.appinfo = { OS: "WINNT" };
+      global.Services.appinfo = { OS: "WINNT", XPCOMABI: "aarch64-unknown" };
       env.zotero.isWin = true;
       global.Services.env = {
         get(key) { return key === "SystemRoot" ? "C:\\Windows" : null; },
       };
+      global.IOUtils = {
+        async exists(p) { return false; },
+      };
 
-      const result = await ensureVcRedistWindows("C:\\zocrates-data", "\\");
-
-      assert.strictEqual(result, false, "Must return false when installer fails / UAC canceled");
-      assert.strictEqual(removedInstaller, true, "Installer must be removed in finally");
+      let threw = false;
+      try {
+        await ensureVcRedistWindows("C:\\zocrates-data", "\\");
+      } catch (err) {
+        threw = true;
+        assert.strictEqual(err.code, "VCRUNTIME_MISSING");
+        assert.strictEqual(err.arch, "ARM64");
+        assert.strictEqual(err.docUrl, VC_REDIST_DOC_URL);
+        assert.ok(err.message.includes("(ARM64)"));
+      }
+      assert.strictEqual(threw, true);
 
       const notifications = notifier.getAll();
-      assert.strictEqual(notifications.length, 1, "Must add warning notification");
-      assert.strictEqual(notifications[0].type, "warning");
-      assert.ok(notifications[0].text.includes("vc_redist.x64.exe"));
+      assert.strictEqual(notifications.length, 1);
+      assert.ok(notifications[0].text.includes("(ARM64)"));
     } finally {
-      bootstrap.setSubprocessForTesting(null);
       global.Services.appinfo = prevAppInfo;
       env.zotero.isWin = prevZoteroIsWin;
       global.Services.env = prevEnv;
       global.IOUtils = prevIOUtils;
-      global.fetch = prevFetch;
     }
   });
 }

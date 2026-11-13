@@ -29,9 +29,21 @@ function startup(data, reason) {
   }
 
   // Expose shared state on the Zotero global
-  Zotero.Zocrates = { rootURI, version: data.version, loadStoredApiKey, saveStoredApiKey, getDetachedWindow };
+  Zotero.Zocrates = {
+    rootURI,
+    version: data.version,
+    loadStoredApiKey,
+    saveStoredApiKey,
+    getDetachedWindow,
+    getWindowsArchitecture,
+    isVcRedistInstalledWindows,
+    VC_REDIST_DOC_URL,
+  };
   Zotero.Zocrates._backendStatus = { status: "connecting", label: "Connecting..." };
   Zotero.Zocrates.setBackendStatus = setBackendStatus;
+  Zotero.Zocrates.getWindowsArchitecture = getWindowsArchitecture;
+  Zotero.Zocrates.isVcRedistInstalledWindows = isVcRedistInstalledWindows;
+  Zotero.Zocrates.VC_REDIST_DOC_URL = VC_REDIST_DOC_URL;
 
   // Single Source of Truth for backend URL resolution. The backend binds loopback
   // only. Resolution order:
@@ -2089,6 +2101,21 @@ async function installBundledWheel(zocratesDataDir, sep, uvPath, venvPython, man
   return true;
 }
 
+const VC_REDIST_DOC_URL = "https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170#latest-supported-redistributable-version";
+
+function getWindowsArchitecture() {
+  try {
+    if (typeof Services !== "undefined" && Services.appinfo && Services.appinfo.XPCOMABI) {
+      const abi = String(Services.appinfo.XPCOMABI).toLowerCase();
+      const arch = abi.split("-")[0];
+      if (arch === "aarch64" || arch === "arm64") return "arm64";
+      if (arch === "x86") return "x86";
+      return "x64";
+    }
+  } catch (e) {}
+  return "x64";
+}
+
 async function isVcRedistInstalledWindows() {
   if (!isWindowsOs()) return true;
   try {
@@ -2116,107 +2143,26 @@ async function ensureVcRedistWindows(zocratesDataDir, sep) {
     return true;
   }
 
-  if (typeof Zotero !== "undefined" && Zotero.Zocrates && typeof Zotero.Zocrates.notifyBootstrapProgress === "function") {
-    Zotero.Zocrates.notifyBootstrapProgress("preparing", {
-      state: "active",
-      label: "Installing Microsoft Visual C++ Runtime (24 MB)...",
-    });
-  }
-
-  const binDir = zocratesDataDir + sep + "bin";
-  const installerPath = binDir + sep + "vc_redist.x64.exe";
-  let installed = false;
+  const rawArch = getWindowsArchitecture();
+  const archLabel = rawArch === "arm64" ? "ARM64" : (rawArch === "x86" ? "X86" : "X64");
 
   try {
-    if (typeof IOUtils !== "undefined" && typeof IOUtils.makeDirectory === "function") {
-      await IOUtils.makeDirectory(binDir, { ignoreExisting: true, createAncestors: true });
+    if (typeof Zotero !== "undefined" && Zotero.Zocrates && Zotero.Zocrates.Notifier && typeof Zotero.Zocrates.Notifier.add === "function") {
+      Zotero.Zocrates.Notifier.add(
+        "Microsoft Visual C++ 2015–2022 Redistributable (" + archLabel + ") is required on Windows. Please install it from " + VC_REDIST_DOC_URL,
+        "warning"
+      );
     }
+  } catch (e) {}
 
-    const downloadUrl = "https://aka.ms/vs/17/release/vc_redist.x64.exe";
-    const controller = (typeof AbortController !== "undefined") ? new AbortController() : null;
-    const timer = controller ? setTimeout(function() { controller.abort(); }, 60000) : null;
-    let res;
-    try {
-      res = await fetch(downloadUrl, { cache: "no-store", signal: controller ? controller.signal : undefined });
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
-    if (!res.ok) {
-      throw new Error("HTTP " + res.status + " downloading Visual C++ Redistributable");
-    }
-    const buf = await res.arrayBuffer();
-    if (!buf || buf.byteLength <= 5 * 1024 * 1024) {
-      throw new Error("vc_redist.x64.exe download invalid or too small: " + (buf ? buf.byteLength : 0) + " bytes");
-    }
-    const bytes = new Uint8Array(buf);
-    if (bytes[0] !== 0x4d || bytes[1] !== 0x5a) {
-      throw new Error("vc_redist.x64.exe is missing PE/MZ magic header");
-    }
-
-    if (typeof IOUtils !== "undefined" && typeof IOUtils.write === "function") {
-      await IOUtils.write(installerPath, bytes);
-    }
-
-    let psBinary = "powershell.exe";
-    const subprocess = getSubprocess();
-    if (subprocess && typeof subprocess.pathSearch === "function") {
-      try {
-        const searched = await subprocess.pathSearch("powershell");
-        if (searched) psBinary = searched;
-      } catch (e) {}
-    }
-    if (psBinary === "powershell.exe" || psBinary === "powershell") {
-      let sysRoot = "C:\\Windows";
-      try {
-        if (typeof Services !== "undefined" && Services.env && typeof Services.env.get === "function") {
-          const envSysRoot = Services.env.get("SystemRoot");
-          if (envSysRoot) sysRoot = envSysRoot;
-        }
-      } catch (e) {}
-      const sysPs = sysRoot.replace(/[\\/]+$/, "") + "\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
-      try {
-        if (typeof IOUtils !== "undefined" && typeof IOUtils.exists === "function" && (await IOUtils.exists(sysPs))) {
-          psBinary = sysPs;
-        }
-      } catch (e) {}
-    }
-
-    const escapedInstallerPath = installerPath.replace(/'/g, "''");
-    const psCommand = `$p = Start-Process -FilePath '${escapedInstallerPath}' -ArgumentList '/install','/passive','/norestart' -Verb RunAs -Wait -PassThru; exit $p.ExitCode`;
-
-    await runProvisionCommand(
-      "install vc_redist",
-      psBinary,
-      ["-NoProfile", "-NonInteractive", "-Command", psCommand],
-      null
-    );
-
-    installed = await isVcRedistInstalledWindows();
-  } catch (e) {
-    if (typeof Zotero !== "undefined" && Zotero.debug) {
-      Zotero.debug("Zocrates: Microsoft Visual C++ Redistributable installation failed: " + e);
-    }
-  } finally {
-    try {
-      if (typeof IOUtils !== "undefined" && typeof IOUtils.remove === "function") {
-        await IOUtils.remove(installerPath, { ignoreAbsent: true });
-      }
-    } catch (e) {}
-  }
-
-  if (!installed && !(await isVcRedistInstalledWindows())) {
-    try {
-      if (typeof Zotero !== "undefined" && Zotero.Zocrates && Zotero.Zocrates.Notifier && typeof Zotero.Zocrates.Notifier.add === "function") {
-        Zotero.Zocrates.Notifier.add(
-          "Microsoft Visual C++ 2015–2022 Redistributable (x64) is required on Windows. Please install it manually from https://aka.ms/vs/17/release/vc_redist.x64.exe",
-          "warning"
-        );
-      }
-    } catch (e) {}
-    return false;
-  }
-
-  return true;
+  const err = new Error(
+    "Microsoft Visual C++ 2015–2022 Redistributable (" + archLabel + ") is required on Windows to run the local Python engine. " +
+    "Please visit " + VC_REDIST_DOC_URL + " and download and install the " + archLabel + " version."
+  );
+  err.code = "VCRUNTIME_MISSING";
+  err.arch = archLabel;
+  err.docUrl = VC_REDIST_DOC_URL;
+  throw err;
 }
 
 async function provisionEnvironment(zocratesDataDir, sep) {
@@ -2842,7 +2788,7 @@ async function launchBackendIfNeeded() {
       spawnedProc = null;
       try { z._backendProcess = null; } catch (e2) {}
     }
-    const message = e && e.message ? e.message : String(e);
+    const message = String(e && e.message || e);
     Zotero.debug("Zocrates: backend launch failed: " + message + (e && e.stack ? "\n" + e.stack : ""));
     try {
       z._bootstrapSettled = true;
@@ -2850,6 +2796,9 @@ async function launchBackendIfNeeded() {
         state: "error",
         message: message,
         failedStep: z._lastBootstrapStepKey || currentStep,
+        code: e && e.code,
+        arch: e && e.arch,
+        docUrl: e && e.docUrl,
       });
     } catch (e2) {}
     // The onboarding error card lives in the sidebar chat area; mount the
@@ -2945,7 +2894,9 @@ if (typeof module !== "undefined" && module.exports) {
     runProvisionCommand,
     downloadStandaloneUv,
     resolveUvBinary,
+    getWindowsArchitecture,
     isVcRedistInstalledWindows,
     ensureVcRedistWindows,
+    VC_REDIST_DOC_URL,
   };
 }

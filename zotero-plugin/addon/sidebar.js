@@ -124,6 +124,7 @@ try {
 // checkBackendStatus success path. handleChatSubmit refuses to POST while it
 // is false, so click and Ctrl/Cmd+Enter submits are inert during install.
 let backendReadyForChat = false;
+let vcRedistCheckTimer = null;
 
 // UI Elements
 const statusDot = document.getElementById("status-dot");
@@ -2107,6 +2108,10 @@ const BOOTSTRAP_STEP_WIDTHS = {
 };
 
 function removeBootstrapProgressCard() {
+  if (vcRedistCheckTimer) {
+    clearInterval(vcRedistCheckTimer);
+    vcRedistCheckTimer = null;
+  }
   // Phase 7 gate composition: while onboarding is mid-flow (CONFIGURE wizard
   // or PROCESS conversion), this routine must NOT dissolve the card nor lift
   // the chat gate — the 10s /status poll would otherwise dismiss the wizard
@@ -2133,6 +2138,13 @@ function applyBootstrapProgressStateToCard(evt) {
   const failedIndex = isError && evt.detail && evt.detail.failedStep
     ? Math.min(BOOTSTRAP_STEP_KEYS.indexOf(evt.detail.failedStep), 2)
     : -1;
+
+  if (!isError) {
+    if (vcRedistCheckTimer) {
+      clearInterval(vcRedistCheckTimer);
+      vcRedistCheckTimer = null;
+    }
+  }
 
   // Row 3 doubles as "Starting backend server…" in the final stage.
   const engineLabel = document.getElementById("bootstrap-step-label-engine");
@@ -2164,15 +2176,112 @@ function applyBootstrapProgressStateToCard(evt) {
 
   const errBox = document.getElementById("bootstrap-card-error");
   if (errBox) {
+    const retryBtn = errBox.querySelector(".bootstrap-retry-btn");
     if (isError) {
       errBox.classList.remove("hidden");
       const msg = document.getElementById("bootstrap-error-message");
-      if (msg) {
-        msg.textContent = evt.detail && evt.detail.message
-          ? String(evt.detail.message)
-          : "Backend setup failed. Please try again.";
+      const isVcMissing = Boolean(
+        evt.detail && (
+          evt.detail.code === "VCRUNTIME_MISSING" ||
+          (evt.detail.error || evt.detail.message || "").includes("Visual C++")
+        )
+      );
+
+      if (isVcMissing) {
+        if (msg) {
+          msg.textContent = "";
+
+          const zot = resolveZotero();
+          const rawArch = (evt.detail && evt.detail.arch) ||
+            (zot?.Zocrates?.getWindowsArchitecture && zot.Zocrates.getWindowsArchitecture()) ||
+            "x64";
+          const archLabel = String(rawArch).toUpperCase();
+          const docUrl = (evt.detail && evt.detail.docUrl) ||
+            (zot?.Zocrates?.VC_REDIST_DOC_URL) ||
+            "https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170#latest-supported-redistributable-version";
+
+          const title = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+          title.className = "vc-redist-title";
+          title.textContent = "Microsoft Visual C++ Runtime Required";
+
+          const desc = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+          desc.className = "vc-redist-desc";
+          desc.textContent = "Microsoft Visual C++ 2015–2022 Redistributable (" + archLabel + ") is required on Windows to run the local Python engine.";
+
+          const archInst = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+          archInst.className = "vc-redist-arch-inst";
+          archInst.textContent = "Detected architecture: " + archLabel + ". On Microsoft's documentation page, download and install the " + archLabel + " version:";
+
+          const linkWrap = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+          linkWrap.className = "vc-redist-link-wrap";
+          const link = document.createElementNS("http://www.w3.org/1999/xhtml", "a");
+          link.href = docUrl;
+          link.setAttribute("href", docUrl);
+          link.className = "onboarding-link";
+          link.setAttribute("class", "onboarding-link");
+          link.target = "_blank";
+          link.setAttribute("target", "_blank");
+          link.textContent = "Microsoft Visual C++ Redistributable Documentation & Downloads ↗";
+          linkWrap.appendChild(link);
+
+          const nextStep = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+          nextStep.className = "vc-redist-next-step";
+          nextStep.textContent = "After installing, click “Check & Continue” below.";
+
+          msg.appendChild(title);
+          msg.appendChild(desc);
+          msg.appendChild(archInst);
+          msg.appendChild(linkWrap);
+          msg.appendChild(nextStep);
+        }
+
+        if (retryBtn) {
+          retryBtn.textContent = "Check & Continue";
+        }
+
+        if (!vcRedistCheckTimer) {
+          vcRedistCheckTimer = setInterval(async () => {
+            try {
+              const zot = resolveZotero();
+              if (zot?.Zocrates?.isVcRedistInstalledWindows) {
+                const installed = await zot.Zocrates.isVcRedistInstalledWindows();
+                if (installed) {
+                  if (vcRedistCheckTimer) {
+                    clearInterval(vcRedistCheckTimer);
+                    vcRedistCheckTimer = null;
+                  }
+                  if (zot.Zocrates.retryBackendLaunch) {
+                    zot.Zocrates.retryBackendLaunch();
+                  }
+                }
+              }
+            } catch (e) {
+              console.warn("Zocrates: vc_redist auto-detection check failed:", e);
+            }
+          }, 3000);
+        }
+      } else {
+        if (vcRedistCheckTimer) {
+          clearInterval(vcRedistCheckTimer);
+          vcRedistCheckTimer = null;
+        }
+        if (retryBtn) {
+          retryBtn.textContent = "Retry";
+        }
+        if (msg) {
+          msg.textContent = evt.detail && evt.detail.message
+            ? String(evt.detail.message)
+            : "Backend setup failed. Please try again.";
+        }
       }
     } else {
+      if (vcRedistCheckTimer) {
+        clearInterval(vcRedistCheckTimer);
+        vcRedistCheckTimer = null;
+      }
+      if (retryBtn) {
+        retryBtn.textContent = "Retry";
+      }
       errBox.classList.add("hidden");
     }
   }
@@ -15411,7 +15520,15 @@ if (typeof module !== "undefined" && module.exports) {
     getBackendReadyForChat: () => backendReadyForChat,
     setBackendReadyForChat: (v) => { backendReadyForChat = v; },
     removeBootstrapProgressCard,
+    applyBootstrapProgressStateToCard,
     renderOrUpdateBootstrapProgressCard,
+    getVcRedistCheckTimer: () => vcRedistCheckTimer,
+    clearVcRedistCheckTimer: () => {
+      if (vcRedistCheckTimer) {
+        clearInterval(vcRedistCheckTimer);
+        vcRedistCheckTimer = null;
+      }
+    },
     handleBootstrapProgressEvent,
     handleOnboardingBootstrapDone,
     checkBackendStatus,
