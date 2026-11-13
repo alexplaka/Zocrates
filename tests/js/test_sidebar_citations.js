@@ -172,19 +172,35 @@ async function runTests() {
     assert.ok(highBadge);
     assert.strictEqual(highBadge.textContent, "✓ Support Probability: 0.92");
 
+    // Badges row should NOT contain inspect button
+    const badgesRow = popover.querySelector(".evidence-popover-badges-row");
+    assert.ok(badgesRow, "Badges row should exist");
+    assert.strictEqual(badgesRow.querySelector(".popover-inspect-claim-btn"), null, "badgesRow must NOT contain inspect button");
+    assert.strictEqual(badgesRow.querySelector(".inspect-claim-badge"), null, "badgesRow must NOT contain inspect claim badge");
+
     // Quote
     assert.ok(popover.querySelector(".evidence-popover-quote").textContent.includes("Achieved 2x speedup"));
 
-    // Action buttons
-    const readerBtn = popover.querySelector(".popover-open-reader-btn");
+    // Footer and action buttons
+    const footerDiv = popover.querySelector(".evidence-popover-footer");
+    assert.ok(footerDiv, "Footer should exist");
+
+    const inspectBtn = footerDiv.querySelector(".popover-inspect-claim-btn");
+    assert.ok(inspectBtn, "popover-inspect-claim-btn should exist in footer");
+    assert.strictEqual(inspectBtn.textContent, "🛡️ Inspect Claim");
+    assert.strictEqual(inspectBtn.getAttribute("title"), "Inspect claim in Claim Verification Inspector");
+
+    const readerBtn = footerDiv.querySelector(".popover-open-reader-btn");
     assert.ok(readerBtn);
-    assert.strictEqual(readerBtn.textContent, "Open in Reader");
+    assert.ok(readerBtn.textContent.includes("📖") && readerBtn.textContent.includes("Open in Reader"));
+    assert.strictEqual(readerBtn.textContent, "📖 Open in Reader");
     assert.strictEqual(readerBtn.getAttribute("data-attachment-key"), "ATT_FA2");
     assert.strictEqual(readerBtn.getAttribute("data-section"), "Hardware Benchmarks");
 
-    const selectBtn = popover.querySelector(".popover-select-item-btn");
+    const selectBtn = footerDiv.querySelector(".popover-select-item-btn");
     assert.ok(selectBtn);
-    assert.strictEqual(selectBtn.textContent, "Select in Library");
+    assert.ok(selectBtn.textContent.includes("📁") && selectBtn.textContent.includes("Select in Library"));
+    assert.strictEqual(selectBtn.textContent, "📁 Select in Library");
     assert.strictEqual(selectBtn.getAttribute("data-item-key"), "ITEM_FA2");
 
     // Close
@@ -1279,6 +1295,9 @@ async function runTests() {
     const badge = popover.querySelector(".evidence-support-badge.high");
     assert.ok(badge, "High support badge should be rendered for canonical occurrence 2");
     assert.strictEqual(badge.textContent, "✓ Support Probability: 0.92");
+    const inspBtn = popover.querySelector(".popover-inspect-claim-btn");
+    assert.ok(inspBtn, "Inspect button should render in footer");
+    assert.strictEqual(inspBtn.textContent, "🛡️ Inspect Claim");
     sidebar.closeEvidencePopover();
   });
 
@@ -2078,6 +2097,342 @@ async function runTests() {
     } finally {
       const leftover = document.querySelector(".info-modal-overlay");
       if (leftover) leftover.remove();
+    }
+  });
+
+  // 36. openClaimsInspectorWindow: passes target options into payload and delegates to window methods
+  test("openClaimsInspectorWindow: passes target options into payload and delegates to window methods", () => {
+    let capturedPayload = null;
+    let highlightCalls = [];
+    let updateCalls = [];
+
+    const mockWin = {
+      updateClaimsData: (p) => { updateCalls.push(p); },
+      highlightAndScrollToClaim: (chunkIdx, occ, claimIdx) => { highlightCalls.push({ chunkIdx, occ, claimIdx }); },
+      focus: () => {},
+    };
+
+    const origTop = window.top;
+    try {
+      window.top = {
+        openDialog: (url, name, features, payload) => {
+          capturedPayload = payload;
+          return mockWin;
+        },
+      };
+
+      const sampleMeta = {
+        citation_verification: {
+          assessments: [
+            { chunk_index: 2, occurrence: 3, claim: "Test Claim Deep Link" },
+          ],
+        },
+      };
+
+      const options = { targetChunkIndex: 2, targetOccurrence: 3, targetClaimIndex: 1 };
+      sidebar.openClaimsInspectorWindow(sampleMeta, options);
+
+      assert.ok(capturedPayload, "Payload must be passed to openDialog");
+      assert.strictEqual(capturedPayload.targetChunkIndex, 2, "targetChunkIndex must be passed in payload");
+      assert.strictEqual(capturedPayload.targetOccurrence, 3, "targetOccurrence must be passed in payload");
+      assert.strictEqual(capturedPayload.targetClaimIndex, 1, "targetClaimIndex must be passed in payload");
+
+      assert.strictEqual(updateCalls.length, 1, "updateClaimsData should be called on existing/opened window");
+      assert.strictEqual(updateCalls[0], capturedPayload);
+      assert.strictEqual(highlightCalls.length, 1, "highlightAndScrollToClaim should be called with target options");
+      assert.strictEqual(highlightCalls[0].chunkIdx, 2);
+      assert.strictEqual(highlightCalls[0].occ, 3);
+    } finally {
+      window.top = origTop;
+    }
+  });
+
+  // 37. claims.js: highlightAndScrollToClaim resets filters and applies pulse class
+  test("claims.js: highlightAndScrollToClaim resets filters and applies pulse class", () => {
+    const claims = require("../../zotero-plugin/addon/claims.js");
+
+    // Set up mock DOM elements required by claims.js
+    let tbody = document.getElementById("claims-tbody");
+    if (!tbody) {
+      tbody = createMockElement("tbody");
+      tbody.id = "claims-tbody";
+      document.body.appendChild(tbody);
+    }
+
+    let filterVerified = createMockElement("div");
+    filterVerified.className = "filter-tab";
+    filterVerified.setAttribute("data-filter", "KEPT");
+    document.body.appendChild(filterVerified);
+
+    let filterAll = createMockElement("div");
+    filterAll.className = "filter-tab active";
+    filterAll.setAttribute("data-filter", "all");
+    document.body.appendChild(filterAll);
+
+    let paperSelect = document.getElementById("claims-paper-filter");
+    if (!paperSelect) {
+      paperSelect = createMockElement("select");
+      paperSelect.id = "claims-paper-filter";
+      document.body.appendChild(paperSelect);
+    }
+
+    claims.setupEventListeners();
+
+    const testClaimsData = {
+      threshold: 0.60,
+      assessments: [
+        {
+          _originalIndex: 1,
+          chunk_index: 1,
+          occurrence: 1,
+          claim: "Verified claim",
+          verdict: "KEPT",
+          support_probability: 0.90,
+        },
+        {
+          _originalIndex: 2,
+          chunk_index: 2,
+          occurrence: 1,
+          claim: "Demoted claim to find",
+          verdict: "DEMOTED",
+          support_probability: 0.20,
+        },
+      ],
+    };
+
+    claims.updateClaimsData(testClaimsData);
+
+    // Initial table has both rows
+    let row2 = document.getElementById("claim-row-2-1");
+    assert.ok(row2, "Row 2-1 should initially exist");
+    assert.strictEqual(row2.getAttribute("data-chunk-index"), "2");
+    assert.strictEqual(row2.getAttribute("data-occurrence"), "1");
+
+    // Switch filter to 'KEPT' (verified), which hides row 2-1
+    filterAll.classList.remove("active");
+    filterVerified.classList.add("active");
+    filterVerified.dispatchEvent("click");
+
+    // Row 2-1 should now be absent from DOM because it's DEMOTED
+    row2 = document.getElementById("claim-row-2-1");
+    assert.strictEqual(row2, null, "Row 2-1 must be hidden when verified filter is active");
+
+    // Call highlightAndScrollToClaim(2, 1)
+    const targetRow = claims.highlightAndScrollToClaim(2, 1);
+    assert.ok(targetRow, "highlightAndScrollToClaim must locate and return target row after resetting filters");
+    assert.strictEqual(targetRow.id, "claim-row-2-1");
+    assert.ok(targetRow.classList.contains("highlight-pulse"), "Target row must receive highlight-pulse class");
+    assert.ok(targetRow._scrolledIntoView, "Target row must be scrolled into view");
+    assert.ok(filterAll.classList.contains("active"), "Status filter must be reset to 'all'");
+  });
+
+  // 38. showEvidencePopover: renders clickable support badge with ↗ and deep-link payload
+  test("showEvidencePopover: renders clickable support badge with ↗ and deep-link payload", () => {
+    sidebar.closeEvidencePopover();
+
+    const pill = createMockElement("span");
+    pill.className = "citation-pill";
+    pill.setAttribute("data-citation-occ", "2");
+
+    const wrapper = createMockElement("div");
+    wrapper.className = "message-wrapper";
+    wrapper._metadata = {
+      citation_verification: {
+        assessments: [
+          { chunk_index: 1, occurrence: 2, claim: "Deep linked claim", support_probability: 0.88 },
+        ],
+      },
+    };
+    wrapper.appendChild(pill);
+    document.body.appendChild(wrapper);
+
+    const citation = {
+      index: 1,
+      title: "Attention Is All You Need",
+      support_probability: 0.88,
+      quote: "Transformer model architecture.",
+      section: "Introduction",
+    };
+
+    let openedMeta = null;
+    let openedOptions = null;
+    const origOpen = window.openClaimsInspectorWindow;
+    window.openClaimsInspectorWindow = (meta, options) => {
+      openedMeta = meta;
+      openedOptions = options;
+    };
+
+    try {
+      sidebar.showEvidencePopover(pill, citation);
+      const popover = document.body.querySelector(".evidence-popover");
+      assert.ok(popover, "Evidence popover must be rendered");
+
+      const badge = popover.querySelector(".evidence-support-badge.high");
+      assert.ok(badge, "Support badge must be created");
+      assert.strictEqual(badge.textContent, "✓ Support Probability: 0.88");
+      assert.ok(badge.getAttribute("title").includes("Calibrated support probability: 0.88"));
+
+      // Badges row should NOT contain inspect button
+      const badgesRow = popover.querySelector(".evidence-popover-badges-row");
+      assert.ok(badgesRow, "Badges row must exist");
+      assert.strictEqual(badgesRow.querySelector(".popover-inspect-claim-btn"), null, "badgesRow must NOT contain inspect button");
+      assert.strictEqual(badgesRow.querySelector(".inspect-claim-badge"), null, "badgesRow must NOT contain inspect claim badge");
+
+      // Footer action buttons
+      const footer = popover.querySelector(".evidence-popover-footer");
+      assert.ok(footer, "Evidence popover footer must be rendered");
+      const inspectBtn = footer.querySelector(".popover-inspect-claim-btn");
+      assert.ok(inspectBtn, "Inspect claim button must exist in footer");
+      assert.strictEqual(inspectBtn.textContent, "🛡️ Inspect Claim");
+      assert.strictEqual(inspectBtn.getAttribute("title"), "Inspect claim in Claim Verification Inspector");
+
+      // Click inspect button in footer
+      inspectBtn.dispatchEvent("click");
+      assert.strictEqual(openedOptions?.targetChunkIndex, 1, "Must pass targetChunkIndex = 1");
+      assert.strictEqual(openedOptions?.targetOccurrence, 2, "Must pass targetOccurrence = 2");
+      assert.strictEqual(document.body.querySelector(".evidence-popover"), null, "Popover must close on inspect button click");
+    } finally {
+      window.openClaimsInspectorWindow = origOpen;
+      sidebar.closeEvidencePopover();
+      wrapper.remove();
+    }
+  });
+
+  // 39. showEvidencePopover: renders inspect-claim-btn in footer when support probability is null
+  test("showEvidencePopover: renders inspect-claim-btn in footer when support probability is null", () => {
+    sidebar.closeEvidencePopover();
+
+    const pill = createMockElement("span");
+    pill.className = "citation-pill";
+    pill.setAttribute("data-citation-occ", "1");
+
+    const wrapper = createMockElement("div");
+    wrapper.className = "message-wrapper";
+    wrapper._metadata = {
+      citation_verification: {
+        assessments: [],
+      },
+    };
+    wrapper.appendChild(pill);
+    document.body.appendChild(wrapper);
+
+    const citation = {
+      index: 3,
+      title: "Unverified Source Paper",
+      support_probability: null,
+      quote: "Some quote text without probability.",
+      section: "Background",
+    };
+
+    let openedMeta = null;
+    let openedOptions = null;
+    const origOpen = window.openClaimsInspectorWindow;
+    window.openClaimsInspectorWindow = (meta, options) => {
+      openedMeta = meta;
+      openedOptions = options;
+    };
+
+    try {
+      sidebar.showEvidencePopover(pill, citation);
+      const popover = document.body.querySelector(".evidence-popover");
+      assert.ok(popover, "Evidence popover must be rendered");
+
+      const highOrLow = popover.querySelector(".evidence-support-badge.high, .evidence-support-badge.low, .evidence-support-badge.moderate");
+      assert.strictEqual(highOrLow, null, "No probability badge should be rendered");
+
+      // Badges row should NOT contain inspect button
+      const badgesRow = popover.querySelector(".evidence-popover-badges-row");
+      assert.ok(badgesRow, "Badges row must be rendered (section badge present)");
+      assert.strictEqual(badgesRow.querySelector(".popover-inspect-claim-btn"), null, "badgesRow must NOT contain inspect button");
+      assert.strictEqual(badgesRow.querySelector(".inspect-claim-badge"), null, "badgesRow must NOT contain inspect claim badge");
+
+      // Footer action buttons
+      const footer = popover.querySelector(".evidence-popover-footer");
+      assert.ok(footer, "Evidence popover footer must be rendered");
+      const inspectBtn = footer.querySelector(".popover-inspect-claim-btn");
+      assert.ok(inspectBtn, "Inspect claim button must be rendered in footer");
+      assert.strictEqual(inspectBtn.textContent, "🛡️ Inspect Claim");
+
+      // Click inspect button in footer
+      inspectBtn.dispatchEvent("click");
+      assert.strictEqual(openedOptions?.targetChunkIndex, 3, "Must pass targetChunkIndex = 3");
+      assert.strictEqual(openedOptions?.targetOccurrence, 1, "Must pass targetOccurrence = 1");
+      assert.strictEqual(document.body.querySelector(".evidence-popover"), null, "Popover must close on inspect button click");
+    } finally {
+      window.openClaimsInspectorWindow = origOpen;
+      sidebar.closeEvidencePopover();
+      wrapper.remove();
+    }
+  });
+
+  // 40. showEvidencePopover: renders highlighted spans and attr-active badge when sentence attribution is cached
+  test("showEvidencePopover: renders highlighted spans and attr-active badge when sentence attribution is cached", () => {
+    sidebar.closeEvidencePopover();
+
+    const pill = createMockElement("span");
+    pill.className = "citation-pill";
+    pill.setAttribute("data-citation-occ", "1");
+
+    const wrapper = createMockElement("div");
+    wrapper.className = "message-wrapper";
+
+    const cachedAttr = {
+      status: "ok",
+      spans: [
+        "First background statement.",
+        "Second pivotal supporting finding.",
+        "Third concluding remark.",
+      ],
+      supporting_indices: [2],
+    };
+
+    wrapper._metadata = {
+      citation_verification: {
+        assessments: [
+          {
+            chunk_index: 1,
+            occurrence: 1,
+            sentence_attribution: cachedAttr,
+          },
+        ],
+      },
+    };
+    wrapper.appendChild(pill);
+    document.body.appendChild(wrapper);
+
+    const citation = {
+      index: 1,
+      title: "Attributed Paper",
+      quote: "First background statement. Second pivotal supporting finding. Third concluding remark.",
+      section: "Results",
+      support_probability: 0.95,
+    };
+
+    try {
+      sidebar.showEvidencePopover(pill, citation);
+      const popover = document.body.querySelector(".evidence-popover");
+      assert.ok(popover, "Popover must be present");
+
+      // Verify .evidence-support-badge.attr-active badge in badges row
+      const attrBadge = popover.querySelector(".evidence-support-badge.attr-active");
+      assert.ok(attrBadge, "Attribution active badge must be rendered in badgesRow");
+      assert.strictEqual(attrBadge.textContent, "Sentence Attribution");
+
+      // Verify highlighted quote body
+      const quoteEl = popover.querySelector(".evidence-popover-quote");
+      assert.ok(quoteEl, "Quote element must be present");
+
+      const highlightedSpan = quoteEl.querySelector(".sentence-attr-highlight");
+      assert.ok(highlightedSpan, "Supporting sentence must be wrapped in .sentence-attr-highlight");
+      assert.strictEqual(highlightedSpan.textContent, "Second pivotal supporting finding.");
+
+      assert.ok(quoteEl.textContent.includes("First background statement."));
+      assert.ok(!quoteEl.innerHTML.includes('<span class="sentence-attr-highlight">First background statement.</span>'));
+      assert.ok(quoteEl.textContent.includes("Third concluding remark."));
+      assert.ok(!quoteEl.innerHTML.includes('<span class="sentence-attr-highlight">Third concluding remark.</span>'));
+    } finally {
+      sidebar.closeEvidencePopover();
+      wrapper.remove();
     }
   });
 }

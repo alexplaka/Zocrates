@@ -146,6 +146,22 @@ For high-accuracy mathematical formula transcription, dense two-column academic 
 5. **Quality & Checkpoint Persistence**:
    - `parse_quality_score` (0.0 to 5.0) and `checkpoint_id` (UUID) are stamped into OKF-0.2 frontmatter `provenance` and persisted in `conversion_meta.db`.
 
+### 3.6. Attachment-Free & Abstract-Only Item Materialization (`materialize_item_metadata_bundle`)
+
+Items in Zotero lacking file attachments (PDF/HTML) or child notes—such as papers imported via DOI, BibTeX, Crossref, OpenAlex, or browser translators—are materialized into first-class OKF v0.2 bundles directly:
+
+1. **Deterministic Bundle Structure**:
+   - Stored at `corpus/<parent_item_key>/` with `document.md`, `toc.json`, `toc.md`, `index.md`, and `item_relations.md`.
+   - Frontmatter specifies `content_type: "text/zotero-metadata"`, `converter_id: "zotero_metadata"`, `source_path: "zotero://item/<parent_item_key>"`, and `parent_item_key: null`.
+2. **Abstract Sanitization & Overview Callout Isolation**:
+   - Ingests `abstract` and strips JATS XML tags (`<jats:p>`, `<jats:title>`, `<jats:italic>`, etc.), converts raw markdown headings to bold text to preserve document hierarchy, and strips YAML code blocks.
+   - An explanatory note (`> **Notice**: This Zotero entry does not have an attached full-text document...`) is placed under `## Document Overview` outside `## Abstract`, shielding vector embeddings from boilerplate token pollution while informing agents and users.
+3. **Title Cascading Fallbacks**:
+   - Cascades `title` -> `doi` -> `url` -> `f"Untitled Item ({key})"`.
+4. **Centralized Post-Ingest PDF Supersession**:
+   - When a PDF attachment is subsequently added and converted, `supersede_metadata_bundle_if_needed(parent_key)` purges the parent's `text/zotero-metadata` bundle (`delete_cached` + `delete_document`).
+   - Executes strictly **post-ingest** across all conversion pathways (`_ingest_item`, `convert_item`, `batch_convert`, `_ingest_standalone_attachment`) only after the child PDF attachment is successfully indexed, guaranteeing zero downtime.
+
 ---
 
 ## 4. Single-Version Bundle Layout & Catalog Generation
