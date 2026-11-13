@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Zocrates",
-  "version": "0.92.1",
+  "version": "0.93.0",
   "description": "Agentic research assistant plugin for Zotero.",
   "author": "Alex Plakantonakis",
   "icons": {
