@@ -2927,7 +2927,7 @@ function renderOnboardingWizardCard() {
   const aiSection = el(wizard, "div", "onboarding-section");
   el(aiSection, "div", "onboarding-section-title", "AI Engine");
   el(aiSection, "div", "onboarding-helper",
-    "OpenRouter is the default engine. An API key is required even for :free models. Choose Ollama/vLLM/OpenAI-compatible to run a local server instead (its base URL is needed then).");
+    "OpenRouter is the default engine. An API key is required even for :free models. Choose Ollama/vLLM/OpenAI-compatible to run a local server instead (default base URLs are used if left blank).");
   const providerField = labeledField(aiSection, "Provider");
   const providerSelect = el(providerField, "select", "onboarding-select");
   for (const [val, label] of [
@@ -2940,9 +2940,29 @@ function renderOnboardingWizardCard() {
     opt.value = val;
   }
   providerSelect.addEventListener("change", () => {
-    if (w.baseUrlRow) w.baseUrlRow.style.display = providerSelect.value === "openrouter_llm" ? "none" : "flex";
+    const prev = w.prevProvider || "openrouter_llm";
+    const curr = providerSelect.value;
+    const isLocal = curr === "ollama" || curr === "vllm" || curr === "openai_compatible";
+    const wasOpenRouter = prev === "openrouter_llm";
+
+    if (wasOpenRouter && isLocal) {
+      const val = (w.modelInput && typeof w.modelInput.value === "string") ? w.modelInput.value.trim() : "";
+      if (val.includes("openrouter") || val.includes("nvidia")) {
+        if (w.modelInput) w.modelInput.value = "";
+      }
+    } else if (curr === "openrouter_llm" && prev !== "openrouter_llm") {
+      const val = (w.modelInput && typeof w.modelInput.value === "string") ? w.modelInput.value.trim() : "";
+      if (!val || val === "gemma4:12b") {
+        if (w.modelInput) {
+          w.modelInput.value = (ONBOARDING_PRESETS && ONBOARDING_PRESETS.recommended && ONBOARDING_PRESETS.recommended.fields.model) || "openrouter/~z-ai/glm-flash-latest";
+        }
+      }
+    }
+    w.prevProvider = curr;
+    syncOnboardingAiEngineUi(w);
   });
   w.providerSelect = providerSelect;
+  w.prevProvider = providerSelect.value;
 
   const modelField = labeledField(aiSection, "Main model",
     "Model slug sent to the provider (OpenRouter presets use openrouter-prefixed slugs; local providers take their own model names).");
@@ -2951,7 +2971,7 @@ function renderOnboardingWizardCard() {
   modelInput.placeholder = "openrouter/~z-ai/glm-flash-latest";
   w.modelInput = modelInput;
 
-  const baseUrlRow = labeledField(aiSection, "Base URL",
+  const baseUrlRow = labeledField(aiSection, "Base URL (optional)",
     "e.g. http://localhost:11434 for Ollama.");
   const baseUrlInput = el(baseUrlRow, "input", "onboarding-input");
   baseUrlInput.type = "text";
@@ -2959,6 +2979,7 @@ function renderOnboardingWizardCard() {
   baseUrlRow.style.display = "none";
   w.baseUrlRow = baseUrlRow;
   w.baseUrlInput = baseUrlInput;
+  w.baseUrlHelper = baseUrlRow.querySelector("div.onboarding-helper");
 
   const keyField = labeledField(aiSection, "OpenRouter API key");
   const keyHelper = el(keyField, "div", "onboarding-helper");
@@ -3136,6 +3157,42 @@ function renderOnboardingWizardCard() {
   loadOnboardingWizardDefaults(w);
 }
 
+function syncOnboardingAiEngineUi(w) {
+  w = w || _onboardingWizardRefs;
+  if (!w || !w.providerSelect) return;
+  const provider = w.providerSelect.value;
+  const isLocal = provider === "ollama" || provider === "vllm" || provider === "openai_compatible";
+  if (isLocal) {
+    if (w.baseUrlRow) w.baseUrlRow.style.display = "flex";
+    if (w.modelInput) w.modelInput.placeholder = "gemma4:12b";
+    if (provider === "ollama") {
+      if (w.baseUrlInput) w.baseUrlInput.placeholder = "http://localhost:11434";
+      if (w.baseUrlHelper) {
+        w.baseUrlHelper.textContent = "Optional — leave blank for default (http://localhost:11434). Only change if running on a custom port or remote host.";
+      }
+    } else if (provider === "vllm") {
+      if (w.baseUrlInput) w.baseUrlInput.placeholder = "http://localhost:8000/v1";
+      if (w.baseUrlHelper) {
+        w.baseUrlHelper.textContent = "Optional — leave blank for default (http://localhost:8000/v1). Only change if running on a custom port or remote host.";
+      }
+    } else if (provider === "openai_compatible") {
+      if (w.baseUrlInput) w.baseUrlInput.placeholder = "http://localhost:8000/v1";
+      if (w.baseUrlHelper) {
+        w.baseUrlHelper.textContent = "Optional — leave blank for default (http://localhost:8000/v1), or specify your server endpoint (e.g. http://localhost:1234/v1 for LM Studio).";
+      }
+    }
+  } else if (provider === "openrouter_llm") {
+    if (w.baseUrlRow) w.baseUrlRow.style.display = "none";
+    if (w.modelInput) {
+      if (w.activePresetKey === "free") {
+        w.modelInput.placeholder = "nvidia/nemotron-3.5-lightning:free";
+      } else {
+        w.modelInput.placeholder = "openrouter/~z-ai/glm-flash-latest";
+      }
+    }
+  }
+}
+
 function applyOnboardingPreset(key) {
   const mapping = mapPresetToWizardFields(key);
   const w = _onboardingWizardRefs;
@@ -3144,7 +3201,10 @@ function applyOnboardingPreset(key) {
   for (const cardBtn of w.presetCards || []) {
     cardBtn.classList.toggle("selected", cardBtn.dataset.presetKey === key);
   }
-  if (w.providerSelect) w.providerSelect.value = mapping.provider;
+  if (w.providerSelect) {
+    w.providerSelect.value = mapping.provider;
+    w.prevProvider = mapping.provider;
+  }
   if (w.modelInput) w.modelInput.value = mapping.model || "";
   if (w.baseUrlRow) w.baseUrlRow.style.display = mapping.baseUrlVisible ? "flex" : "none";
   if (mapping.embedMode === "cloud") {
@@ -3170,6 +3230,7 @@ function applyOnboardingPreset(key) {
       w.presetWarning.style.display = "none";
     }
   }
+  syncOnboardingAiEngineUi(w);
 }
 
 function setOnboardingStatus(node, text, isFail) {
@@ -15396,6 +15457,8 @@ if (typeof module !== "undefined" && module.exports) {
     subscribeOnboardingStageBus,
     enterOnboardingConfigure,
     enterOnboardingProcess,
+    applyOnboardingPreset,
+    syncOnboardingAiEngineUi,
     testOnboardingConnection,
     readOnboardingSyncStream,
     finalizeFollowerAbortFallback: _finalizeFollowerAbortFallback,

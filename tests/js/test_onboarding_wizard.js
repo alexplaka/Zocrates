@@ -1261,10 +1261,23 @@ async function runTests() {
 
       assert.strictEqual(w.activePresetKey, "offline");
       assert.strictEqual(w.providerSelect.value, "ollama");
+      assert.strictEqual(w.modelInput.placeholder, "gemma4:12b");
+      assert.strictEqual(w.baseUrlRow.style.display, "flex");
       assert.strictEqual(offlineBtn.classList.contains("selected"), true, "offline preset button must be selected");
 
       const recBtn = w.presetCards.find((btn) => btn.dataset.presetKey === "recommended");
+      assert.ok(recBtn, "recommended preset button must exist");
       assert.strictEqual(recBtn.classList.contains("selected"), false, "recommended preset button must no longer be selected");
+
+      recBtn.dispatchEvent("click");
+      assert.strictEqual(w.activePresetKey, "recommended");
+      assert.strictEqual(w.modelInput.placeholder, "openrouter/~z-ai/glm-flash-latest");
+      assert.strictEqual(w.baseUrlRow.style.display, "none");
+
+      w.providerSelect.value = "vllm";
+      w.providerSelect.dispatchEvent("change");
+      assert.strictEqual(w.modelInput.placeholder, "gemma4:12b");
+      assert.strictEqual(w.baseUrlInput.placeholder, "http://localhost:8000/v1");
 
       // Still exactly 1 card in the DOM
       assert.strictEqual(onboardingHost.children.length, 1, "#onboarding-container must still contain only 1 card after preset click");
@@ -1340,6 +1353,127 @@ async function runTests() {
       }
       global.IOUtils = prevIO;
       sidebar.setSessions(prevSessions);
+      sidebar.setIsDetached(prevIsDetached);
+      sidebar.setCurrentSessionId(prevSid);
+      sidebar.setOnboardingStage("ready");
+      sidebar.cleanupOnboardingResources();
+    }
+  });
+
+  test("sidebar: onboarding wizard AI engine UI synchronization (presets, placeholders, base URL)", () => {
+    const onboardingHost = env.document.getElementById("onboarding-container");
+    const prevIsDetached = sidebar.getIsDetached();
+    const prevSid = sidebar.getCurrentSessionId();
+
+    try {
+      while (onboardingHost.firstChild) {
+        onboardingHost.removeChild(onboardingHost.firstChild);
+      }
+      arrangeDataDir();
+      bootstrap.initOnboardingStageBus(env.zotero);
+
+      sidebar.setIsDetached(false);
+      sidebar.setCurrentSessionId("");
+      sidebar.setOnboardingStatePending(false);
+      env.zotero.Zocrates._backendReady = true;
+
+      sidebar.setOnboardingStage("configure");
+      sidebar.enterOnboardingConfigure();
+
+      const w = sidebar.getOnboardingWizardRefs();
+      assert.ok(w, "wizard refs must be defined");
+      assert.ok(w.baseUrlHelper, "baseUrlHelper must be stored on wizard refs");
+
+      // Base URL label must include (optional)
+      const baseUrlLabel = w.baseUrlRow.querySelector("span.onboarding-field-label");
+      assert.ok(baseUrlLabel, "Base URL field label must exist");
+      assert.strictEqual(baseUrlLabel.textContent, "Base URL (optional)");
+
+      // 1. Recommended preset is pre-selected by default
+      assert.strictEqual(w.activePresetKey, "recommended");
+      assert.strictEqual(w.providerSelect.value, "openrouter_llm");
+      assert.strictEqual(w.modelInput.placeholder, "openrouter/~z-ai/glm-flash-latest");
+      assert.strictEqual(w.baseUrlRow.style.display, "none");
+      assert.strictEqual(w.modelInput.value, "openrouter/~z-ai/glm-flash-latest");
+
+      // 2. Select offline preset
+      sidebar.applyOnboardingPreset("offline");
+      assert.strictEqual(w.activePresetKey, "offline");
+      assert.strictEqual(w.providerSelect.value, "ollama");
+      assert.strictEqual(w.modelInput.placeholder, "gemma4:12b");
+      assert.strictEqual(w.baseUrlRow.style.display, "flex");
+      assert.strictEqual(w.baseUrlInput.placeholder, "http://localhost:11434");
+      assert.strictEqual(
+        w.baseUrlHelper.textContent,
+        "Optional — leave blank for default (http://localhost:11434). Only change if running on a custom port or remote host."
+      );
+      assert.strictEqual(w.modelInput.value, "");
+
+      // 3. Switch back to recommended preset
+      sidebar.applyOnboardingPreset("recommended");
+      assert.strictEqual(w.activePresetKey, "recommended");
+      assert.strictEqual(w.providerSelect.value, "openrouter_llm");
+      assert.strictEqual(w.modelInput.placeholder, "openrouter/~z-ai/glm-flash-latest");
+      assert.strictEqual(w.baseUrlRow.style.display, "none");
+      assert.strictEqual(w.modelInput.value, "openrouter/~z-ai/glm-flash-latest");
+
+      // 4. Change providerSelect to "vllm" (switching from openrouter_llm to local clears default slug)
+      w.providerSelect.value = "vllm";
+      w.providerSelect.dispatchEvent("change");
+      assert.strictEqual(w.modelInput.placeholder, "gemma4:12b");
+      assert.strictEqual(w.baseUrlInput.placeholder, "http://localhost:8000/v1");
+      assert.strictEqual(w.baseUrlRow.style.display, "flex");
+      assert.strictEqual(
+        w.baseUrlHelper.textContent,
+        "Optional — leave blank for default (http://localhost:8000/v1). Only change if running on a custom port or remote host."
+      );
+      assert.strictEqual(w.modelInput.value, "", "openrouter slug cleared so local ghost text shows through");
+
+      // 5. Change providerSelect to "openai_compatible"
+      w.providerSelect.value = "openai_compatible";
+      w.providerSelect.dispatchEvent("change");
+      assert.strictEqual(w.modelInput.placeholder, "gemma4:12b");
+      assert.strictEqual(w.baseUrlInput.placeholder, "http://localhost:8000/v1");
+      assert.strictEqual(w.baseUrlRow.style.display, "flex");
+      assert.strictEqual(
+        w.baseUrlHelper.textContent,
+        "Optional — leave blank for default (http://localhost:8000/v1), or specify your server endpoint (e.g. http://localhost:1234/v1 for LM Studio)."
+      );
+
+      // 6. Switching back to openrouter_llm when modelInput is empty restores recommended model
+      w.providerSelect.value = "openrouter_llm";
+      w.providerSelect.dispatchEvent("change");
+      assert.strictEqual(w.modelInput.placeholder, "openrouter/~z-ai/glm-flash-latest");
+      assert.strictEqual(w.baseUrlRow.style.display, "none");
+      assert.strictEqual(w.modelInput.value, "openrouter/~z-ai/glm-flash-latest");
+
+      // 7. Switching to local, typing "gemma4:12b", then switching back restores recommended slug
+      w.providerSelect.value = "ollama";
+      w.providerSelect.dispatchEvent("change");
+      w.modelInput.value = "gemma4:12b";
+      w.providerSelect.value = "openrouter_llm";
+      w.providerSelect.dispatchEvent("change");
+      assert.strictEqual(w.modelInput.value, "openrouter/~z-ai/glm-flash-latest");
+
+      // 8. Free preset updates placeholder to nvidia free model and hides base URL row
+      sidebar.applyOnboardingPreset("free");
+      assert.strictEqual(w.activePresetKey, "free");
+      assert.strictEqual(w.modelInput.placeholder, "nvidia/nemotron-3.5-lightning:free");
+      assert.strictEqual(w.baseUrlRow.style.display, "none");
+      assert.strictEqual(w.modelInput.value, "nvidia/nemotron-3.5-lightning:free");
+
+      // 9. From free preset, switching to local clears nvidia default slug
+      w.providerSelect.value = "ollama";
+      w.providerSelect.dispatchEvent("change");
+      assert.strictEqual(w.modelInput.value, "", "nvidia slug cleared so local ghost text shows through");
+      assert.strictEqual(w.modelInput.placeholder, "gemma4:12b");
+    } finally {
+      while (onboardingHost.firstChild) {
+        onboardingHost.removeChild(onboardingHost.firstChild);
+      }
+      if (env.zotero.Zocrates && env.zotero.Zocrates._onboardingStageSubscribers) {
+        env.zotero.Zocrates._onboardingStageSubscribers.clear();
+      }
       sidebar.setIsDetached(prevIsDetached);
       sidebar.setCurrentSessionId(prevSid);
       sidebar.setOnboardingStage("ready");
