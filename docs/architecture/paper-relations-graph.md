@@ -85,7 +85,9 @@ Where $\text{min\_score} = 0.015$ and $\tau = 0.10$, clamped strictly to $[0.50,
 The engine extracts explicit relationships directly from Zotero's local SQLite database:
 
 1. `human_curated`: Explicit related items defined in Zotero's `itemRelations` table (`dc:relation`, `dc:replaces`). Weight: $1.0$.
-2. `shared_tags`: Distinctive user tags shared across items in `itemTags` (filtering out generic tags like `read`, `todo`, `pdf`). Weight: normalized Jaccard similarity in $[0.50, 0.85]$.
+2. `shared_tags`: Distinctive tags shared across items in `itemTags`, supporting both manual user tags (`type = 0`) and automatic/imported subject tags (`type = 1`) governed by the `include_automatic_tags_in_shared_tags` setting (default `True`). Weight: normalized Jaccard similarity in $[0.50, 0.85]$.
+   * **Document Frequency (DF) Noise Cap**: To prevent broad medical, biological, or domain-wide subject headings (present across large swaths of a library) from forming dense, uninformative cliques, tags exceeding a 5% Document Frequency cap ($\text{cap} = \max(5, \lfloor 0.05 \times N \rfloor)$) are automatically excluded.
+   * **Parent-Paper Entity Normalization**: Tags and document frequencies are computed strictly across unique parent papers. Child notes and secondary attachments are mapped to their parent paper, preventing self-parent edges, sibling attachment loops, and artificial tag DF inflation.
 
 When multiple relationship sources connect the same paper pair, edges are coalesced under strict display precedence:
 
@@ -94,6 +96,11 @@ $$\text{human\_curated\_and\_hybrid\_search (Rank 4)} > \text{human\_curated (Ra
 All edges are symmetrized as undirected relationships ($A \leftrightarrow B$) with canonical max score:
 
 $$\text{score}_{AB} = \max(\text{score}_{A \to B}, \text{score}_{B \to A})$$
+
+### 2.6 Attachment-Free & Abstract-Less Item Integration
+Items lacking full-text attachments (materialized as `text/zotero-metadata` bundles) participate fully in graph construction:
+* **Abstract-Bearing Metadata Items**: Items with an abstract are indexed into ChromaDB and FTS5, participating in evidence-gated hybrid retrieval, manual relations, and shared tags.
+* **Abstract-Less Metadata Items**: Items lacking an abstract bypass dense/BM25 hybrid query execution (preventing spurious single-sentence or title-only vector collisions) while participating in manual relations and shared tag matching. If unconnected, they appear predictably as perimeter orphan nodes rather than being omitted from the visualization.
 
 ---
 

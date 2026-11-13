@@ -137,6 +137,23 @@ corpus/<note_key>/
 * **Strictly Non-LLM Summaries**: Notes follow a zero-LLM summarization policy. Notes with fewer than 100 plain-text words skip summary generation (`abstract = None`). Notes with ≥ 100 words use a deterministic extractive lead-paragraph method (`abstract_source = "extractive"`) taking the first non-heading paragraph up to 300 characters (<5ms, zero API cost).
 * **Staleness Tracking & On-Demand Materialization**: If an agent requests `get_document_toc` or `read_document` for a note that is not yet bundled, `_resolve_bundle_dir` materializes the bundle dynamically. The SHA-256 hash of raw note HTML is recorded as `source_hash` in `conversion_meta.db`. If the hash diverges, the bundle refreshes atomically.
 
+### Attachment-Free Metadata OKF Bundles
+
+Items in Zotero lacking file attachments (PDF/HTML) or child notes—such as papers imported via DOI, BibTeX, Crossref, OpenAlex, or browser translators—are materialized as first-class OKF bundles:
+
+```
+corpus/<parent_item_key>/
+  ├── document.md       # YAML frontmatter + abstract + isolated overview notice
+  ├── toc.json          # Line-offset boundaries and section boundaries
+  ├── toc.md            # Human/agent readable Table of Contents
+  ├── item_relations.md # Related paper links (0 bytes if unconnected)
+  └── index.md          # Metadata asset catalog
+```
+
+* **Virtual Source Paths**: Frontmatter and SQLite metadata record `source_path = "zotero://item/<parent_item_key>"` and `content_type = "text/zotero-metadata"`, seamlessly bypassed by disk file converters while participating fully in catalog generation, graph relations, and vector retrieval.
+* **Abstract Sanitization & Callout Isolation**: JATS XML tags (`<jats:*>`) are cleanly stripped, raw markdown headings in abstracts are converted to bold text to preserve outline hierarchy, and user-facing notices (`> **Notice**: This Zotero entry does not have an attached full-text document...`) are isolated under `## Document Overview` outside `## Abstract` to shield vector embeddings from boilerplate tokens.
+* **Post-Ingest PDF Supersession**: When a user later attaches a PDF to an existing metadata-only paper, the parent metadata bundle is purged across disk, SQLite metadata, and vector datastores strictly *after* the child attachment is successfully converted and indexed.
+
 ---
 
 ## 4. Agent Navigation Protocol & Discovery
@@ -235,7 +252,7 @@ Vector search alone cannot reliably reconstruct entire multi-step derivations or
 
 ## 6. Bundle Mutation Lifecycle & Master Inventory
 
-All write operations inside `corpus/<key>/` are governed by **12 distinct write paths**:
+All write operations inside `corpus/<key>/` are governed by **13 distinct write paths**:
 
 | # | Writer Path | Trigger Condition & Frequency | Source Location | Files Touched | Mechanism & Lifecycle | Risk / Invariant Guardrail |
 |---|-------------|-------------------------------|-----------------|---------------|-----------------------|----------------------------|
@@ -251,6 +268,7 @@ All write operations inside `corpus/<key>/` are governed by **12 distinct write 
 | **10** | **Lazy ToC Backfill** | **Trigger**: Agent ToC request on unindexed bundle.<br>**When**: Dialogue agent calls `get_document_toc()` or `search_corpus()` on an existing bundle where `toc.json` has not been generated yet. | `zocrates.rag.library_syncer`, `zocrates.agents.common.toolkit` | `toc.json`<br>`toc.md`<br>`index.md` | On-demand generation triggered when dialogue agent requests ToC of a bundle missing ToC files | Uses shared `toc_generator` and `generate_item_index_md` routines to maintain layout parity. |
 | **11** | **Maintenance CLI Sweeps** | **Trigger**: Manual operator invocation.<br>**When**: Developer runs CLI scripts in terminal (`scripts/refresh_frontmatter.py`). | `scripts/refresh_frontmatter.py`, `scripts/refresh_toc.py` | `document.md`<br>`toc.json`, `toc.md`<br>`index.md` | Standalone CLI maintenance utilities | Delegate directly to paths **6** and **8**; inherit all safety guardrails. |
 | **12** | **Real-Time Deletion Purge** | **Trigger**: Real-time event observer.<br>**When**: `autoConverter.js` detects `event === 'trash'` or `event === 'delete'` via `Zotero.Notifier` observer, firing `POST /items/delete`. | `zocrates.rag.library_syncer` (`purge_item`), `zocrates.fast_api_app` (`delete_items`) | Entire bundle directory, `conversion_meta.db`, vector store, root index | Immediate atomic purge across all four datastores upon item trashing or deletion in Zotero UI | Enforce 4-datastore store parity; batch-regenerate neighbor `item_relations.md`; eliminate stale point-of-use lookups. |
+| **13** | **Metadata Bundle Materialization** | **Trigger**: Ingestion or sync of attachment-free regular item.<br>**When**: `POST /items/ingest` from Scholar Import or AutoConverter, `full_sync` scan encountering an item with no file attachments or child notes, or on-demand agent fallback in `_resolve_bundle_dir`. | `zocrates.rag.document_processor` (`materialize_item_metadata_bundle`) | `document.md`<br>`toc.json`, `toc.md`<br>`index.md`<br>`item_relations.md` | Staged metadata bundle generation: writes to temp staging dir → atomic rename; registers `conversion_meta` with `content_type="text/zotero-metadata"` | Atomic directory swap; JATS XML abstract sanitization; notice callout isolation; centralized post-ingest PDF supersession when attachments are subsequently converted. |
 
 ---
 

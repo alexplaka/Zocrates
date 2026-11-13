@@ -5756,6 +5756,55 @@ function formatMessageContent(text, metadata = null, isUser = false) {
   return formatMarkdown(processed, citationPlaceholders);
 }
 
+function buildHighlightedPassage(sourceText, spans, supportingIndices) {
+  if (!sourceText || !Array.isArray(spans) || spans.length === 0) {
+    return sourceText || "";
+  }
+  const supSet = new Set((supportingIndices || []).map(Number));
+  let output = "";
+  let cursor = 0;
+
+  for (let i = 0; i < spans.length; i++) {
+    const span = spans[i];
+    if (!span || typeof span !== "string") continue;
+    const spanNum = i + 1;
+    let idx = sourceText.indexOf(span, cursor);
+    let matchLen = span.length;
+
+    if (idx === -1) {
+      const trimmed = span.trim();
+      if (trimmed) {
+        const trimIdx = sourceText.indexOf(trimmed, cursor);
+        if (trimIdx !== -1) {
+          idx = trimIdx;
+          matchLen = trimmed.length;
+        }
+      }
+    }
+
+    if (idx === -1) {
+      continue;
+    }
+
+    output += sourceText.substring(cursor, idx);
+    const matchedText = sourceText.substring(idx, idx + matchLen);
+    cursor = idx + matchLen;
+
+    if (supSet.has(spanNum)) {
+      const trimmed = matchedText.trim();
+      if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
+        output += matchedText.replace(/^(\s*\|\s*)/, "$1<span data-attr-highlight-tr=\"true\"></span>");
+      } else {
+        output += `<span class="sentence-attr-highlight">${matchedText}</span>`;
+      }
+    } else {
+      output += matchedText;
+    }
+  }
+  output += sourceText.substring(cursor);
+  return output;
+}
+
 let activeEvidencePopover = null;
 
 function closeEvidencePopover() {
@@ -5916,24 +5965,62 @@ function showEvidencePopover(pill, citation) {
     popover.appendChild(metaDiv);
   }
 
-  // 3. Badges row (Section badge & Decision Support badge)
-  let supportBadge = null;
-  const occ = parseInt(pill.getAttribute("data-citation-occ"), 10);
-  let targetProb = citation.support_probability;
-  if (Number.isFinite(occ) && Array.isArray(citation.occurrences)) {
-    const occRecord = citation.occurrences.find(o => o.occurrence === occ);
-    if (occRecord) {
-      targetProb = (occRecord.support_probability !== undefined && occRecord.support_probability !== null)
-        ? occRecord.support_probability
-        : null;
-    } else {
+  // 3. Badges row (Section badge & Decision Support badge / Inspect Claim badge & Attribution Active badge)
+  const cIdx = citation.index !== undefined ? citation.index : (citation.chunk_index || 1);
+  const occAttr = (pill && typeof pill.getAttribute === "function" && pill.getAttribute("data-citation-occ")) ||
+                  (pill && pill.dataset && pill.dataset.citationOcc) ||
+                  null;
+  const rawOcc = (occAttr ? parseInt(occAttr, 10) : 1) || 1;
+
+  let occRecord = null;
+  if (Array.isArray(citation.occurrences)) {
+    occRecord = citation.occurrences.find(o => o.occurrence === rawOcc);
+    if (!occRecord) {
       const occRecords = citation.occurrences.filter(o => o.survived !== false);
-      if (occRecords[occ - 1] && occRecords[occ - 1].support_probability !== undefined && occRecords[occ - 1].support_probability !== null) {
-        targetProb = occRecords[occ - 1].support_probability;
+      if (occRecords[rawOcc - 1]) {
+        occRecord = occRecords[rawOcc - 1];
       }
     }
   }
 
+  const resolvedOcc = (occRecord && occRecord.occurrence !== undefined && occRecord.occurrence !== null)
+    ? Number(occRecord.occurrence)
+    : rawOcc;
+
+  const wrapper = (pill && typeof pill.closest === "function") ? pill.closest(".message-wrapper") : null;
+  const meta = (pill && pill._metadata) ||
+               (wrapper?.querySelector?.(".message-bubble")?._metadata) ||
+               (wrapper?._metadata) ||
+               (wrapper?.querySelector?.(".info-btn")?._metadata) ||
+               (citation && citation._metadata) ||
+               {};
+
+  let matchingAssessment = null;
+  const assessments = Array.isArray(meta?.citation_verification?.assessments) ? meta.citation_verification.assessments : null;
+  if (assessments && assessments.length > 0) {
+    matchingAssessment = assessments.find(a => (a.chunk_index === cIdx || a.index === cIdx) && Number(a.occurrence) === resolvedOcc) ||
+                         assessments.find(a => (a.chunk_index === cIdx || a.index === cIdx) && (a.occurrence === undefined || a.occurrence === null)) ||
+                         null;
+  }
+
+  let targetProb = citation.support_probability;
+  if (occRecord) {
+    targetProb = (occRecord.support_probability !== undefined && occRecord.support_probability !== null)
+      ? occRecord.support_probability
+      : null;
+  } else if (matchingAssessment) {
+    targetProb = (matchingAssessment.support_probability !== undefined && matchingAssessment.support_probability !== null)
+      ? matchingAssessment.support_probability
+      : null;
+  }
+
+  const existingSentenceAttr = (matchingAssessment && matchingAssessment.sentence_attribution) ||
+                               (occRecord && occRecord.sentence_attribution) ||
+                               (!Array.isArray(citation.occurrences) || citation.occurrences.length <= 1 ? citation.sentence_attribution : null) ||
+                               null;
+  const hasValidSentenceAttr = !!(existingSentenceAttr && existingSentenceAttr.status === "ok" && Array.isArray(existingSentenceAttr.spans));
+
+  let supportBadge = null;
   if (targetProb !== undefined && targetProb !== null) {
     const numProb = parseFloat(targetProb);
     if (Number.isFinite(numProb) && numProb >= 0.0 && numProb <= 1.0) {
@@ -5950,11 +6037,12 @@ function showEvidencePopover(pill, citation) {
         badge.textContent = `Support Probability: ${pFormatted}`;
       }
       badge.setAttribute("title", `Calibrated support probability: ${pFormatted} (evaluated by decision model)`);
+
       supportBadge = badge;
     }
   }
 
-  if (sec || supportBadge) {
+  if (sec || supportBadge || hasValidSentenceAttr) {
     const badgesRow = document.createElementNS(XHTMLNS, "div");
     badgesRow.className = "evidence-popover-badges-row";
     if (sec) {
@@ -5967,6 +6055,13 @@ function showEvidencePopover(pill, citation) {
     if (supportBadge) {
       badgesRow.appendChild(supportBadge);
     }
+    if (hasValidSentenceAttr) {
+      const attrBadge = document.createElementNS(XHTMLNS, "div");
+      attrBadge.className = "evidence-support-badge attr-active sentence-attr-badge";
+      attrBadge.textContent = "Sentence Attribution";
+      attrBadge.setAttribute("title", "Underlined sentences in passage below support this claim");
+      badgesRow.appendChild(attrBadge);
+    }
     popover.appendChild(badgesRow);
   }
 
@@ -5976,7 +6071,16 @@ function showEvidencePopover(pill, citation) {
     bodyDiv.className = "evidence-popover-body";
     const quoteDiv = document.createElementNS(XHTMLNS, "div");
     quoteDiv.className = "evidence-popover-quote markdown-body";
-    quoteDiv.innerHTML = formatMarkdown(quote);
+    let quoteToRender = quote;
+    if (hasValidSentenceAttr) {
+      quoteToRender = buildHighlightedPassage(quote, existingSentenceAttr.spans, existingSentenceAttr.supporting_indices || []);
+    }
+    quoteDiv.innerHTML = formatMarkdown(quoteToRender);
+    quoteDiv.querySelectorAll("span[data-attr-highlight-tr]").forEach(marker => {
+      const trEl = marker.closest("tr");
+      if (trEl) trEl.classList.add("sentence-attr-highlight");
+      marker.remove();
+    });
     bodyDiv.appendChild(quoteDiv);
     popover.appendChild(bodyDiv);
   }
@@ -5984,6 +6088,22 @@ function showEvidencePopover(pill, citation) {
   // 5. Footer action buttons
   const footerDiv = document.createElementNS(XHTMLNS, "div");
   footerDiv.className = "evidence-popover-footer";
+
+  const inspectBtn = document.createElementNS(XHTMLNS, "button");
+  inspectBtn.className = "evidence-popover-btn popover-inspect-claim-btn";
+  inspectBtn.setAttribute("type", "button");
+  inspectBtn.setAttribute("title", "Inspect claim in Claim Verification Inspector");
+  inspectBtn.textContent = "🛡️ Inspect Claim";
+  inspectBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    closeEvidencePopover();
+    const openFn = (typeof window !== "undefined" && typeof window.openClaimsInspectorWindow === "function")
+      ? window.openClaimsInspectorWindow
+      : openClaimsInspectorWindow;
+    openFn(meta, { targetChunkIndex: cIdx, targetOccurrence: resolvedOcc });
+  });
+  footerDiv.appendChild(inspectBtn);
 
   const hasOpenableAttachment = checkItemHasAttachment(citation);
   if (attKey && hasOpenableAttachment) {
@@ -5994,7 +6114,7 @@ function showEvidencePopover(pill, citation) {
       readerBtn.setAttribute("data-section", sec);
     }
     readerBtn.setAttribute("type", "button");
-    readerBtn.textContent = "Open in Reader";
+    readerBtn.textContent = "📖 Open in Reader";
     footerDiv.appendChild(readerBtn);
   }
 
@@ -6004,7 +6124,7 @@ function showEvidencePopover(pill, citation) {
     selectBtn.className = "evidence-popover-btn popover-select-item-btn";
     selectBtn.setAttribute("data-item-key", effectiveItemKey);
     selectBtn.setAttribute("type", "button");
-    selectBtn.textContent = "Select in Library";
+    selectBtn.textContent = "📁 Select in Library";
     footerDiv.appendChild(selectBtn);
   }
 
@@ -8059,10 +8179,16 @@ function buildClaimsInspectorData(meta) {
 /**
  * Opens the standalone Claim Verification Inspector dialog window.
  */
-function openClaimsInspectorWindow(meta = {}) {
+function openClaimsInspectorWindow(meta = {}, options = {}) {
   const payload = buildClaimsInspectorData(meta);
   payload.theme = (typeof document !== "undefined" && document.body?.getAttribute?.("data-theme")) || payload.theme || "slate";
   payload._sidebarWindow = window;
+
+  if (options && typeof options === "object") {
+    if (options.targetChunkIndex !== undefined) payload.targetChunkIndex = options.targetChunkIndex;
+    if (options.targetOccurrence !== undefined) payload.targetOccurrence = options.targetOccurrence;
+    if (options.targetClaimIndex !== undefined) payload.targetClaimIndex = options.targetClaimIndex;
+  }
 
   if (typeof Zotero !== "undefined" && Zotero.Zocrates) {
     Zotero.Zocrates._sidebarWindow = window;
@@ -8108,6 +8234,7 @@ function openClaimsInspectorWindow(meta = {}) {
       );
       if (win) {
         win.updateClaimsData?.(payload);
+        win.highlightAndScrollToClaim?.(options?.targetChunkIndex, options?.targetOccurrence, options?.targetClaimIndex);
         win.focus?.();
         return;
       }
@@ -10868,6 +10995,7 @@ function applyTheme() {
     appliedTheme = "sepia";
   }
   
+  document.documentElement.setAttribute("data-theme", appliedTheme);
   document.body.setAttribute("data-theme", appliedTheme);
 
 
@@ -15120,6 +15248,7 @@ if (typeof window !== "undefined") {
   window.ensureClaimsInspectorBtn = ensureClaimsInspectorBtn;
   window.selectItemInLibrary = selectItemInLibrary;
   window.openItemInReader = openItemInReader;
+  window.buildHighlightedPassage = buildHighlightedPassage;
   try {
     Object.defineProperty(window, "sessions", {
       get: () => sessions,
@@ -15139,6 +15268,7 @@ if (typeof module !== "undefined" && module.exports) {
     createClaimsInspectorBtn,
     ensureClaimsInspectorBtn,
     selectItemInLibrary,
+    buildHighlightedPassage,
     sanitizeHTML,
     isSafeUrl,
     isSafeLinkUrl,
