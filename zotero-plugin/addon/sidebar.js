@@ -6486,7 +6486,7 @@ function showEvidencePopover(pill, citation) {
   inspectBtn.className = "evidence-popover-btn popover-inspect-claim-btn";
   inspectBtn.setAttribute("type", "button");
   inspectBtn.setAttribute("title", "Inspect claim in Claim Verification Inspector");
-  inspectBtn.innerHTML = `<svg class="claims-inspector-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="currentColor" d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg><span class="claims-inspector-label">Inspect Claim</span>`;
+  inspectBtn.innerHTML = `<span class="claims-inspector-label"><svg class="claims-inspector-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="currentColor" d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg>Inspect Claim</span>`;
   inspectBtn.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
