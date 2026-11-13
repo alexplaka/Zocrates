@@ -1565,6 +1565,91 @@ async function runTests() {
 
     if (card) card.remove();
   });
+
+  await testAsync("sidebar: uv missing error renders prerequisite card with code block, copy button, docUrl link, Check & Continue button, and polls isUvAvailable", async () => {
+    const existing = global.document.getElementById("bootstrap-progress-card");
+    if (existing) existing.remove();
+
+    const docUrl = "https://docs.astral.sh/uv/getting-started/installation/";
+    const installCmd = "curl -LsSf https://astral.sh/uv/install.sh | sh";
+    sidebar.handleBootstrapProgressEvent({
+      state: "error",
+      stepKey: "error",
+      detail: {
+        state: "error",
+        code: "UV_MISSING",
+        uvVersion: "0.13.8",
+        triple: "x86_64-unknown-linux-gnu",
+        docUrl: docUrl,
+        installCmd: installCmd,
+        message: "Failed to automatically obtain uv package manager (v0.13.8 for x86_64-unknown-linux-gnu). Please install uv manually: " + installCmd,
+      },
+    });
+
+    const card = global.document.getElementById("bootstrap-progress-card");
+    assert.ok(card !== null, "Bootstrap card must exist");
+
+    const errBox = card.querySelector("#bootstrap-card-error");
+    assert.ok(errBox !== null, "Error box must exist");
+    assert.ok(!errBox.classList.contains("hidden"), "Error box must be visible");
+
+    const msg = card.querySelector("#bootstrap-error-message");
+    assert.ok(msg !== null, "Error message container must exist");
+
+    // Title
+    const title = msg.querySelector(".uv-missing-title");
+    assert.ok(title !== null, "UV missing title element must exist");
+    assert.strictEqual(title.textContent, "uv Package Manager Required");
+
+    // Description mentions version and triple
+    const desc = msg.querySelector(".uv-missing-desc");
+    assert.ok(desc !== null, "Description must exist");
+    assert.ok(desc.textContent.includes("0.13.8"), "Description must mention pinned version 0.13.8");
+    assert.ok(desc.textContent.includes("x86_64-unknown-linux-gnu"), "Description must mention triple");
+
+    // Code block with copy button
+    const codeEl = msg.querySelector(".uv-install-code");
+    assert.ok(codeEl !== null, "Code element must exist");
+    assert.strictEqual(codeEl.textContent, installCmd);
+
+    const copyBtn = msg.querySelector(".uv-install-copy-btn");
+    assert.ok(copyBtn !== null, "Copy button must exist");
+
+    // Documentation link
+    const link = msg.querySelector("a.onboarding-link");
+    assert.ok(link !== null, "Documentation link must exist with class onboarding-link");
+    assert.strictEqual(link.href, docUrl);
+    assert.strictEqual(link.getAttribute("target"), "_blank");
+    assert.ok(link.textContent.includes("Astral uv Installation Documentation"));
+
+    // Check & Continue button
+    const retryBtn = errBox.querySelector(".bootstrap-retry-btn");
+    assert.ok(retryBtn !== null, "Retry button must exist");
+    assert.strictEqual(retryBtn.textContent, "Check & Continue", "Button text must be updated to Check & Continue");
+
+    // Next step instruction
+    const nextStep = msg.querySelector(".uv-missing-next-step");
+    assert.ok(nextStep !== null, "Next step instruction must exist");
+    assert.ok(nextStep.textContent.includes("Check & Continue"));
+
+    // Verify background polling timer is set
+    assert.ok(sidebar.getUvCheckTimer() !== null, "uvCheckTimer must be active");
+
+    // Clean up timer and card
+    if (sidebar.clearUvCheckTimer) {
+      sidebar.clearUvCheckTimer();
+    }
+    assert.strictEqual(sidebar.getUvCheckTimer(), null, "uvCheckTimer must be cleared");
+
+    sidebar.handleBootstrapProgressEvent({
+      state: "active",
+      stepKey: "preparing",
+      detail: { state: "active" },
+    });
+    assert.strictEqual(retryBtn.textContent, "Retry", "Non-error event resets retry button to Retry");
+
+    if (card) card.remove();
+  });
 }
 
 if (require.main === module) {

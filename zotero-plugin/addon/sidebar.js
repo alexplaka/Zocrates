@@ -125,6 +125,7 @@ try {
 // is false, so click and Ctrl/Cmd+Enter submits are inert during install.
 let backendReadyForChat = false;
 let vcRedistCheckTimer = null;
+let uvCheckTimer = null;
 
 // UI Elements
 const statusDot = document.getElementById("status-dot");
@@ -2112,6 +2113,10 @@ function removeBootstrapProgressCard() {
     clearInterval(vcRedistCheckTimer);
     vcRedistCheckTimer = null;
   }
+  if (uvCheckTimer) {
+    clearInterval(uvCheckTimer);
+    uvCheckTimer = null;
+  }
   // Phase 7 gate composition: while onboarding is mid-flow (CONFIGURE wizard
   // or PROCESS conversion), this routine must NOT dissolve the card nor lift
   // the chat gate — the 10s /status poll would otherwise dismiss the wizard
@@ -2143,6 +2148,10 @@ function applyBootstrapProgressStateToCard(evt) {
     if (vcRedistCheckTimer) {
       clearInterval(vcRedistCheckTimer);
       vcRedistCheckTimer = null;
+    }
+    if (uvCheckTimer) {
+      clearInterval(uvCheckTimer);
+      uvCheckTimer = null;
     }
   }
 
@@ -2186,8 +2195,18 @@ function applyBootstrapProgressStateToCard(evt) {
           (evt.detail.error || evt.detail.message || "").includes("Visual C++")
         )
       );
+      const isUvMissing = Boolean(
+        evt.detail && (
+          evt.detail.code === "UV_MISSING" ||
+          (evt.detail.error || evt.detail.message || "").includes("uv package manager")
+        )
+      );
 
       if (isVcMissing) {
+        if (uvCheckTimer) {
+          clearInterval(uvCheckTimer);
+          uvCheckTimer = null;
+        }
         if (msg) {
           msg.textContent = "";
 
@@ -2260,10 +2279,129 @@ function applyBootstrapProgressStateToCard(evt) {
             }
           }, 3000);
         }
+      } else if (isUvMissing) {
+        if (vcRedistCheckTimer) {
+          clearInterval(vcRedistCheckTimer);
+          vcRedistCheckTimer = null;
+        }
+        if (msg) {
+          msg.textContent = "";
+
+          const zot = resolveZotero();
+          const uvVersion = (evt.detail && evt.detail.uvVersion) || (zot?.Zocrates?.PINNED_UV_VERSION) || "0.13.8";
+          const triple = (evt.detail && evt.detail.triple) || "";
+          const docUrl = (evt.detail && evt.detail.docUrl) || (zot?.Zocrates?.UV_INSTALL_DOC_URL) || "https://docs.astral.sh/uv/getting-started/installation/";
+          const isWin = (typeof zot?.isWin !== "undefined")
+            ? zot.isWin
+            : (typeof navigator !== "undefined" && navigator.platform && navigator.platform.toLowerCase().includes("win"));
+          const installCmd = (evt.detail && evt.detail.installCmd) || (
+            isWin
+              ? 'powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"'
+              : "curl -LsSf https://astral.sh/uv/install.sh | sh"
+          );
+
+          const title = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+          title.className = "uv-missing-title";
+          title.textContent = "uv Package Manager Required";
+
+          const desc = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+          desc.className = "uv-missing-desc";
+          desc.textContent = "Zocrates was unable to automatically download the pinned uv package manager (v" + uvVersion + ")" + (triple ? " for your system (" + triple + ")." : ".");
+
+          const codeWrap = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+          codeWrap.className = "uv-install-code-wrap";
+
+          const codeEl = document.createElementNS("http://www.w3.org/1999/xhtml", "code");
+          codeEl.className = "uv-install-code";
+          codeEl.textContent = installCmd;
+
+          const copyBtn = document.createElementNS("http://www.w3.org/1999/xhtml", "button");
+          copyBtn.className = "uv-install-copy-btn";
+          copyBtn.title = "Copy command";
+          copyBtn.setAttribute("title", "Copy command");
+          copyBtn.innerHTML = '<svg class="copy-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg><svg class="check-icon hidden" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>';
+
+          copyBtn.addEventListener("click", async () => {
+            try {
+              await copyTextToClipboard(installCmd);
+              const copyIcon = copyBtn.querySelector(".copy-icon");
+              const checkIcon = copyBtn.querySelector(".check-icon");
+              if (copyIcon && checkIcon) {
+                copyIcon.classList.add("hidden");
+                checkIcon.classList.remove("hidden");
+                copyBtn.title = "Copied!";
+                copyBtn.setAttribute("title", "Copied!");
+                setTimeout(() => {
+                  copyIcon.classList.remove("hidden");
+                  checkIcon.classList.add("hidden");
+                  copyBtn.title = "Copy command";
+                  copyBtn.setAttribute("title", "Copy command");
+                }, 2000);
+              }
+            } catch (err) {
+              console.warn("Zocrates: failed to copy uv install command:", err);
+            }
+          });
+
+          codeWrap.appendChild(codeEl);
+          codeWrap.appendChild(copyBtn);
+
+          const linkWrap = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+          linkWrap.className = "uv-missing-link-wrap";
+          const link = document.createElementNS("http://www.w3.org/1999/xhtml", "a");
+          link.href = docUrl;
+          link.setAttribute("href", docUrl);
+          link.className = "onboarding-link";
+          link.setAttribute("class", "onboarding-link");
+          link.target = "_blank";
+          link.setAttribute("target", "_blank");
+          link.textContent = "Astral uv Installation Documentation ↗";
+          linkWrap.appendChild(link);
+
+          const nextStep = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+          nextStep.className = "uv-missing-next-step";
+          nextStep.textContent = "After installing uv, click “Check & Continue” below.";
+
+          msg.appendChild(title);
+          msg.appendChild(desc);
+          msg.appendChild(codeWrap);
+          msg.appendChild(linkWrap);
+          msg.appendChild(nextStep);
+        }
+
+        if (retryBtn) {
+          retryBtn.textContent = "Check & Continue";
+        }
+
+        if (!uvCheckTimer) {
+          uvCheckTimer = setInterval(async () => {
+            try {
+              const zot = resolveZotero();
+              if (zot?.Zocrates?.isUvAvailable) {
+                const available = await zot.Zocrates.isUvAvailable();
+                if (available) {
+                  if (uvCheckTimer) {
+                    clearInterval(uvCheckTimer);
+                    uvCheckTimer = null;
+                  }
+                  if (zot.Zocrates.retryBackendLaunch) {
+                    zot.Zocrates.retryBackendLaunch();
+                  }
+                }
+              }
+            } catch (e) {
+              console.warn("Zocrates: uv auto-detection check failed:", e);
+            }
+          }, 3000);
+        }
       } else {
         if (vcRedistCheckTimer) {
           clearInterval(vcRedistCheckTimer);
           vcRedistCheckTimer = null;
+        }
+        if (uvCheckTimer) {
+          clearInterval(uvCheckTimer);
+          uvCheckTimer = null;
         }
         if (retryBtn) {
           retryBtn.textContent = "Retry";
@@ -2278,6 +2416,10 @@ function applyBootstrapProgressStateToCard(evt) {
       if (vcRedistCheckTimer) {
         clearInterval(vcRedistCheckTimer);
         vcRedistCheckTimer = null;
+      }
+      if (uvCheckTimer) {
+        clearInterval(uvCheckTimer);
+        uvCheckTimer = null;
       }
       if (retryBtn) {
         retryBtn.textContent = "Retry";
@@ -15527,6 +15669,13 @@ if (typeof module !== "undefined" && module.exports) {
       if (vcRedistCheckTimer) {
         clearInterval(vcRedistCheckTimer);
         vcRedistCheckTimer = null;
+      }
+    },
+    getUvCheckTimer: () => uvCheckTimer,
+    clearUvCheckTimer: () => {
+      if (uvCheckTimer) {
+        clearInterval(uvCheckTimer);
+        uvCheckTimer = null;
       }
     },
     handleBootstrapProgressEvent,

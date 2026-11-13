@@ -38,12 +38,22 @@ function startup(data, reason) {
     getWindowsArchitecture,
     isVcRedistInstalledWindows,
     VC_REDIST_DOC_URL,
+    PINNED_UV_VERSION,
+    UV_INSTALL_DOC_URL,
+    isUvAvailable,
+    probeExistingUvBinary,
+    resolveUvTargetTriple,
   };
   Zotero.Zocrates._backendStatus = { status: "connecting", label: "Connecting..." };
   Zotero.Zocrates.setBackendStatus = setBackendStatus;
   Zotero.Zocrates.getWindowsArchitecture = getWindowsArchitecture;
   Zotero.Zocrates.isVcRedistInstalledWindows = isVcRedistInstalledWindows;
   Zotero.Zocrates.VC_REDIST_DOC_URL = VC_REDIST_DOC_URL;
+  Zotero.Zocrates.PINNED_UV_VERSION = PINNED_UV_VERSION;
+  Zotero.Zocrates.UV_INSTALL_DOC_URL = UV_INSTALL_DOC_URL;
+  Zotero.Zocrates.isUvAvailable = isUvAvailable;
+  Zotero.Zocrates.probeExistingUvBinary = probeExistingUvBinary;
+  Zotero.Zocrates.resolveUvTargetTriple = resolveUvTargetTriple;
 
   // Single Source of Truth for backend URL resolution. The backend binds loopback
   // only. Resolution order:
@@ -1647,31 +1657,129 @@ async function verifyUvBinary(targetPath) {
   }
 }
 
+const PINNED_UV_VERSION = "0.13.8";
+const UV_INSTALL_DOC_URL = "https://docs.astral.sh/uv/getting-started/installation/";
+const PINNED_UV_HASHES = {
+  "aarch64-apple-darwin": "6b71028a6b904f2ae3340ef52e595512de807d06c0a20eaef2f692581b246558",
+  "x86_64-apple-darwin": "a04c2ffeac28b2003a2c13caf538ab425fcd7def3e4a41571f4a8fb370a66af3",
+  "aarch64-pc-windows-msvc": "59e6d919bed1f72035e622a7c930058f08a8931c4c78ceaf9f56e7fb74dd2c48",
+  "x86_64-pc-windows-msvc": "529e78a9cec6cd7e3e014f7ecd8bda0c113969d4ed0f2efeedb85c30943325b8",
+  "aarch64-unknown-linux-gnu": "74f2f5c6024d397481db228db8fc25eed420db192243f88438c118e7e013e585",
+  "x86_64-unknown-linux-gnu": "5acfd9177cfecf0bf87578f059728215ccc884388988f55f7a65041b57387d91",
+};
+
+function resolveUvTargetTriple(os, abi) {
+  let hostOs = os;
+  if (hostOs === undefined) {
+    if (typeof Services !== "undefined" && Services.appinfo && Services.appinfo.OS) {
+      hostOs = Services.appinfo.OS;
+    } else {
+      hostOs = isWindowsOs() ? "WINNT" : "Linux";
+    }
+  }
+  let hostAbi = abi;
+  if (hostAbi === undefined) {
+    if (typeof Services !== "undefined" && Services.appinfo && Services.appinfo.XPCOMABI) {
+      hostAbi = Services.appinfo.XPCOMABI;
+    } else {
+      hostAbi = "";
+    }
+  }
+
+  hostOs = String(hostOs || "");
+  hostAbi = String(hostAbi || "");
+  const arch = hostAbi.split("-")[0].toLowerCase();
+  const isArm = (arch === "aarch64" || arch === "arm64");
+
+  if (hostOs === "Darwin" || /darwin|mac/i.test(hostOs)) {
+    return isArm ? "aarch64-apple-darwin" : "x86_64-apple-darwin";
+  }
+  if (hostOs === "WINNT" || /^win/i.test(hostOs) || /windows/i.test(hostOs)) {
+    return isArm ? "aarch64-pc-windows-msvc" : "x86_64-pc-windows-msvc";
+  }
+  return isArm ? "aarch64-unknown-linux-gnu" : "x86_64-unknown-linux-gnu";
+}
+
+async function computeBufferSha256Hex(bufferOrBytes) {
+  let subtle = null;
+  if (typeof crypto !== "undefined" && crypto.subtle) {
+    subtle = crypto.subtle;
+  } else if (typeof globalThis !== "undefined" && globalThis.crypto && globalThis.crypto.subtle) {
+    subtle = globalThis.crypto.subtle;
+  } else {
+    try {
+      const nodeCrypto = require("crypto");
+      if (nodeCrypto.webcrypto && nodeCrypto.webcrypto.subtle) {
+        subtle = nodeCrypto.webcrypto.subtle;
+      }
+    } catch (e) {}
+  }
+
+  if (subtle) {
+    let input = bufferOrBytes;
+    if (typeof Buffer !== "undefined" && Buffer.isBuffer && Buffer.isBuffer(input)) {
+      input = new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
+    }
+    const digest = await subtle.digest("SHA-256", input);
+    return Array.from(new Uint8Array(digest))
+      .map(function(b) { return b.toString(16).padStart(2, "0"); })
+      .join("")
+      .toLowerCase();
+  }
+
+  // XPCOM fallback
+  if (typeof Cc !== "undefined" && typeof Ci !== "undefined" && Cc["@mozilla.org/security/hash;1"]) {
+    try {
+      const ch = Cc["@mozilla.org/security/hash;1"].createInstance(Ci.nsICryptoHash);
+      ch.init(ch.SHA256);
+      const bytes = bufferOrBytes instanceof Uint8Array
+        ? bufferOrBytes
+        : new Uint8Array(bufferOrBytes.buffer || bufferOrBytes);
+      ch.update(bytes, bytes.length);
+      const binaryStr = ch.finish(false);
+      let hex = "";
+      for (let i = 0; i < binaryStr.length; i++) {
+        hex += binaryStr.charCodeAt(i).toString(16).padStart(2, "0");
+      }
+      return hex.toLowerCase();
+    } catch (e) {
+      if (typeof Zotero !== "undefined" && Zotero.debug) {
+        Zotero.debug("Zocrates: nsICryptoHash calculation failed: " + e);
+      }
+    }
+  }
+
+  try {
+    const nodeCrypto = require("crypto");
+    if (nodeCrypto && typeof nodeCrypto.createHash === "function") {
+      const bytes = bufferOrBytes instanceof Uint8Array
+        ? bufferOrBytes
+        : new Uint8Array(bufferOrBytes.buffer || bufferOrBytes);
+      return nodeCrypto.createHash("sha256").update(bytes).digest("hex").toLowerCase();
+    }
+  } catch (e) {}
+
+  throw new Error("No cryptographic hash implementation available");
+}
+
 async function downloadStandaloneUv(binDir, sep, targetPath) {
   const win = isWindowsOs();
-  let triple = null;
-  try {
-    const abi = String(Services.appinfo.XPCOMABI || "");
-    const arch = abi.split("-")[0];
-    const machine = (arch === "aarch64" || arch === "arm64") ? "aarch64" : (arch === "x86" ? "i686" : "x86_64");
-    if (win) {
-      triple = machine === "aarch64" ? "aarch64-pc-windows-msvc" : "x86_64-pc-windows-msvc";
-    } else if (Services.appinfo.OS === "Darwin") {
-      triple = machine === "aarch64" ? "aarch64-apple-darwin" : "x86_64-apple-darwin";
-    } else {
-      triple = machine + "-unknown-linux-gnu";
-    }
-  } catch (e) {
-    Zotero.debug("Zocrates: Could not detect host OS/arch for uv download: " + e);
-  }
+  const triple = resolveUvTargetTriple();
   if (!triple) throw new Error("Cannot determine host OS/arch for uv download");
 
+  const expectedHash = PINNED_UV_HASHES[triple];
+  if (!expectedHash) {
+    throw new Error("No pinned SHA-256 hash configured for target triple " + triple);
+  }
+
   const artifactName = "uv-" + triple + (win ? ".zip" : ".tar.gz");
-  const url = "https://github.com/astral-sh/uv/releases/latest/download/" + artifactName;
+  const url = "https://github.com/astral-sh/uv/releases/download/" + PINNED_UV_VERSION + "/" + artifactName;
   Zotero.debug("Zocrates: downloading standalone uv from " + url);
 
   await IOUtils.makeDirectory(binDir, { ignoreExisting: true, createAncestors: true });
   const archivePath = binDir + sep + artifactName;
+  const tempExtractDir = binDir + sep + "uv-" + triple;
+
   try {
     const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status + " for " + url);
@@ -1679,172 +1787,187 @@ async function downloadStandaloneUv(binDir, sep, targetPath) {
     if (!buf || buf.byteLength < 1024 * 1024) {
       throw new Error("uv download suspiciously small: " + (buf ? buf.byteLength : 0) + " bytes");
     }
-    await IOUtils.write(archivePath, new Uint8Array(buf));
-  } catch (e) {
-    Zotero.debug("Zocrates: uv download failed: " + e);
-    throw new Error("uv download failed: " + (e && e.message ? e.message : e));
-  }
 
-  // Remove pre-existing stale targetPath before extraction
-  try { await IOUtils.remove(targetPath, { ignoreAbsent: true }); } catch (e) {}
-
-  const subprocess = getSubprocess();
-
-  if (win) {
-    let extracted = false;
-    // Strategy 1: extractZipArchive(archivePath, binDir, sep)
-    try {
-      await extractZipArchive(archivePath, binDir, sep);
-      const flatCandidate = binDir + sep + "uv.exe";
-      const nestedCandidate = binDir + sep + "uv-" + triple + sep + "uv.exe";
-      if ((await IOUtils.exists(flatCandidate)) || (await IOUtils.exists(nestedCandidate))) {
-        extracted = true;
-      } else {
-        Zotero.debug("Zocrates: extractZipArchive completed but uv.exe not found; attempting external fallbacks");
-      }
-    } catch (zipErr) {
-      Zotero.debug("Zocrates: extractZipArchive failed, falling back to tar: " + zipErr);
-    }
-
-    // Strategy 2: If Strategy 1 throws, fallback to tar.exe
-    if (!extracted) {
-      try {
-        let tarBinary = "tar";
-        if (subprocess && typeof subprocess.pathSearch === "function") {
-          try {
-            const searched = await subprocess.pathSearch("tar");
-            if (searched) tarBinary = searched;
-          } catch (e) {}
-        }
-        if (tarBinary === "tar") {
-          const sysRoot = (typeof Services !== "undefined" && Services.env && typeof Services.env.get === "function" && Services.env.get("SystemRoot")) || "C:\\Windows";
-          const sysTar = sysRoot + "\\System32\\tar.exe";
-          try {
-            if (await IOUtils.exists(sysTar)) tarBinary = sysTar;
-          } catch (e) {}
-        }
-        await runProvisionCommand("extract uv archive (tar)", tarBinary, ["-xf", archivePath, "-C", binDir], null);
-        extracted = true;
-      } catch (tarErr) {
-        Zotero.debug("Zocrates: tar fallback failed, falling back to powershell: " + tarErr);
-      }
-    }
-
-    // Strategy 3: If Strategy 2 throws, fallback to powershell.exe
-    if (!extracted) {
-      let psBinary = "powershell";
-      if (subprocess && typeof subprocess.pathSearch === "function") {
-        try {
-          const searched = await subprocess.pathSearch("powershell");
-          if (searched) psBinary = searched;
-        } catch (e) {}
-      }
-      if (psBinary === "powershell") {
-        const sysRoot = (typeof Services !== "undefined" && Services.env && typeof Services.env.get === "function" && Services.env.get("SystemRoot")) || "C:\\Windows";
-        const sysPs = sysRoot + "\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
-        try {
-          if (await IOUtils.exists(sysPs)) psBinary = sysPs;
-        } catch (e) {}
-      }
-      const safeArchivePath = archivePath.replace(/'/g, "''");
-      const safeBinDir = binDir.replace(/'/g, "''");
-      await runProvisionCommand(
-        "extract uv archive (powershell)",
-        psBinary,
-        ["-NoProfile", "-NonInteractive", "-Command", "Expand-Archive -LiteralPath '" + safeArchivePath + "' -DestinationPath '" + safeBinDir + "' -Force"],
-        null
+    const actualHash = await computeBufferSha256Hex(buf);
+    if (actualHash !== expectedHash) {
+      throw new Error(
+        "SHA-256 mismatch for standalone uv artifact (" + artifactName + "): expected " +
+        expectedHash + ", got " + actualHash
       );
     }
-  } else {
-    // Unix: Resolve tar via subprocess.pathSearch("tar") or /usr/bin/tar or /bin/tar.
-    let tarBinary = null;
-    if (subprocess && typeof subprocess.pathSearch === "function") {
+    await IOUtils.write(archivePath, new Uint8Array(buf));
+
+    // Remove pre-existing stale targetPath before extraction
+    try { await IOUtils.remove(targetPath, { ignoreAbsent: true }); } catch (e) {}
+
+    const subprocess = getSubprocess();
+
+    if (win) {
+      let extracted = false;
+      // Strategy 1: extractZipArchive(archivePath, binDir, sep)
       try {
-        const searched = await subprocess.pathSearch("tar");
-        if (searched) tarBinary = searched;
+        await extractZipArchive(archivePath, binDir, sep);
+        const flatCandidate = binDir + sep + "uv.exe";
+        const nestedCandidate = binDir + sep + "uv-" + triple + sep + "uv.exe";
+        if ((await IOUtils.exists(flatCandidate)) || (await IOUtils.exists(nestedCandidate))) {
+          extracted = true;
+        } else {
+          Zotero.debug("Zocrates: extractZipArchive completed but uv.exe not found; attempting external fallbacks");
+        }
+      } catch (zipErr) {
+        Zotero.debug("Zocrates: extractZipArchive failed, falling back to tar: " + zipErr);
+      }
+
+      // Strategy 2: If Strategy 1 throws, fallback to tar.exe
+      if (!extracted) {
+        try {
+          let tarBinary = "tar";
+          if (subprocess && typeof subprocess.pathSearch === "function") {
+            try {
+              const searched = await subprocess.pathSearch("tar");
+              if (searched) tarBinary = searched;
+            } catch (e) {}
+          }
+          if (tarBinary === "tar") {
+            const sysRoot = (typeof Services !== "undefined" && Services.env && typeof Services.env.get === "function" && Services.env.get("SystemRoot")) || "C:\\Windows";
+            const sysTar = sysRoot + "\\System32\\tar.exe";
+            try {
+              if (await IOUtils.exists(sysTar)) tarBinary = sysTar;
+            } catch (e) {}
+          }
+          await runProvisionCommand("extract uv archive (tar)", tarBinary, ["-xf", archivePath, "-C", binDir], null);
+          extracted = true;
+        } catch (tarErr) {
+          Zotero.debug("Zocrates: tar fallback failed, falling back to powershell: " + tarErr);
+        }
+      }
+
+      // Strategy 3: If Strategy 2 throws, fallback to powershell.exe
+      if (!extracted) {
+        let psBinary = "powershell";
+        if (subprocess && typeof subprocess.pathSearch === "function") {
+          try {
+            const searched = await subprocess.pathSearch("powershell");
+            if (searched) psBinary = searched;
+          } catch (e) {}
+        }
+        if (psBinary === "powershell") {
+          const sysRoot = (typeof Services !== "undefined" && Services.env && typeof Services.env.get === "function" && Services.env.get("SystemRoot")) || "C:\\Windows";
+          const sysPs = sysRoot + "\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
+          try {
+            if (await IOUtils.exists(sysPs)) psBinary = sysPs;
+          } catch (e) {}
+        }
+        const safeArchivePath = archivePath.replace(/'/g, "''");
+        const safeBinDir = binDir.replace(/'/g, "''");
+        await runProvisionCommand(
+          "extract uv archive (powershell)",
+          psBinary,
+          ["-NoProfile", "-NonInteractive", "-Command", "Expand-Archive -LiteralPath '" + safeArchivePath + "' -DestinationPath '" + safeBinDir + "' -Force"],
+          null
+        );
+      }
+    } else {
+      // Unix: Resolve tar via subprocess.pathSearch("tar") or /usr/bin/tar or /bin/tar.
+      let tarBinary = null;
+      if (subprocess && typeof subprocess.pathSearch === "function") {
+        try {
+          const searched = await subprocess.pathSearch("tar");
+          if (searched) tarBinary = searched;
+        } catch (e) {}
+      }
+      if (!tarBinary) {
+        for (const cand of ["/usr/bin/tar", "/bin/tar"]) {
+          try {
+            if (await IOUtils.exists(cand)) {
+              tarBinary = cand;
+              break;
+            }
+          } catch (e) {}
+        }
+      }
+      if (!tarBinary) tarBinary = "tar";
+      await runProvisionCommand("extract uv archive", tarBinary, ["-xzf", archivePath, "-C", binDir], null);
+    }
+
+    // Locate extracted binary:
+    // Check in this order:
+    // 1. Flat root in binDir: targetPath (binDir + sep + "uv" + (win ? ".exe" : ""))
+    // 2. Nested triple folder: binDir + sep + "uv-" + triple + sep + "uv" + (win ? ".exe" : "")
+    // 3. Subdirectories of binDir via IOUtils.getChildren(binDir).
+    let extractedBinary = null;
+    const flatCandidate = binDir + sep + "uv" + (win ? ".exe" : "");
+    try {
+      if (await IOUtils.exists(flatCandidate)) {
+        extractedBinary = flatCandidate;
+      }
+    } catch (e) {}
+
+    if (!extractedBinary) {
+      const nestedCandidate = binDir + sep + "uv-" + triple + sep + "uv" + (win ? ".exe" : "");
+      try {
+        if (await IOUtils.exists(nestedCandidate)) {
+          extractedBinary = nestedCandidate;
+        }
       } catch (e) {}
     }
-    if (!tarBinary) {
-      for (const cand of ["/usr/bin/tar", "/bin/tar"]) {
-        try {
-          if (await IOUtils.exists(cand)) {
-            tarBinary = cand;
-            break;
-          }
-        } catch (e) {}
+
+    if (!extractedBinary) {
+      try {
+        const children = await IOUtils.getChildren(binDir);
+        for (const child of children) {
+          const candidate = String(child) + sep + "uv" + (win ? ".exe" : "");
+          try {
+            if (await IOUtils.exists(candidate)) {
+              extractedBinary = candidate;
+              break;
+            }
+          } catch (e) {}
+        }
+      } catch (e) {}
+    }
+
+    if (!extractedBinary || !(await IOUtils.exists(extractedBinary))) {
+      throw new Error("extracted uv binary not found in " + binDir);
+    }
+
+    // Binary placement guard:
+    const norm = function(p) { return String(p).replace(/\\/g, "/"); };
+    const isSame = win
+      ? norm(extractedBinary).toLowerCase() === norm(targetPath).toLowerCase()
+      : norm(extractedBinary) === norm(targetPath);
+    if (!isSame) {
+      try { await IOUtils.remove(targetPath, { ignoreAbsent: true }); } catch (e) {}
+      await IOUtils.move(extractedBinary, targetPath);
+    }
+
+    if (!win) {
+      try { await IOUtils.setPermissions(targetPath, 0o755); } catch (e) {
+        Zotero.debug("Zocrates: chmod on uv binary failed: " + e);
       }
     }
-    if (!tarBinary) tarBinary = "tar";
-    await runProvisionCommand("extract uv archive", tarBinary, ["-xzf", archivePath, "-C", binDir], null);
+    await verifyUvBinary(targetPath);
+    Zotero.debug("Zocrates: standalone uv installed at " + targetPath);
+  } finally {
+    try { await IOUtils.remove(tempExtractDir, { recursive: true, ignoreAbsent: true }); } catch (e) {}
+    try { await IOUtils.remove(archivePath, { ignoreAbsent: true }); } catch (e) {}
   }
-
-  // Locate extracted binary:
-  // Check in this order:
-  // 1. Flat root in binDir: targetPath (binDir + sep + "uv" + (win ? ".exe" : ""))
-  // 2. Nested triple folder: binDir + sep + "uv-" + triple + sep + "uv" + (win ? ".exe" : "")
-  // 3. Subdirectories of binDir via IOUtils.getChildren(binDir).
-  // If not found, throw error.
-  let extractedBinary = null;
-  const flatCandidate = binDir + sep + "uv" + (win ? ".exe" : "");
-  try {
-    if (await IOUtils.exists(flatCandidate)) {
-      extractedBinary = flatCandidate;
-    }
-  } catch (e) {}
-
-  if (!extractedBinary) {
-    const nestedCandidate = binDir + sep + "uv-" + triple + sep + "uv" + (win ? ".exe" : "");
-    try {
-      if (await IOUtils.exists(nestedCandidate)) {
-        extractedBinary = nestedCandidate;
-      }
-    } catch (e) {}
-  }
-
-  if (!extractedBinary) {
-    try {
-      const children = await IOUtils.getChildren(binDir);
-      for (const child of children) {
-        const candidate = String(child) + sep + "uv" + (win ? ".exe" : "");
-        try {
-          if (await IOUtils.exists(candidate)) {
-            extractedBinary = candidate;
-            break;
-          }
-        } catch (e) {}
-      }
-    } catch (e) {}
-  }
-
-  if (!extractedBinary || !(await IOUtils.exists(extractedBinary))) {
-    throw new Error("extracted uv binary not found in " + binDir);
-  }
-
-  // Binary placement guard:
-  const norm = function(p) { return String(p).replace(/\\/g, "/"); };
-  const isSame = win
-    ? norm(extractedBinary).toLowerCase() === norm(targetPath).toLowerCase()
-    : norm(extractedBinary) === norm(targetPath);
-  if (!isSame) {
-    try { await IOUtils.remove(targetPath, { ignoreAbsent: true }); } catch (e) {}
-    await IOUtils.move(extractedBinary, targetPath);
-  }
-
-  // Best-effort cleanup of the extraction scaffolding and archive.
-  try { await IOUtils.remove(binDir + sep + "uv-" + triple, { recursive: true, ignoreAbsent: true }); } catch (e) {}
-  try { await IOUtils.remove(archivePath, { ignoreAbsent: true }); } catch (e) {}
-
-  if (!win) {
-    try { await IOUtils.setPermissions(targetPath, 0o755); } catch (e) {
-      Zotero.debug("Zocrates: chmod on uv binary failed: " + e);
-    }
-  }
-  await verifyUvBinary(targetPath);
-  Zotero.debug("Zocrates: standalone uv installed at " + targetPath);
 }
 
-async function resolveUvBinary(zocratesDataDir, sep) {
-  // Tier 1 (spec order): system uv reachable via PATH.
+async function probeExistingUvBinary(zocratesDataDir, sep) {
+  if (!zocratesDataDir || !sep) {
+    try {
+      const paths = getZocratesLaunchPaths();
+      zocratesDataDir = zocratesDataDir || paths.zocratesDataDir;
+      sep = sep || paths.sep;
+    } catch (e) {
+      sep = sep || (isWindowsOs() ? "\\" : "/");
+      zocratesDataDir = zocratesDataDir || "";
+    }
+  }
+  const win = isWindowsOs();
+
+  // Tier 1: system uv reachable via PATH
   const subprocess = getSubprocess();
   if (subprocess) {
     try {
@@ -1862,28 +1985,123 @@ async function resolveUvBinary(zocratesDataDir, sep) {
         return "uv";
       }
     } catch (e) {
-      Zotero.debug("Zocrates: system uv not usable: " + e);
+      Zotero.debug("Zocrates: probe: system uv not usable: " + e);
     }
   }
-  // Tier 2: previously downloaded standalone uv in the hermetic bin dir.
-  const binDir = zocratesDataDir + sep + "bin";
-  const bundledUv = binDir + sep + "uv" + (isWindowsOs() ? ".exe" : "");
+
+  // Tier 2: previously installed / bundled uv in <zocrates-data>/bin/uv
+  if (zocratesDataDir) {
+    const binDir = zocratesDataDir + sep + "bin";
+    const bundledUv = binDir + sep + "uv" + (win ? ".exe" : "");
+    try {
+      if (typeof IOUtils !== "undefined" && typeof IOUtils.exists === "function" && await IOUtils.exists(bundledUv)) {
+        await verifyUvBinary(bundledUv);
+        return bundledUv;
+      }
+    } catch (e) {
+      Zotero.debug("Zocrates: probe: bundled uv not usable: " + e);
+    }
+  }
+
+  // Tier 3: common user locations (~/.local/bin/uv, ~/.cargo/bin/uv, and on Windows %LOCALAPPDATA%\Microsoft\WinGet\Links\uv.exe or %USERPROFILE%\.local\bin\uv.exe)
+  const userCandidates = [];
   try {
-    if (await IOUtils.exists(bundledUv)) return bundledUv;
-  } catch (e) {}
-  // Tier 3: common user locations (~/.local/bin/uv, ~/.cargo/bin/uv).
-  try {
-    const home = Services.dirsvc.get("Home", Ci.nsIFile).path;
-    for (const rel of [".local" + sep + "bin", ".cargo" + sep + "bin"]) {
-      const candidate = home + sep + rel + sep + "uv" + (isWindowsOs() ? ".exe" : "");
-      try { if (await IOUtils.exists(candidate)) return candidate; } catch (e) {}
+    if (typeof Services !== "undefined" && Services.dirsvc && typeof Services.dirsvc.get === "function") {
+      const home = Services.dirsvc.get("Home", Ci.nsIFile).path;
+      userCandidates.push(home + sep + ".local" + sep + "bin" + sep + "uv" + (win ? ".exe" : ""));
+      userCandidates.push(home + sep + ".cargo" + sep + "bin" + sep + "uv" + (win ? ".exe" : ""));
     }
   } catch (e) {
-    Zotero.debug("Zocrates: user uv location probe skipped: " + e);
+    Zotero.debug("Zocrates: probe: user home directory probe skipped: " + e);
   }
+
+  if (win) {
+    try {
+      if (typeof Services !== "undefined" && Services.env && typeof Services.env.get === "function") {
+        const localAppData = Services.env.get("LOCALAPPDATA");
+        if (localAppData) {
+          userCandidates.push(localAppData + sep + "Microsoft" + sep + "WinGet" + sep + "Links" + sep + "uv.exe");
+        }
+        const userProfile = Services.env.get("USERPROFILE");
+        if (userProfile) {
+          userCandidates.push(userProfile + sep + ".local" + sep + "bin" + sep + "uv.exe");
+        }
+      }
+    } catch (e) {
+      Zotero.debug("Zocrates: probe: windows environment candidates probe skipped: " + e);
+    }
+  }
+
+  for (const candidate of userCandidates) {
+    try {
+      if (typeof IOUtils !== "undefined" && typeof IOUtils.exists === "function" && await IOUtils.exists(candidate)) {
+        await verifyUvBinary(candidate);
+        return candidate;
+      }
+    } catch (e) {
+      Zotero.debug("Zocrates: probe: candidate " + candidate + " not usable: " + e);
+    }
+  }
+
+  return null;
+}
+
+async function isUvAvailable(zocratesDataDir, sep) {
+  try {
+    const existing = await probeExistingUvBinary(zocratesDataDir, sep);
+    return Boolean(existing);
+  } catch (e) {
+    return false;
+  }
+}
+
+async function resolveUvBinary(zocratesDataDir, sep) {
+  // If probeExistingUvBinary finds an existing usable uv, return it.
+  const existing = await probeExistingUvBinary(zocratesDataDir, sep);
+  if (existing) {
+    return existing;
+  }
+
   // Tier 4: download the official standalone static uv binary.
-  await downloadStandaloneUv(binDir, sep, bundledUv);
-  return bundledUv;
+  const win = isWindowsOs();
+  const binDir = zocratesDataDir + sep + "bin";
+  const bundledUv = binDir + sep + "uv" + (win ? ".exe" : "");
+  let triple = "";
+  try {
+    triple = resolveUvTargetTriple();
+  } catch (e) {}
+
+  try {
+    await downloadStandaloneUv(binDir, sep, bundledUv);
+    return bundledUv;
+  } catch (dlErr) {
+    Zotero.debug("Zocrates: standalone uv download failed: " + dlErr);
+    const installCmd = win
+      ? 'powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"'
+      : "curl -LsSf https://astral.sh/uv/install.sh | sh";
+
+    try {
+      if (typeof Zotero !== "undefined" && Zotero.Zocrates && Zotero.Zocrates.Notifier && typeof Zotero.Zocrates.Notifier.add === "function") {
+        Zotero.Zocrates.Notifier.add(
+          "uv package manager (v" + PINNED_UV_VERSION + ") is required. Automatic download failed. Install with: " + installCmd,
+          "warning"
+        );
+      }
+    } catch (e) {}
+
+    const err = new Error(
+      "Failed to automatically obtain uv package manager (v" + PINNED_UV_VERSION +
+      (triple ? " for " + triple : "") + "): " + (dlErr && dlErr.message ? dlErr.message : dlErr) +
+      ". Please install uv manually: " + installCmd +
+      " (see " + UV_INSTALL_DOC_URL + ")"
+    );
+    err.code = "UV_MISSING";
+    err.uvVersion = PINNED_UV_VERSION;
+    err.triple = triple;
+    err.docUrl = UV_INSTALL_DOC_URL;
+    err.installCmd = installCmd;
+    throw err;
+  }
 }
 
 function getVenvPythonPath(zocratesDataDir, sep) {
@@ -2398,6 +2616,11 @@ if (typeof Zotero !== "undefined") {
   if (!Zotero.Zocrates) Zotero.Zocrates = {};
   Zotero.Zocrates.loadStoredApiKey = loadStoredApiKey;
   Zotero.Zocrates.saveStoredApiKey = saveStoredApiKey;
+  Zotero.Zocrates.isUvAvailable = isUvAvailable;
+  Zotero.Zocrates.probeExistingUvBinary = probeExistingUvBinary;
+  Zotero.Zocrates.resolveUvTargetTriple = resolveUvTargetTriple;
+  Zotero.Zocrates.PINNED_UV_VERSION = PINNED_UV_VERSION;
+  Zotero.Zocrates.UV_INSTALL_DOC_URL = UV_INSTALL_DOC_URL;
 }
 
 async function spawnBackend(zocratesDataDir, port) {
@@ -2799,6 +3022,9 @@ async function launchBackendIfNeeded() {
         code: e && e.code,
         arch: e && e.arch,
         docUrl: e && e.docUrl,
+        uvVersion: e && e.uvVersion,
+        triple: e && e.triple,
+        installCmd: e && e.installCmd,
       });
     } catch (e2) {}
     // The onboarding error card lives in the sidebar chat area; mount the
@@ -2894,6 +3120,13 @@ if (typeof module !== "undefined" && module.exports) {
     runProvisionCommand,
     downloadStandaloneUv,
     resolveUvBinary,
+    probeExistingUvBinary,
+    isUvAvailable,
+    resolveUvTargetTriple,
+    computeBufferSha256Hex,
+    PINNED_UV_VERSION,
+    UV_INSTALL_DOC_URL,
+    PINNED_UV_HASHES,
     getWindowsArchitecture,
     isVcRedistInstalledWindows,
     ensureVcRedistWindows,

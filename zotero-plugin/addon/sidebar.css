@@ -4361,6 +4361,78 @@ details.considered-sources li {
   margin: 6px 0 8px 0;
 }
 
+.uv-missing-title {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 4px;
+  color: #ef4444;
+}
+
+.uv-missing-desc,
+.uv-missing-next-step {
+  margin-bottom: 6px;
+  line-height: 1.4;
+  color: var(--text-main);
+}
+
+.uv-install-code-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin: 6px 0 8px 0;
+  gap: 8px;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+}
+
+.uv-install-code {
+  flex: 1;
+  word-break: break-all;
+  user-select: all;
+  color: var(--text-main);
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  border: none;
+  font-family: inherit;
+  font-size: inherit;
+}
+
+.uv-install-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 2px;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.uv-install-copy-btn:hover {
+  color: var(--text-main);
+  background-color: var(--bg-card-hover);
+}
+
+.uv-install-copy-btn svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+.uv-missing-link-wrap {
+  margin: 6px 0 8px 0;
+}
+
 .bootstrap-retry-btn {
   padding: 6px 14px;
   border-radius: 6px;
