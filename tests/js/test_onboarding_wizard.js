@@ -141,6 +141,7 @@ async function runTests() {
   test("presets: mapPresetToWizardFields matches the tier JSON for all three tiers", () => {
     const rec = sidebar.mapPresetToWizardFields("recommended");
     assert.strictEqual(rec.model, "openrouter/~z-ai/glm-flash-latest");
+    assert.strictEqual(rec.synthesisModel, "openrouter/google/gemini-3.8-flash");
     assert.strictEqual(rec.embedMode, "cloud");
     assert.strictEqual(rec.cloudEmbeddingModel, "openrouter/voyageai/voyage-4");
     assert.strictEqual(rec.vlmModel, "openrouter/deepseek/deepseek-v4.1-flash");
@@ -151,6 +152,7 @@ async function runTests() {
 
     const free = sidebar.mapPresetToWizardFields("free");
     assert.strictEqual(free.model, "nvidia/nemotron-3.5-lightning:free");
+    assert.strictEqual(free.synthesisModel, "");
     assert.strictEqual(free.cloudEmbeddingModel, "openrouter/nvidia/nemotron-3-embed-1b:free");
     assert.strictEqual(free.vlmBackupModel, "openrouter/nvidia/nemotron-3.5-super-vl:free");
     assert.strictEqual(free.vlmMaxImagesPerDoc, 3);
@@ -159,12 +161,57 @@ async function runTests() {
     const off = sidebar.mapPresetToWizardFields("offline");
     assert.strictEqual(off.provider, "ollama");
     assert.strictEqual(off.model, "", "Offline is a manual path: no model pre-populated");
+    assert.strictEqual(off.synthesisModel, "");
     assert.strictEqual(off.embedMode, "local");
     assert.strictEqual(off.vlmChoice, "disable");
     assert.strictEqual(off.vlmBackupModel, "");
     assert.strictEqual(off.vlmMaxImagesPerDoc, 5);
     assert.strictEqual(off.layaRowVisible, true);
     assert.strictEqual(sidebar.mapPresetToWizardFields("nope"), null);
+  });
+
+  test("presets: buildOnboardingFinishPayloads overrides synthesis model or sets null when empty", () => {
+    // Custom synthesis model overrides both library_synthesizer and online_synthesizer
+    const custom = sidebar.buildOnboardingFinishPayloads({
+      preset: "recommended",
+      provider: "openrouter_llm",
+      model: "openrouter/~z-ai/glm-flash-latest",
+      synthesisModel: "openrouter/anthropic/claude-3.5-sonnet",
+    });
+    assert.strictEqual(
+      custom.llmConfig.override_agent_models.library_synthesizer.model,
+      "openrouter/anthropic/claude-3.5-sonnet"
+    );
+    assert.strictEqual(
+      custom.llmConfig.override_agent_models.online_synthesizer.model,
+      "openrouter/anthropic/claude-3.5-sonnet"
+    );
+
+    // Empty string resolves to null (inherits main model)
+    const empty = sidebar.buildOnboardingFinishPayloads({
+      preset: "recommended",
+      provider: "openrouter_llm",
+      model: "openrouter/~z-ai/glm-flash-latest",
+      synthesisModel: "",
+    });
+    assert.strictEqual(empty.llmConfig.override_agent_models.library_synthesizer.model, null);
+    assert.strictEqual(empty.llmConfig.override_agent_models.online_synthesizer.model, null);
+
+    // Whitespace string also resolves to null
+    const whitespace = sidebar.buildOnboardingFinishPayloads({
+      preset: "recommended",
+      provider: "openrouter_llm",
+      model: "openrouter/~z-ai/glm-flash-latest",
+      synthesisModel: "   ",
+    });
+    assert.strictEqual(whitespace.llmConfig.override_agent_models.library_synthesizer.model, null);
+    assert.strictEqual(whitespace.llmConfig.override_agent_models.online_synthesizer.model, null);
+
+    // Deep copy: mutations must not leak back to ONBOARDING_PRESETS
+    assert.strictEqual(
+      sidebar.ONBOARDING_PRESETS.recommended.llmConfig.override_agent_models.library_synthesizer.model,
+      "openrouter/google/gemini-3.8-flash"
+    );
   });
 
   test("presets: Recommended Finish payloads carry the paid matrix", () => {
@@ -1389,12 +1436,28 @@ async function runTests() {
       assert.ok(baseUrlLabel, "Base URL field label must exist");
       assert.strictEqual(baseUrlLabel.textContent, "Base URL (optional)");
 
+      // Check synthesisModel input and helper rendering
+      assert.ok(w.synthesisModelInput, "synthesisModelInput must be stored on wizard refs");
+      assert.strictEqual(w.synthesisModelInput.className, "onboarding-input");
+      assert.strictEqual(w.synthesisModelInput.type, "text");
+      const synthField = w.synthesisModelInput.closest ? w.synthesisModelInput.closest(".onboarding-field") : w.synthesisModelInput.parentNode;
+      const synthLabel = synthField.querySelector("span.onboarding-field-label");
+      assert.strictEqual(synthLabel.textContent, "Synthesis model (optional)");
+      const synthHelper = synthField.querySelector("div.onboarding-helper");
+      assert.ok(synthHelper.textContent.includes("top-ranking knowledge-based reasoning models"));
+      const gpqaLink = synthHelper.querySelector("a.onboarding-link");
+      assert.ok(gpqaLink, "GPQA Diamond link must exist");
+      assert.strictEqual(gpqaLink.href, "https://openrouter.ai/benchmarks/gpqa-diamond");
+      assert.strictEqual(gpqaLink.getAttribute("target"), "_blank");
+
       // 1. Recommended preset is pre-selected by default
       assert.strictEqual(w.activePresetKey, "recommended");
       assert.strictEqual(w.providerSelect.value, "openrouter_llm");
       assert.strictEqual(w.modelInput.placeholder, "openrouter/~z-ai/glm-flash-latest");
       assert.strictEqual(w.baseUrlRow.style.display, "none");
       assert.strictEqual(w.modelInput.value, "openrouter/~z-ai/glm-flash-latest");
+      assert.strictEqual(w.synthesisModelInput.value, "openrouter/google/gemini-3.8-flash");
+      assert.strictEqual(w.synthesisModelInput.placeholder, "openrouter/google/gemini-3.8-flash");
 
       // 2. Select offline preset
       sidebar.applyOnboardingPreset("offline");
@@ -1408,6 +1471,8 @@ async function runTests() {
         "Optional — leave blank for default (http://localhost:11434). Only change if running on a custom port or remote host."
       );
       assert.strictEqual(w.modelInput.value, "");
+      assert.strictEqual(w.synthesisModelInput.value, "");
+      assert.strictEqual(w.synthesisModelInput.placeholder, "Leave blank to inherit main model");
 
       // 3. Switch back to recommended preset
       sidebar.applyOnboardingPreset("recommended");
@@ -1416,6 +1481,8 @@ async function runTests() {
       assert.strictEqual(w.modelInput.placeholder, "openrouter/~z-ai/glm-flash-latest");
       assert.strictEqual(w.baseUrlRow.style.display, "none");
       assert.strictEqual(w.modelInput.value, "openrouter/~z-ai/glm-flash-latest");
+      assert.strictEqual(w.synthesisModelInput.value, "openrouter/google/gemini-3.8-flash");
+      assert.strictEqual(w.synthesisModelInput.placeholder, "openrouter/google/gemini-3.8-flash");
 
       // 4. Change providerSelect to "vllm" (switching from openrouter_llm to local clears default slug)
       w.providerSelect.value = "vllm";
@@ -1428,6 +1495,8 @@ async function runTests() {
         "Optional — leave blank for default (http://localhost:8000/v1). Only change if running on a custom port or remote host."
       );
       assert.strictEqual(w.modelInput.value, "", "openrouter slug cleared so local ghost text shows through");
+      assert.strictEqual(w.synthesisModelInput.value, "", "openrouter synthesis model cleared on switch to local provider");
+      assert.strictEqual(w.synthesisModelInput.placeholder, "Leave blank to inherit main model");
 
       // 5. Change providerSelect to "openai_compatible"
       w.providerSelect.value = "openai_compatible";
@@ -1446,6 +1515,8 @@ async function runTests() {
       assert.strictEqual(w.modelInput.placeholder, "openrouter/~z-ai/glm-flash-latest");
       assert.strictEqual(w.baseUrlRow.style.display, "none");
       assert.strictEqual(w.modelInput.value, "openrouter/~z-ai/glm-flash-latest");
+      assert.strictEqual(w.synthesisModelInput.value, "openrouter/google/gemini-3.8-flash", "recommended default restored when empty on switch to openrouter");
+      assert.strictEqual(w.synthesisModelInput.placeholder, "openrouter/google/gemini-3.8-flash");
 
       // 7. Switching to local, typing "gemma4:12b", then switching back restores recommended slug
       w.providerSelect.value = "ollama";
@@ -1461,12 +1532,29 @@ async function runTests() {
       assert.strictEqual(w.modelInput.placeholder, "nvidia/nemotron-3.5-lightning:free");
       assert.strictEqual(w.baseUrlRow.style.display, "none");
       assert.strictEqual(w.modelInput.value, "nvidia/nemotron-3.5-lightning:free");
+      assert.strictEqual(w.synthesisModelInput.value, "", "free preset clears synthesis model");
+      assert.strictEqual(w.synthesisModelInput.placeholder, "openrouter/google/gemini-3.8-flash");
 
       // 9. From free preset, switching to local clears nvidia default slug
       w.providerSelect.value = "ollama";
       w.providerSelect.dispatchEvent("change");
       assert.strictEqual(w.modelInput.value, "", "nvidia slug cleared so local ghost text shows through");
       assert.strictEqual(w.modelInput.placeholder, "gemma4:12b");
+      assert.strictEqual(w.synthesisModelInput.value, "");
+      assert.strictEqual(w.synthesisModelInput.placeholder, "Leave blank to inherit main model");
+
+      // 10. Selections collection captures synthesisModel
+      sidebar.applyOnboardingPreset("recommended");
+      let sel = sidebar.collectOnboardingSelections();
+      assert.strictEqual(sel.synthesisModel, "openrouter/google/gemini-3.8-flash");
+
+      sidebar.applyOnboardingPreset("offline");
+      sel = sidebar.collectOnboardingSelections();
+      assert.strictEqual(sel.synthesisModel, "");
+
+      w.synthesisModelInput.value = "  my-custom-synth-model  ";
+      sel = sidebar.collectOnboardingSelections();
+      assert.strictEqual(sel.synthesisModel, "my-custom-synth-model");
     } finally {
       while (onboardingHost.firstChild) {
         onboardingHost.removeChild(onboardingHost.firstChild);

@@ -2911,6 +2911,7 @@ const ONBOARDING_PRESETS = {
     fields: {
       provider: "openrouter_llm",
       model: "openrouter/~z-ai/glm-flash-latest",
+      synthesisModel: "openrouter/google/gemini-3.8-flash",
       embedMode: "cloud",
       cloudEmbeddingModel: "openrouter/voyageai/voyage-4",
       vlmChoice: "openrouter",
@@ -2942,6 +2943,7 @@ const ONBOARDING_PRESETS = {
     fields: {
       provider: "openrouter_llm",
       model: "nvidia/nemotron-3.5-lightning:free",
+      synthesisModel: "",
       embedMode: "cloud",
       cloudEmbeddingModel: "openrouter/nvidia/nemotron-3-embed-1b:free",
       vlmChoice: "openrouter",
@@ -2972,6 +2974,7 @@ const ONBOARDING_PRESETS = {
     fields: {
       provider: "ollama",
       model: "",
+      synthesisModel: "",
       embedMode: "local",
       cloudEmbeddingModel: "",
       vlmChoice: "disable",
@@ -2996,6 +2999,7 @@ function mapPresetToWizardFields(presetKey) {
   return {
     provider: def.fields.provider,
     model: def.fields.model,
+    synthesisModel: (def.fields && def.fields.synthesisModel) || "",
     baseUrlVisible: def.fields.provider !== "openrouter_llm",
     embedMode: def.fields.embedMode,
     cloudEmbeddingModel: def.fields.cloudEmbeddingModel,
@@ -3027,7 +3031,9 @@ function buildOnboardingFinishPayloads(selection, presetDef) {
   if (isLocalProvider && selection.baseUrl) llmConfig.llm_base_url = selection.baseUrl;
   if (selection.openrouterKey) llmConfig.openrouter_api_key = selection.openrouterKey;
   if (!presetDef.manual) {
-    llmConfig.override_agent_models = presetDef.llmConfig.override_agent_models;
+    llmConfig.override_agent_models = presetDef.llmConfig && presetDef.llmConfig.override_agent_models
+      ? JSON.parse(JSON.stringify(presetDef.llmConfig.override_agent_models))
+      : undefined;
   } else {
     // Offline path: reset every role to inherit the local main model — the
     // shipped defaults pin the synthesizers to OpenRouter-hosted Gemini,
@@ -3039,6 +3045,17 @@ function buildOnboardingFinishPayloads(selection, presetDef) {
       online_search: { model: null, thinking_level: "low" },
       online_synthesizer: { model: null, thinking_level: "high" },
     };
+  }
+  if (selection && selection.synthesisModel !== undefined) {
+    const synthModel = (typeof selection.synthesisModel === "string" ? selection.synthesisModel.trim() : "") || null;
+    if (llmConfig.override_agent_models) {
+      if (llmConfig.override_agent_models.library_synthesizer) {
+        llmConfig.override_agent_models.library_synthesizer.model = synthModel;
+      }
+      if (llmConfig.override_agent_models.online_synthesizer) {
+        llmConfig.override_agent_models.online_synthesizer.model = synthModel;
+      }
+    }
   }
   for (const key of [
     "reranker_model",
@@ -3201,11 +3218,23 @@ function renderOnboardingWizardCard() {
       if (val.includes("openrouter") || val.includes("nvidia")) {
         if (w.modelInput) w.modelInput.value = "";
       }
+      if (w.synthesisModelInput && typeof w.synthesisModelInput.value === "string") {
+        const sVal = w.synthesisModelInput.value.toLowerCase();
+        if (sVal.includes("openrouter") || sVal.includes("google") || sVal.includes("gemini")) {
+          w.synthesisModelInput.value = "";
+        }
+      }
     } else if (curr === "openrouter_llm" && prev !== "openrouter_llm") {
       const val = (w.modelInput && typeof w.modelInput.value === "string") ? w.modelInput.value.trim() : "";
       if (!val || val === "gemma4:12b") {
         if (w.modelInput) {
           w.modelInput.value = (ONBOARDING_PRESETS && ONBOARDING_PRESETS.recommended && ONBOARDING_PRESETS.recommended.fields.model) || "openrouter/~z-ai/glm-flash-latest";
+        }
+      }
+      if (w.synthesisModelInput && typeof w.synthesisModelInput.value === "string") {
+        const sVal = w.synthesisModelInput.value.trim();
+        if (!sVal && (w.activePresetKey === "recommended" || !w.activePresetKey)) {
+          w.synthesisModelInput.value = "openrouter/google/gemini-3.8-flash";
         }
       }
     }
@@ -3221,6 +3250,23 @@ function renderOnboardingWizardCard() {
   modelInput.type = "text";
   modelInput.placeholder = "openrouter/~z-ai/glm-flash-latest";
   w.modelInput = modelInput;
+
+  const synthField = labeledField(aiSection, "Synthesis model (optional)");
+  const synthHelper = el(synthField, "div", "onboarding-helper");
+  synthHelper.appendChild(document.createTextNode(
+    "A high-performance reasoning model is recommended to evaluate retrieved evidence and synthesize findings. If left blank, inherits the main model. Check the "
+  ));
+  const gpqaLink = el(synthHelper, "a", "onboarding-link", "OpenRouter GPQA Diamond");
+  gpqaLink.href = "https://openrouter.ai/benchmarks/gpqa-diamond";
+  gpqaLink.target = "_blank";
+  gpqaLink.setAttribute("target", "_blank");
+  synthHelper.appendChild(document.createTextNode(
+    " benchmark for top-ranking knowledge-based reasoning models."
+  ));
+  const synthInput = el(synthField, "input", "onboarding-input");
+  synthInput.type = "text";
+  synthInput.placeholder = "openrouter/google/gemini-3.8-flash";
+  w.synthesisModelInput = synthInput;
 
   const baseUrlRow = labeledField(aiSection, "Base URL (optional)",
     "e.g. http://localhost:11434 for Ollama.");
@@ -3416,6 +3462,13 @@ function syncOnboardingAiEngineUi(w) {
   if (isLocal) {
     if (w.baseUrlRow) w.baseUrlRow.style.display = "flex";
     if (w.modelInput) w.modelInput.placeholder = "gemma4:12b";
+    if (w.synthesisModelInput) {
+      const synthVal = typeof w.synthesisModelInput.value === "string" ? w.synthesisModelInput.value.toLowerCase() : "";
+      if (synthVal.includes("openrouter") || synthVal.includes("google") || synthVal.includes("gemini")) {
+        w.synthesisModelInput.value = "";
+      }
+      w.synthesisModelInput.placeholder = "Leave blank to inherit main model";
+    }
     if (provider === "ollama") {
       if (w.baseUrlInput) w.baseUrlInput.placeholder = "http://localhost:11434";
       if (w.baseUrlHelper) {
@@ -3441,6 +3494,13 @@ function syncOnboardingAiEngineUi(w) {
         w.modelInput.placeholder = "openrouter/~z-ai/glm-flash-latest";
       }
     }
+    if (w.synthesisModelInput) {
+      const synthVal = typeof w.synthesisModelInput.value === "string" ? w.synthesisModelInput.value.trim() : "";
+      if (!synthVal && (w.activePresetKey === "recommended" || !w.activePresetKey)) {
+        w.synthesisModelInput.value = "openrouter/google/gemini-3.8-flash";
+      }
+      w.synthesisModelInput.placeholder = "openrouter/google/gemini-3.8-flash";
+    }
   }
 }
 
@@ -3457,6 +3517,7 @@ function applyOnboardingPreset(key) {
     w.prevProvider = mapping.provider;
   }
   if (w.modelInput) w.modelInput.value = mapping.model || "";
+  if (w.synthesisModelInput) w.synthesisModelInput.value = mapping.synthesisModel || "";
   if (w.baseUrlRow) w.baseUrlRow.style.display = mapping.baseUrlVisible ? "flex" : "none";
   if (mapping.embedMode === "cloud") {
     if (w.embedCloud) w.embedCloud.checked = true;
@@ -3655,6 +3716,7 @@ function collectOnboardingSelections() {
     preset: w.activePresetKey || null,
     provider: w.providerSelect ? w.providerSelect.value : "openrouter_llm",
     model: w.modelInput ? w.modelInput.value.trim() : "",
+    synthesisModel: w.synthesisModelInput ? w.synthesisModelInput.value.trim() : "",
     baseUrl: w.baseUrlInput ? w.baseUrlInput.value.trim() : "",
     openrouterKey: w.openrouterKey ? w.openrouterKey.value.trim() : "",
     embedMode: w.embedCloud && w.embedCloud.checked ? "cloud" : "local",
@@ -15725,6 +15787,7 @@ if (typeof module !== "undefined" && module.exports) {
     enterOnboardingProcess,
     applyOnboardingPreset,
     syncOnboardingAiEngineUi,
+    collectOnboardingSelections,
     testOnboardingConnection,
     readOnboardingSyncStream,
     finalizeFollowerAbortFallback: _finalizeFollowerAbortFallback,
