@@ -2327,7 +2327,7 @@ function initZocratesPreferences() {
         document_converter_mode: newMode,
         document_converter_id: newId,
         converter_id: newId,
-        datalab_api_key: newDatalabKey,
+        datalab_api_key: newDatalabKey || undefined,
         datalab_non_pdf_fallback: newFallback,
         datalab_merge_cross_page: newMergeCrossPage,
         enable_vlm_captioning: currentVlmEnable,
@@ -2475,9 +2475,12 @@ function initZocratesPreferences() {
           body: JSON.stringify({ converter_id: "datalab", datalab_api_key: keyVal }),
         });
         const data = await res.json();
-        if (data.status === "success") {
+        if (res.ok && (data.status === "ok" || data.status === "success")) {
+          if (keyVal) {
+            await syncDatalabApiKey();
+          }
           if (datalabKeyStatusBadge) {
-            datalabKeyStatusBadge.textContent = "✓ " + data.message;
+            datalabKeyStatusBadge.textContent = "✓ " + (data.message || "Connection test succeeded");
             datalabKeyStatusBadge.className = "zc-text-success";
           }
         } else {

@@ -48,7 +48,7 @@ def is_substantive_chunk(chunk: dict[str, Any]) -> bool:
       - Text is pure YAML frontmatter (starts with '---', contains 'title:' or 'authors:', and has '\n---')
     Otherwise returns True.
     """
-    if chunk.get("chunk_type") == "frontmatter":
+    if chunk.get("chunk_type") in ("frontmatter", "metadata"):
         return False
 
     chunk_id = str(chunk.get("chunk_id") or "")

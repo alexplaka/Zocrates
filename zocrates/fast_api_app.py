@@ -40,6 +40,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.adk.runners import Runner
 from google.genai import types
@@ -1420,6 +1421,35 @@ def get_library_conversion_status() -> dict:
     }
 
 
+class ItemIngestRequest(BaseModel):
+    item_keys: list[str]
+
+
+@app.post("/items/ingest", dependencies=[Depends(verify_auth)])
+async def ingest_items_endpoint(req: ItemIngestRequest) -> dict[str, Any]:
+    """Ingest attachment-free regular items or notes directly by key."""
+    try:
+        syncer = get_syncer()
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Zocrates backend is not registered. Call /register first.",
+        ) from exc
+
+    results: dict[str, Any] = {}
+    for key in req.item_keys:
+        clean_key = key.strip()
+        if not clean_key:
+            continue
+        try:
+            res = await syncer.sync_item(item_key=clean_key)
+            results[clean_key] = res
+        except Exception as exc:
+            logger.error("Error ingesting item %s: %s", clean_key, exc)
+            results[clean_key] = f"error: {exc}"
+    return {"status": "success", "results": results}
+
+
 @app.post("/convert/{item_key}", dependencies=[Depends(verify_auth)])
 async def convert_item(item_key: str, request: ConvertRequest | None = None) -> dict:
     """Convert a single item using the specified or active converter strategy.
@@ -1486,6 +1516,27 @@ async def convert_item(item_key: str, request: ConvertRequest | None = None) -> 
                 )
 
     if not attachment or not attachment.path or not attachment.path.exists():
+        # Fallback for regular items without attachments
+        item = syncer.db.get_item_by_key(item_key)
+        item_type = getattr(item, "item_type", None)
+        if item and isinstance(item_type, str) and item_type not in ("attachment", "note", "annotation"):
+            atts = syncer.db.get_attachments(item.item_id) if hasattr(syncer.db, "get_attachments") else []
+            valid_atts = [a for a in atts if getattr(a, "path", None) and a.path.exists()]
+            if not valid_atts:
+                sync_result = syncer.sync_item(
+                    item_key=item_key, force=request.force if request else False
+                )
+                if inspect.isawaitable(sync_result):
+                    res = await sync_result
+                else:
+                    res = sync_result
+                return {
+                    "status": res,
+                    "item_key": item_key,
+                    "converter_id": "zotero_metadata",
+                    "content_type": "text/zotero-metadata",
+                }
+
         raise HTTPException(
             status_code=404,
             detail=f"No valid attachment file found on disk for item key '{item_key}'",
@@ -1538,6 +1589,12 @@ async def convert_item(item_key: str, request: ConvertRequest | None = None) -> 
             try:
                 current_hash = _file_sha256(attachment.path)
                 if meta.get("source_hash") == current_hash:
+                    if attachment.parent_item_key:
+                        from zocrates.rag.library_syncer import (
+                            supersede_metadata_bundle_if_needed,
+                        )
+
+                        supersede_metadata_bundle_if_needed(attachment.parent_item_key, syncer)
                     logger.info(
                         "Skipping already converted item %s ('%s') with %s",
                         attachment.item_key,
@@ -1705,6 +1762,11 @@ async def convert_item(item_key: str, request: ConvertRequest | None = None) -> 
             chunks,
             meta_dict,
         )
+        if attachment.parent_item_key:
+            from zocrates.rag.library_syncer import supersede_metadata_bundle_if_needed
+
+            supersede_metadata_bundle_if_needed(attachment.parent_item_key, syncer)
+
         syncer.processor.update_indexed_at(attachment.item_key)
         _dispatch_edge_evaluation(attachment.item_key, syncer)
 
@@ -2110,6 +2172,12 @@ async def batch_convert(
                     try:
                         current_hash = _file_sha256(att.path)
                         if meta.get("source_hash") == current_hash:
+                            if att.parent_item_key:
+                                from zocrates.rag.library_syncer import (
+                                    supersede_metadata_bundle_if_needed,
+                                )
+
+                                supersede_metadata_bundle_if_needed(att.parent_item_key, syncer)
                             skipped += 1
                             logger.info("[%d/%d] Skipping already converted item %s ('%s') with %s", idx, total,
                                         att.item_key, title, effective_id)
@@ -2264,6 +2332,13 @@ async def batch_convert(
                         chunks,
                         meta_dict,
                     )
+                    if att.parent_item_key:
+                        from zocrates.rag.library_syncer import (
+                            supersede_metadata_bundle_if_needed,
+                        )
+
+                        supersede_metadata_bundle_if_needed(att.parent_item_key, syncer)
+
                     syncer.processor.update_indexed_at(att.item_key)
                     _dispatch_edge_evaluation(att.item_key, syncer)
 
@@ -2533,6 +2608,13 @@ async def batch_index(
                         chunks,
                         meta_dict,
                     )
+                    if att.parent_item_key:
+                        from zocrates.rag.library_syncer import (
+                            supersede_metadata_bundle_if_needed,
+                        )
+
+                        supersede_metadata_bundle_if_needed(att.parent_item_key, syncer)
+
                     syncer.processor.update_indexed_at(ak)
                     _dispatch_edge_evaluation(ak, syncer)
 
@@ -2908,12 +2990,28 @@ async def delete_items(request: ItemDeleteRequest) -> dict:
 
     valid_keys = [k for k in request.item_keys if _validate_item_key(k)]
 
-    def _purge_worker() -> list[str]:
+    def _purge_worker() -> tuple[list[str], list[str]]:
         """Purge requested items from disk and sync indexes synchronously.
 
         Returns:
-            List of successfully purged item keys.
+            Tuple of (purged_keys, candidate_parent_keys).
         """
+        candidate_parents: set[str] = set()
+        if hasattr(syncer, "processor") and hasattr(syncer.processor, "get_metadata"):
+            for k in valid_keys:
+                try:
+                    meta = syncer.processor.get_metadata(k)
+                    if isinstance(meta, dict):
+                        p_key = meta.get("parent_item_key")
+                        if (
+                            p_key
+                            and p_key not in valid_keys
+                            and meta.get("content_type") not in ("text/note", "text/zotero-metadata")
+                        ):
+                            candidate_parents.add(p_key)
+                except Exception as exc:
+                    logger.warning("Failed to inspect metadata for item %s: %s", k, exc)
+
         purged_keys: list[str] = []
         for key in valid_keys:
             try:
@@ -2923,9 +3021,45 @@ async def delete_items(request: ItemDeleteRequest) -> dict:
                 logger.error("Failed to purge item %s: %s", key, exc)
         if purged_keys:
             syncer.processor.regenerate_root_index()
-        return purged_keys
+        return purged_keys, list(candidate_parents)
 
-    purged = await asyncio.to_thread(_purge_worker)
+    purged, candidate_parent_keys = await asyncio.to_thread(_purge_worker)
+
+    rematerialized_any = False
+    for p_key in candidate_parent_keys:
+        if p_key and getattr(syncer, "db", None) and hasattr(syncer, "processor"):
+            try:
+                p_item = syncer.db.get_item_by_key(p_key)
+                if p_item and not syncer.processor.has_child_attachments(p_key):
+                    atts = (
+                        syncer.db.get_attachments(p_item.item_id)
+                        if hasattr(syncer.db, "get_attachments")
+                        else []
+                    )
+                    valid_atts = [
+                        a for a in atts
+                        if getattr(a, "path", None) and (
+                            a.path.exists() if callable(getattr(a.path, "exists", None)) else False
+                        )
+                    ]
+                    if not valid_atts:
+                        ingest_coro = syncer._ingest_item(
+                            p_item.item_id,
+                            p_key,
+                            getattr(p_item, "title", "") or "",
+                            evaluate_edges=True,
+                        )
+                        res = await ingest_coro if inspect.isawaitable(ingest_coro) else ingest_coro
+                        if res == "processed":
+                            rematerialized_any = True
+            except Exception as exc:
+                logger.warning("Failed to rematerialize childless parent %s: %s", p_key, exc)
+
+    if rematerialized_any and hasattr(syncer, "processor") and hasattr(syncer.processor, "regenerate_root_index"):
+        try:
+            await asyncio.to_thread(syncer.processor.regenerate_root_index)
+        except Exception as exc:
+            logger.warning("Failed to regenerate root index after rematerialization: %s", exc)
 
     return {"status": "success", "purged": purged}
 
@@ -4471,7 +4605,18 @@ async def update_active_converter(request: ConverterChangeRequest) -> dict:
         if target_datalab_merge_cross_page is not None:
             config_updates["datalab_merge_cross_page"] = target_datalab_merge_cross_page
         if target_datalab_key is not None:
-            config_updates["datalab_api_key"] = target_datalab_key
+            from pydantic import SecretStr
+
+            key_str = (
+                target_datalab_key.get_secret_value()
+                if isinstance(target_datalab_key, SecretStr)
+                else str(target_datalab_key)
+            )
+            if key_str.strip():
+                from zocrates.config import save_datalab_api_key
+
+                save_datalab_api_key(key_str.strip())
+                config_updates["datalab_api_key"] = key_str.strip()
         if target_conversion_timeout is not None:
             config_updates["conversion_timeout_seconds"] = max(30, int(target_conversion_timeout))
 

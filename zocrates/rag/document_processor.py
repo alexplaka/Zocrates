@@ -16,6 +16,7 @@ Each item gets an item-centric bundle directory:
 """
 
 import hashlib
+import html as html_module
 import json
 import logging
 import re
@@ -100,6 +101,8 @@ _INITIALIZED_META_DBS: set[Path] = set()
 
 # Lock protecting concurrent note bundle materialization (atomic directory swap).
 _note_bundle_lock = threading.Lock()
+# Lock protecting concurrent metadata bundle materialization (atomic directory swap).
+_metadata_bundle_lock = threading.Lock()
 
 
 def _open_meta_db(cache_dir: Path) -> sqlite3.Connection:
@@ -264,7 +267,7 @@ def _migrate_storage_paths_to_relative(
 
         cursor = conn.execute(
             "SELECT item_key, source_path FROM conversion_meta "
-            "WHERE source_path NOT LIKE 'storage/%' AND source_path NOT LIKE 'zotero://note/%';"
+            "WHERE source_path NOT LIKE 'storage/%' AND source_path NOT LIKE 'zotero://%';"
         )
         rows = cursor.fetchall()
         updates = []
@@ -769,6 +772,21 @@ class DocumentProcessor:
             generate_root_index_md(self._cache_dir)
 
         return deleted
+
+    def has_child_attachments(self, parent_item_key: str) -> bool:
+        """Return True if any attachment bundle exists in conversion_meta for parent_item_key."""
+        if not parent_item_key:
+            return False
+        with _open_meta_db(self._cache_dir) as conn:
+            row = conn.execute(
+                """
+                SELECT 1 FROM conversion_meta
+                WHERE parent_item_key = ? AND content_type NOT IN ('text/note', 'text/zotero-metadata')
+                LIMIT 1
+                """,
+                (parent_item_key,),
+            ).fetchone()
+            return row is not None
 
     def update_indexed_at(self, item_key: str, timestamp: str | None = None) -> None:
         """Update the indexed_at timestamp for item_key in conversion_meta DB.
@@ -1622,3 +1640,269 @@ def materialize_note_bundle(
             )
 
         return note_dir, note.note_key
+
+
+def compute_item_content_hash(item: Any) -> str:
+    """Compute canonical content and bibliographic SHA-256 hash for a metadata-only Zotero item."""
+    title = (getattr(item, "title", None) or "").strip()
+    abstract = (getattr(item, "abstract", None) or "").strip()
+    creators_str = ";".join(str(c) for c in (getattr(item, "creators", None) or []))
+    collections_str = ";".join(
+        f"{getattr(c, 'key', '')}:{getattr(c, 'name', '')}"
+        for c in (getattr(item, "collections", None) or [])
+    )
+    raw = (
+        f"{getattr(item, 'item_key', '')}|{getattr(item, 'item_type', '')}|{title}|"
+        f"{creators_str}|{getattr(item, 'year', '')}|{getattr(item, 'publication', '')}|"
+        f"{getattr(item, 'doi', '')}|{getattr(item, 'url', '')}|{abstract}|"
+        f"{collections_str}"
+    )
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def materialize_item_metadata_bundle(
+    item: Any,
+    syncer: Any,
+    cache_dir: Path | None = None,
+    force: bool = False,
+) -> tuple[Path, str]:
+    """Create or refresh an OKF bundle for an attachment-free Zotero item in the markdown cache.
+
+    The bundle is placed at ``<cache_dir>/<item.item_key>/`` and contains
+    ``document.md``, ``toc.json``, ``toc.md``, ``index.md``, and ``item_relations.md``.
+    Staleness is detected via a SHA-256 hash of the canonical title, abstract, and bibliographic fields.
+
+    Zero LLM calls, thread-safe (via ``_metadata_bundle_lock``), and atomic directory
+    swap (write to ``.tmp_{key}`` then rename).
+
+    Args:
+        item: A ``ZoteroItem`` instance.
+        syncer: The active ``LibrarySyncer`` instance.
+        cache_dir: Override for the cache directory; defaults to
+            ``syncer.processor._cache_dir``.
+        force: If True, bypasses hash fast-path and forces re-materialization.
+
+    Returns:
+        Tuple of ``(item_dir, item.item_key)``.
+    """
+    effective_cache_dir: Path = (
+        cache_dir if cache_dir is not None else syncer.processor._cache_dir
+    )
+    item_dir = effective_cache_dir / item.item_key
+    current_hash = compute_item_content_hash(item)
+
+    # Fast path: bundle exists and hash matches (checked outside lock).
+    if not force and item_dir.exists() and (item_dir / "document.md").exists():
+        existing_meta = syncer.processor.get_metadata(item.item_key)
+        if existing_meta and existing_meta.get("source_hash") == current_hash:
+            return item_dir, item.item_key
+
+    with _metadata_bundle_lock:
+        # Re-check inside lock (double-checked locking pattern).
+        if not force and item_dir.exists() and (item_dir / "document.md").exists():
+            existing_meta = syncer.processor.get_metadata(item.item_key)
+            if existing_meta and existing_meta.get("source_hash") == current_hash:
+                return item_dir, item.item_key
+
+        # Title fallback: if title is missing or whitespace-only
+        raw_title = (getattr(item, "title", None) or "").strip()
+        if not raw_title:
+            effective_title = (
+                (getattr(item, "doi", None) or "").strip()
+                or (getattr(item, "url", None) or "").strip()
+                or f"Untitled Item ({item.item_key})"
+            )
+        else:
+            effective_title = raw_title
+
+        # Abstract sanitization: strip JATS XML markup and demote raw markdown headers
+        raw_abstract = (getattr(item, "abstract", None) or "").strip()
+        cleaned_abstract: str | None = None
+        if raw_abstract:
+            # Replace block and heading HTML/JATS tags with newlines
+            abs_text = re.sub(
+                r"</?(?:jats:[^>]+|p|div|sec|title|h[1-6])\b[^>]*>",
+                "\n",
+                raw_abstract,
+                flags=re.IGNORECASE,
+            )
+            # Strip remaining inline tags
+            abs_text = re.sub(r"<[^>]+>", " ", abs_text)
+            abs_text = html_module.unescape(abs_text)
+            # Demote line-leading markdown headings and strip YAML fences
+            abs_lines = []
+            for line in abs_text.splitlines():
+                stripped_line = line.strip()
+                if stripped_line.startswith("---"):
+                    continue
+                # Only strip line-leading ATX heading hashes (e.g. '### Header')
+                line = re.sub(r"^\s*#+\s*", "", line)
+                abs_lines.append(line.rstrip())
+            clean_str = "\n".join(abs_lines).strip()
+            cleaned_abstract = re.sub(r"\n{3,}", "\n\n", clean_str).strip() or None
+
+        # Statistical keywords extraction
+        keywords: list[str] = []
+        try:
+            from zocrates.rag.keyword_extractor import extract_statistical_keywords
+
+            keywords = extract_statistical_keywords(
+                effective_title, cleaned_abstract or "", max_keywords=6
+            )
+        except Exception:
+            pass
+
+        # Build document body with Notice under ## Document Overview (outside the abstract)
+        if cleaned_abstract:
+            body = (
+                f"\n# {effective_title}\n\n"
+                "## Document Overview\n\n"
+                "> **Notice**: This Zotero entry does not have an attached full-text document (PDF/HTML). "
+                "Only bibliographic metadata and the abstract are available in the library.\n\n"
+                "## Abstract\n\n"
+                f"{cleaned_abstract}\n"
+            )
+        else:
+            authors_list = getattr(item, "creators", None) or []
+            authors_str = "; ".join(authors_list) if authors_list else "Unknown"
+            year_val = getattr(item, "year", None) or "Unknown"
+            pub_val = getattr(item, "publication", None) or ""
+            doi_val = getattr(item, "doi", None) or ""
+            summary_lines = [
+                f"- **Title**: {effective_title}",
+                f"- **Authors**: {authors_str}",
+                f"- **Year**: {year_val}",
+            ]
+            if pub_val:
+                summary_lines.append(f"- **Publication**: {pub_val}")
+            if doi_val:
+                summary_lines.append(f"- **DOI**: {doi_val}")
+            bib_summary = "\n".join(summary_lines)
+
+            body = (
+                f"\n# {effective_title}\n\n"
+                "## Document Overview\n\n"
+                "> **Notice**: This Zotero entry is a metadata-only record with no attached "
+                "full-text document (PDF/HTML) and no abstract in Zotero.\n\n"
+                "## Bibliographic Summary\n\n"
+                f"{bib_summary}\n"
+            )
+
+        from zocrates.rag.bundle_catalog import build_frontmatter
+
+        converted_at = datetime.now(UTC).isoformat()
+        frontmatter = build_frontmatter(
+            item_key=item.item_key,
+            parent_item_type=getattr(item, "item_type", None) or "document",
+            title=effective_title,
+            collections=getattr(item, "collections", None),
+            source_path=f"zotero://item/{item.item_key}",
+            source_hash=current_hash,
+            content_type="text/zotero-metadata",
+            converter_id="zotero_metadata",
+            converter_version="1.0",
+            converted_at=converted_at,
+            parent_item_key=None,
+            authors=getattr(item, "creators", None),
+            year=getattr(item, "year", None),
+            publication=getattr(item, "publication", None),
+            doi=getattr(item, "doi", None),
+            url=getattr(item, "url", None),
+            keywords=keywords,
+            bundle_dir=None,
+        )
+        full_doc = frontmatter + body
+
+        # Write to staging directory then atomically swap
+        tmp_dir = effective_cache_dir / f".tmp_{item.item_key}"
+        if tmp_dir.exists():
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+
+        (tmp_dir / "document.md").write_text(full_doc, encoding="utf-8")
+
+        # ToC Generation
+        try:
+            from zocrates.rag.toc_generator import generate_toc, save_toc_files
+
+            effective_abstract = cleaned_abstract if cleaned_abstract else None
+            effective_abstract_source = "zotero" if cleaned_abstract else "none"
+            toc_json, toc_md = generate_toc(
+                document_md=full_doc,
+                title=effective_title,
+                abstract=effective_abstract,
+                abstract_source=effective_abstract_source,
+                item_key=item.item_key,
+                parent_item_key=None,
+            )
+            save_toc_files(tmp_dir, toc_json, toc_md)
+        except Exception as exc:
+            logger.warning(
+                "ToC generation failed for metadata item %s: %s", item.item_key, exc
+            )
+
+        # item_relations.md & index.md inside staging dir
+        try:
+            from zocrates.rag.bundle_catalog import (
+                generate_item_index_md,
+                regenerate_item_relations_md,
+            )
+
+            regenerate_item_relations_md(
+                item_key=item.item_key,
+                cache_dir=effective_cache_dir,
+                target_bundle_dir=tmp_dir,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to generate item_relations.md for metadata item %s: %s",
+                item.item_key,
+                exc,
+            )
+
+        generate_item_index_md(
+            item_dir=tmp_dir,
+            item_key=item.item_key,
+            title=effective_title,
+            converter_id="zotero_metadata",
+            converter_version="1.0",
+        )
+
+        # Atomic swap
+        if item_dir.exists():
+            shutil.rmtree(item_dir, ignore_errors=True)
+        tmp_dir.rename(item_dir)
+
+        # Persist conversion metadata with indexed_at = NULL
+        with _open_meta_db(effective_cache_dir) as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO conversion_meta
+                    (item_key, title, converter_id, converter_version, source_path,
+                     content_type, parent_item_type, converted_at, indexed_at, source_hash, char_count,
+                     parent_item_key, parse_quality_score, checkpoint_id, abstract, abstract_source, keywords)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    item.item_key,
+                    effective_title,
+                    "zotero_metadata",
+                    "1.0",
+                    f"zotero://item/{item.item_key}",
+                    "text/zotero-metadata",
+                    getattr(item, "item_type", None) or "document",
+                    converted_at,
+                    None,  # indexed_at stamped upon vector store ingestion
+                    current_hash,
+                    len(full_doc),
+                    None,  # parent_item_key
+                    None,  # parse_quality_score
+                    None,  # checkpoint_id
+                    cleaned_abstract if cleaned_abstract else None,
+                    "zotero" if cleaned_abstract else "none",
+                    json.dumps(keywords) if keywords else None,
+                ),
+            )
+            conn.commit()
+
+        return item_dir, item.item_key

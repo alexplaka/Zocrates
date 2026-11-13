@@ -373,45 +373,91 @@ def sync_shared_tags(
         return 0
 
     effective_score = score
+    cfg_graph = None
+    try:
+        from zocrates.config import get_graph_relations_config
+        cfg_graph = get_graph_relations_config(zotero_dir)
+    except Exception:
+        pass
+
     if effective_score is None:
-        try:
-            from zocrates.config import get_graph_relations_config
-            cfg = get_graph_relations_config(zotero_dir)
-            effective_score = float(cfg.get("shared_tags_score", 0.70))
-        except Exception:
-            effective_score = 0.70
+        effective_score = float(cfg_graph.get("shared_tags_score", 0.70)) if cfg_graph else 0.70
+
+    include_auto = cfg_graph.get("include_automatic_tags_in_shared_tags", True) if cfg_graph else True
+    tag_type = None if include_auto else 0
 
     try:
-        rows = conn.execute("SELECT item_key, parent_item_key FROM conversion_meta").fetchall()
-        items = [(r["item_key"], r["parent_item_key"]) for r in rows]
+        rows = conn.execute(
+            "SELECT item_key, parent_item_key, content_type FROM conversion_meta"
+        ).fetchall()
     except Exception:
         return 0
 
-    if not items:
+    if not rows:
         return 0
 
-    # Retrieve user tags (tag_type=0) for all items
+    # Resolve primary bundle key per parent paper and exclude child notes from tag entity map
+    parent_map: dict[str, str] = {}
+    paper_primary_key: dict[str, str] = {}
+
+    for r in rows:
+        k = r["item_key"]
+        pk = r["parent_item_key"]
+        ct = r["content_type"]
+        is_pdf = ct == "application/pdf"
+        parent_id = pk or k
+        parent_map[k] = parent_id
+
+        # Skip child notes attached to a parent from being distinct tag sharing entities
+        if ct == "text/note" and pk:
+            continue
+
+        # Choose primary bundle key for each parent paper (prefer PDF)
+        if parent_id not in paper_primary_key or is_pdf:
+            paper_primary_key[parent_id] = k
+
+    # Retrieve tags per unique parent paper
+    unique_paper_tags: dict[str, set[str]] = {}
+    for parent_id, primary_k in paper_primary_key.items():
+        tags = set(get_item_tags(zotero_dir, item_key=parent_id, tag_type=tag_type))
+        if not tags and primary_k != parent_id:
+            tags = set(get_item_tags(zotero_dir, item_key=primary_k, tag_type=tag_type))
+        unique_paper_tags[parent_id] = tags
+
+    # Compute Document Frequency (DF) across unique parent papers in the library
+    tag_df: dict[str, int] = {}
+    for tags in unique_paper_tags.values():
+        for t in tags:
+            tag_df[t] = tag_df.get(t, 0) + 1
+
+    total_items = len(unique_paper_tags)
+    df_cap = max(5, int(total_items * 0.05)) if total_items > 0 else 5
+
     item_tags_map: dict[str, set[str]] = {}
-    for k, pk in items:
-        tags = set(get_item_tags(zotero_dir, item_key=k, tag_type=0))
-        if pk and not tags:
-            tags = set(get_item_tags(zotero_dir, item_key=pk, tag_type=0))
-        item_tags_map[k] = tags
+    for parent_id, tags in unique_paper_tags.items():
+        primary_k = paper_primary_key.get(parent_id)
+        if primary_k:
+            item_tags_map[primary_k] = {t for t in tags if tag_df[t] <= df_cap}
 
     created_count = 0
     if target_key:
-        src_tags = item_tags_map.get(target_key, set())
+        target_bundle_key = target_key
+        target_parent = parent_map.get(target_key, target_key)
+        if target_key in paper_primary_key:
+            target_bundle_key = paper_primary_key[target_key]
+
+        src_tags = item_tags_map.get(target_bundle_key, set())
         if not src_tags:
             return 0
         for other_key, other_tags in item_tags_map.items():
-            if other_key == target_key:
+            if other_key == target_bundle_key or parent_map.get(other_key) == target_parent:
                 continue
             shared = src_tags & other_tags
             if len(shared) >= min_shared_tags:
                 evidence = json.dumps({"shared_tags": sorted(list(shared))})
                 upsert_edge(
                     conn=conn,
-                    source_key=target_key,
+                    source_key=target_bundle_key,
                     target_key=other_key,
                     score=effective_score,
                     relation_type="shared_tags",
@@ -423,11 +469,15 @@ def sync_shared_tags(
         all_keys = sorted(item_tags_map.keys())
         for i in range(len(all_keys)):
             k1 = all_keys[i]
+            p1 = parent_map.get(k1, k1)
             t1 = item_tags_map[k1]
             if len(t1) < min_shared_tags:
                 continue
             for j in range(i + 1, len(all_keys)):
                 k2 = all_keys[j]
+                p2 = parent_map.get(k2, k2)
+                if p1 == p2:
+                    continue
                 t2 = item_tags_map[k2]
                 shared = t1 & t2
                 if len(shared) >= min_shared_tags:
@@ -450,6 +500,7 @@ def evaluate_and_persist_edges(
     item_key: str,
     syncer: Any,
     sync_bundle_files: bool = True,
+    sync_ground_truth: bool = True,
 ) -> list[dict[str, Any]]:
     """Evaluate and persist relations for an item using hybrid search and ground truth.
 
@@ -496,7 +547,7 @@ def evaluate_and_persist_edges(
     try:
         item_row = conn.execute(
             """
-            SELECT item_key, parent_item_key, title, abstract, keywords, content_type
+            SELECT item_key, parent_item_key, title, abstract, keywords, content_type, abstract_source
             FROM conversion_meta
             WHERE item_key = ?
             """,
@@ -505,6 +556,52 @@ def evaluate_and_persist_edges(
 
         if not item_row:
             return []
+
+        col_keys = item_row.keys()
+        is_metadata_bundle = item_row["content_type"] == "text/zotero-metadata"
+        abs_src = item_row["abstract_source"] if "abstract_source" in col_keys else None
+        has_substantive_abstract = bool(item_row["abstract"] and abs_src != "none")
+
+        # If an item has NO abstract, skip running dense/BM25 hybrid search
+        if is_metadata_bundle and not has_substantive_abstract:
+            if sync_ground_truth:
+                if cfg.get("include_human_curated", True) and zotero_dir:
+                    sync_manual_relations(conn=conn, zotero_dir=zotero_dir, target_key=item_key)
+                if cfg.get("include_shared_tags", True) and zotero_dir:
+                    sync_shared_tags(
+                        conn=conn,
+                        zotero_dir=zotero_dir,
+                        min_shared_tags=int(cfg.get("min_shared_tags", 2)),
+                        target_key=item_key,
+                        score=float(cfg.get("shared_tags_score", 0.70)),
+                    )
+            edges_cursor = conn.execute(
+                """
+                SELECT source_key, target_key, score, relation_type, match_evidence, updated_at
+                FROM item_relations
+                WHERE source_key = ?
+                ORDER BY score DESC, target_key ASC
+                """,
+                (item_key,),
+            )
+            persisted_edges = [dict(r) for r in edges_cursor.fetchall()]
+            if sync_bundle_files and cfg.get("sync_bundle_files", True):
+                try:
+                    from zocrates.rag.bundle_catalog import regenerate_item_relations_md
+
+                    regenerate_item_relations_md(item_key=item_key, cache_dir=cache_dir)
+                    connected_neighbors = {
+                        e["target_key"] for e in persisted_edges if e.get("target_key")
+                    }
+                    for neighbor_key in connected_neighbors:
+                        regenerate_item_relations_md(item_key=neighbor_key, cache_dir=cache_dir)
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to synchronize item_relations.md files for %s: %s",
+                        item_key,
+                        exc,
+                    )
+            return persisted_edges
 
         title = str(item_row["title"] or "").strip()
         abstract = str(item_row["abstract"] or "").strip()
@@ -648,17 +745,18 @@ def evaluate_and_persist_edges(
                 )
 
         # Ground truth ingestion: manual links & shared tags
-        if cfg.get("include_human_curated", True) and zotero_dir:
-            sync_manual_relations(conn=conn, zotero_dir=zotero_dir, target_key=item_key)
+        if sync_ground_truth:
+            if cfg.get("include_human_curated", True) and zotero_dir:
+                sync_manual_relations(conn=conn, zotero_dir=zotero_dir, target_key=item_key)
 
-        if cfg.get("include_shared_tags", True) and zotero_dir:
-            sync_shared_tags(
-                conn=conn,
-                zotero_dir=zotero_dir,
-                min_shared_tags=int(cfg.get("min_shared_tags", 2)),
-                target_key=item_key,
-                score=float(cfg.get("shared_tags_score", 0.70)),
-            )
+            if cfg.get("include_shared_tags", True) and zotero_dir:
+                sync_shared_tags(
+                    conn=conn,
+                    zotero_dir=zotero_dir,
+                    min_shared_tags=int(cfg.get("min_shared_tags", 2)),
+                    target_key=item_key,
+                    score=float(cfg.get("shared_tags_score", 0.70)),
+                )
 
         # Query all verified edges for item_key
         edges_cursor = conn.execute(

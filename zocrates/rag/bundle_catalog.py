@@ -38,7 +38,12 @@ def _compute_relative_source_path(
     if not source_path or not str(source_path).strip():
         return ""
     str_source = str(source_path).strip()
-    if "://" in str_source or str_source.startswith("zotero:"):
+    if (
+        str_source.startswith("zotero://note/")
+        or str_source.startswith("zotero://item/")
+        or "://" in str_source
+        or str_source.startswith("zotero:")
+    ):
         return str_source
     if str_source.startswith("storage/"):
         return "../../../" + str_source
@@ -74,7 +79,7 @@ def normalize_to_storage_relative(
         return ""
 
     str_path = str(source_path).strip()
-    if str_path.startswith("zotero://note/"):
+    if str_path.startswith("zotero://note/") or str_path.startswith("zotero://item/"):
         return str_path
 
     if "://" in str_path:
@@ -130,7 +135,11 @@ def resolve_source_path(
         return ""
 
     str_stored = str(stored_path).strip()
-    if str_stored.startswith("zotero://note/") or ("file:" not in str_stored and "://" in str_stored):
+    if (
+        str_stored.startswith("zotero://note/")
+        or str_stored.startswith("zotero://item/")
+        or ("file:" not in str_stored and "://" in str_stored)
+    ):
         return str_stored
 
     if str_stored.startswith("storage/"):
@@ -737,6 +746,8 @@ def generate_root_index_md(cache_dir: Path) -> None:
             stored_path = (r["source_path"] or "").strip()
             if stored_path.startswith("zotero://note/"):
                 rel_source = f"[Zotero Note]({stored_path})"
+            elif stored_path.startswith("zotero://item/"):
+                rel_source = f"[Zotero Item]({stored_path})"
             elif stored_path.startswith("storage/"):
                 rel_source = f"[Source Document](../../{stored_path})"
             elif stored_path.startswith("../../storage/"):

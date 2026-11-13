@@ -277,6 +277,25 @@ var AutoConverter = {
         }
       }, delay);
     });
+
+    // 30-second debounced check for attachment-free regular items (allowing Zotero sync or PDF find to finish)
+    setTimeout(() => {
+      try {
+        if (this._suppressAll || this._suppressParentIDs.has(itemId)) return;
+        // Skip check if Zotero is currently syncing
+        if (typeof Zotero !== "undefined" && Zotero.Sync && Zotero.Sync.Runner && Zotero.Sync.Runner.syncInProgress) {
+          return;
+        }
+        let item = Zotero.Items.get(itemId);
+        if (!item || item.deleted || !item.isRegularItem()) return;
+        let attIDs = item.getAttachments ? item.getAttachments() : [];
+        if (!attIDs || attIDs.length === 0) {
+          this.enqueueMetadataItem(item.key);
+        }
+      } catch (e) {
+        Zotero.debug("Zocrates: AutoConverter 30s metadata check error for id " + itemId + ": " + e);
+      }
+    }, 30000);
   },
 
   notify(event, type, ids, extraData) {
@@ -348,6 +367,7 @@ var AutoConverter = {
 
     if (event === "trash" || event === "delete") {
       let keys = new Set();
+      let candidateParentIDs = new Set();
       for (let id of ids) {
         try {
           let item = Zotero.Items.get(id);
@@ -377,6 +397,9 @@ var AutoConverter = {
           }
 
           if (item) {
+            if (typeof item.isAttachment === "function" && item.isAttachment() && item.parentItemID) {
+              candidateParentIDs.add(item.parentItemID);
+            }
             if (item.key) keys.add(item.key);
             if (typeof item.isRegularItem === "function" && item.isRegularItem()) {
               if (typeof item.getAttachments === "function") {
@@ -430,6 +453,40 @@ var AutoConverter = {
           }).catch((err) => {
             Zotero.debug("Zocrates: AutoConverter failed to purge deleted items: " + err);
           });
+
+          if (candidateParentIDs.size > 0) {
+            let deletionBatchSet = new Set(ids);
+            for (let parentID of candidateParentIDs) {
+              if (deletionBatchSet.has(parentID)) continue;
+              try {
+                let parent = Zotero.Items.get(parentID);
+                if (parent && !parent.deleted && !keys.has(parent.key) && typeof parent.isRegularItem === "function" && parent.isRegularItem()) {
+                  let attIDs = typeof parent.getAttachments === "function" ? (parent.getAttachments() || []) : [];
+                  let hasLiveAtt = false;
+                  for (let attID of attIDs) {
+                    if (!deletionBatchSet.has(attID)) {
+                      let att = Zotero.Items.get(attID);
+                      if (att && !att.deleted && isConvertibleAttachment(att) && att.attachmentLinkMode !== 3) {
+                        hasLiveAtt = true;
+                        break;
+                      }
+                    }
+                  }
+                  if (!hasLiveAtt && parent.key) {
+                    fetchFn(`${serverUrl}/items/ingest`, {
+                      method: "POST",
+                      headers: this.getAuthHeaders({ "Content-Type": "application/json" }),
+                      body: JSON.stringify({ item_keys: [parent.key] }),
+                    }).catch((err) => {
+                      Zotero.debug("Zocrates: AutoConverter failed to rematerialize childless parent: " + err);
+                    });
+                  }
+                }
+              } catch (e) {
+                Zotero.debug("Zocrates: AutoConverter parent rematerialize error for parentID " + parentID + ": " + e);
+              }
+            }
+          }
         }
       }
       return;
@@ -448,6 +505,17 @@ var AutoConverter = {
     this._queue.push(key);
     Zotero.debug("Zocrates: AutoConverter enqueued item " + key);
 
+    this.processQueue();
+  },
+
+  enqueueMetadataItem(key) {
+    if (!key || this._suppressAll || this._suppressKeys.has(key)) return;
+    if (this._inQueue.has(key) || this._activeConversions.has(key) || this._convertedCache.has(key)) {
+      return;
+    }
+    this._inQueue.add(key);
+    this._queue.push(key);
+    Zotero.debug("Zocrates: AutoConverter enqueued metadata item " + key);
     this.processQueue();
   },
 
@@ -497,6 +565,39 @@ var AutoConverter = {
     }
 
     if (!attItem || attItem.deleted) return;
+
+    if (typeof attItem.isRegularItem === "function" && attItem.isRegularItem()) {
+      let atts = attItem.getAttachments ? attItem.getAttachments() : [];
+      let hasConvertibleFile = false;
+      for (let attID of atts) {
+        let att = Zotero.Items.get(attID);
+        if (att && !att.deleted && isConvertibleAttachment(att) && att.attachmentLinkMode !== 3) {
+          hasConvertibleFile = true;
+          break;
+        }
+      }
+      if (!hasConvertibleFile) {
+        let fetchFn = _resolveAutoConverterFetch();
+        if (!fetchFn) return;
+        if (Zotero.DB && typeof Zotero.DB.queryAsync === "function") {
+          try {
+            await Zotero.DB.queryAsync("PRAGMA wal_checkpoint(TRUNCATE)");
+          } catch (e) {}
+        }
+        let serverUrl = this.getServerUrl();
+        await fetchFn(`${serverUrl}/items/ingest`, {
+          method: "POST",
+          headers: this.getAuthHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({ item_keys: [key] }),
+        }).catch((err) => {
+          this._convertedCache.delete(key);
+          Zotero.debug("Zocrates: AutoConverter failed to ingest metadata item " + key + ": " + err);
+        });
+        Zotero.debug("Zocrates: AutoConverter ingested metadata-only item " + key);
+        setTimeout(() => this._convertedCache.delete(key), 60000);
+      }
+      return;
+    }
 
     // Verify attachment file exists on disk & non-zero size with async retry backoff
     let file = await waitForAttachmentFile(attItem, 4, 500);

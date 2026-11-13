@@ -1333,6 +1333,30 @@ function cleanupActivityListeners() {
   _activityListenersInstalled = false;
 }
 
+function syncWarmBackendCredentials(statusData) {
+  if (!statusData || statusData.status !== "ready") return null;
+  const missingKeys = {};
+  const datalabKey = loadStoredApiKey("datalab_api_key");
+  if (statusData.has_datalab_key === false && datalabKey) {
+    missingKeys.datalab_api_key = datalabKey;
+  }
+  const openalexKey = loadStoredApiKey("openalex_api_key");
+  if (statusData.has_openalex_api_key === false && openalexKey) {
+    missingKeys.openalex_api_key = openalexKey;
+  }
+  if (Object.keys(missingKeys).length > 0) {
+    return fetch(`${BACKEND_URL}/config`, {
+      method: "POST",
+      headers: getAuthHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(missingKeys),
+    }).catch((e) => {
+      try { Zotero.debug("Zocrates sidebar: failed to sync warm credentials: " + e); } catch (_) {}
+      return null;
+    });
+  }
+  return null;
+}
+
 function checkBackendStatus() {
   if (_backendCheckInFlight) {
     return _backendCheckInFlight;
@@ -1372,8 +1396,29 @@ function checkBackendStatus() {
         if (_lastBackendOnline === false || sessions.length === 0 || (sessions.length === 1 && sessions[0].id && sessions[0].id.startsWith("session_"))) {
           loadSessions();
         }
+        const wasBackendOnline = _lastBackendOnline;
         _lastBackendOnline = true;
         _consecutiveBackendFailures = 0;
+
+        // Warm-backend credential synchronization: check once on connect/reconnect
+        // if Zotero holds vault credentials that a warm backend might be missing.
+        if (
+          wasBackendOnline !== true &&
+          (loadStoredApiKey("datalab_api_key") || loadStoredApiKey("openalex_api_key"))
+        ) {
+          if (data && typeof data.has_datalab_key === "boolean") {
+            syncWarmBackendCredentials(data);
+          } else {
+            fetch(`${BACKEND_URL}/status`, { headers: getAuthHeaders() })
+              .then((r) => (r.ok ? r.json() : null))
+              .then((statusData) => {
+                if (statusData && statusData.status === "ready") {
+                  syncWarmBackendCredentials(statusData);
+                }
+              })
+              .catch(() => {});
+          }
+        }
       } else {
         // Backend is online but not registered. Auto-register in the background.
         await autoRegister();
@@ -4556,7 +4601,10 @@ function openItemInReader(attachmentKey, rawSection) {
         }
       }
 
-      if (!targetItemID) return;
+      if (!targetItemID) {
+        selectItemInZotero(attachmentKey);
+        return;
+      }
 
       let isPdf = Boolean(
         targetAttachment?.attachmentReaderType === "pdf" ||
@@ -5766,6 +5814,46 @@ function closeEvidencePopover() {
   }
 }
 
+function checkItemHasAttachment(citationOrKey) {
+  if (!citationOrKey) return false;
+  if (typeof citationOrKey === "object" && typeof citationOrKey.has_attachment === "boolean") {
+    return citationOrKey.has_attachment;
+  }
+  const citation = typeof citationOrKey === "object" ? citationOrKey : null;
+  const key = citation ? (citation.attachment_key || citation.item_key) : citationOrKey;
+  if (!key) return false;
+  try {
+    const zot = resolveZotero();
+    if (!zot || !zot.Items) return true;
+    let item = null;
+    const userLibID = zot.Libraries?.userLibraryID;
+    if (userLibID !== undefined && typeof zot.Items.getByLibraryAndKey === "function") {
+      item = zot.Items.getByLibraryAndKey(userLibID, key);
+    }
+    if (!item && zot.Libraries?.getAll && typeof zot.Items.getByLibraryAndKey === "function") {
+      for (const lib of zot.Libraries.getAll()) {
+        const cand = zot.Items.getByLibraryAndKey(lib.id, key);
+        if (cand) {
+          item = cand;
+          break;
+        }
+      }
+    }
+    if (!item) {
+      if (citation && citation.attachment_key && citation.attachment_key !== citation.item_key) {
+        return true;
+      }
+      return false;
+    }
+    if (item.isAttachment?.()) return true;
+    if (typeof item.getAttachments === "function") {
+      const attIDs = item.getAttachments();
+      return Boolean(attIDs && attIDs.length > 0);
+    }
+  } catch (_) {}
+  return false;
+}
+
 function showEvidencePopover(pill, citation) {
   if (activeEvidencePopover) {
     const isSamePill = (activeEvidencePopover._targetPill === pill);
@@ -6020,7 +6108,8 @@ function showEvidencePopover(pill, citation) {
   });
   footerDiv.appendChild(inspectBtn);
 
-  if (attKey) {
+  const hasOpenableAttachment = checkItemHasAttachment(citation);
+  if (attKey && hasOpenableAttachment) {
     const readerBtn = document.createElementNS(XHTMLNS, "button");
     readerBtn.className = "evidence-popover-btn popover-open-reader-btn";
     readerBtn.setAttribute("data-attachment-key", attKey);
@@ -6032,10 +6121,11 @@ function showEvidencePopover(pill, citation) {
     footerDiv.appendChild(readerBtn);
   }
 
-  if (itemKey) {
+  const effectiveItemKey = itemKey || attKey;
+  if (effectiveItemKey) {
     const selectBtn = document.createElementNS(XHTMLNS, "button");
     selectBtn.className = "evidence-popover-btn popover-select-item-btn";
-    selectBtn.setAttribute("data-item-key", itemKey);
+    selectBtn.setAttribute("data-item-key", effectiveItemKey);
     selectBtn.setAttribute("type", "button");
     selectBtn.textContent = "📁 Select in Library";
     footerDiv.appendChild(selectBtn);
@@ -8044,6 +8134,12 @@ function buildClaimsInspectorData(meta) {
     });
   }
 
+  rows.forEach(r => {
+    if (r.has_attachment === undefined) {
+      r.has_attachment = checkItemHasAttachment({ item_key: r.item_key, attachment_key: r.attachment_key });
+    }
+  });
+
   // Determine or compute summary stats
   let summary = (ver && ver.summary) ? Object.assign({}, ver.summary) : null;
   const threshold = (ver && ver.threshold !== undefined)
@@ -8834,15 +8930,17 @@ function renderCandidatePapersGroup(wrapperDiv, candidates, invocationId) {
           const paperUrl = (res && res.oaUrl) || cand.oa_pdf_url || cand.landing_page_url || cand.url || "";
 
           const badgesEl = card.querySelector(".candidate-card-badges");
-          if (badgesEl && !badgesEl.querySelector(".candidate-badge.imported")) {
+          if (badgesEl && !badgesEl.querySelector(".candidate-badge.imported, .candidate-badge.imported-no-pdf")) {
             const impBadge = document.createElementNS("http://www.w3.org/1999/xhtml", "span");
             if (hasAtt) {
               impBadge.className = "candidate-badge imported";
               impBadge.textContent = "✓ Imported";
             } else {
-              impBadge.className = "candidate-badge imported-no-pdf";
+              impBadge.className = "candidate-badge imported imported-no-pdf";
               impBadge.textContent = "✓ Imported (No PDF)";
-              impBadge.title = "Metadata saved, but PDF download was blocked by repository anti-bot protection (Cloudflare).";
+              impBadge.title = cand.oa_pdf_url
+                ? "Metadata saved, but PDF download was blocked by repository anti-bot protection (Cloudflare)."
+                : "Metadata saved to library (no open-access PDF was available for automatic download).";
               countWithoutPdf++;
             }
             badgesEl.appendChild(impBadge);
@@ -9088,7 +9186,7 @@ async function syncCandidatesWithLibrary(groupDiv, candidates) {
 
         const badgesEl = card.querySelector(".candidate-card-badges");
         if (badgesEl) {
-          let impBadge = badgesEl.querySelector(".candidate-badge.imported");
+          let impBadge = badgesEl.querySelector(".candidate-badge.imported, .candidate-badge.imported-no-pdf");
           if (!impBadge) {
             impBadge = document.createElementNS("http://www.w3.org/1999/xhtml", "span");
             badgesEl.appendChild(impBadge);
@@ -9097,7 +9195,7 @@ async function syncCandidatesWithLibrary(groupDiv, candidates) {
             impBadge.className = "candidate-badge imported";
             impBadge.textContent = "✓ Imported";
           } else {
-            impBadge.className = "candidate-badge imported-no-pdf";
+            impBadge.className = "candidate-badge imported imported-no-pdf";
             impBadge.textContent = "✓ Imported (No PDF)";
             impBadge.title = "Paper metadata present in library, but no PDF attachment found.";
           }
@@ -15159,6 +15257,7 @@ if (typeof window !== "undefined") {
   window.ensureClaimsInspectorBtn = ensureClaimsInspectorBtn;
   window.selectItemInLibrary = selectItemInLibrary;
   window.openItemInReader = openItemInReader;
+  window.checkItemHasAttachment = checkItemHasAttachment;
   window.buildHighlightedPassage = buildHighlightedPassage;
   try {
     Object.defineProperty(window, "sessions", {
@@ -15197,6 +15296,7 @@ if (typeof module !== "undefined" && module.exports) {
     resolvePoliteEmail,
     loadStoredApiKey,
     saveStoredApiKey,
+    syncWarmBackendCredentials,
     autoRegister,
     formatMessageContent,
     syncCandidatesWithLibrary,
@@ -15212,6 +15312,7 @@ if (typeof module !== "undefined" && module.exports) {
     findOutlineDestination,
     findHtmlSnapshotHeading,
     openItemInReader,
+    checkItemHasAttachment,
     stripCitationsFromText,
     buildReferencesMarkdown,
     getMessageTextForCopy,

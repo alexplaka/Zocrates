@@ -134,6 +134,72 @@ def test_update_active_converter_vlm_preferences(mock_get_syncer, mock_save):
     })
 
 
+@patch("zocrates.config.save_zocrates_config")
+@patch("zocrates.fast_api_app.get_syncer")
+def test_update_active_converter_sets_datalab_api_key(mock_get_syncer, mock_save):
+    """Verify POST /rag/converter with non-empty datalab_api_key sets get_datalab_api_key()."""
+    from zocrates.config import get_datalab_api_key, save_datalab_api_key
+
+    mock_syncer = MagicMock()
+    mock_get_syncer.return_value = mock_syncer
+
+    try:
+        response = client.post(
+            "/rag/converter",
+            json={
+                "converter_id": "datalab",
+                "document_converter_mode": "cloud",
+                "datalab_api_key": "test-datalab-valid-key-12345",
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "success"
+        assert get_datalab_api_key() == "test-datalab-valid-key-12345"
+        mock_save.assert_called_once_with({
+            "document_converter_id": "datalab",
+            "document_converter_mode": "cloud",
+            "datalab_api_key": "test-datalab-valid-key-12345",
+        })
+    finally:
+        save_datalab_api_key(None)
+
+
+@patch("zocrates.config.save_zocrates_config")
+@patch("zocrates.fast_api_app.get_syncer")
+def test_update_active_converter_empty_datalab_api_key_does_not_clobber(mock_get_syncer, mock_save):
+    """Verify POST /rag/converter with datalab_api_key: "" does NOT clobber an existing key."""
+    from zocrates.config import get_datalab_api_key, save_datalab_api_key
+
+    mock_syncer = MagicMock()
+    mock_get_syncer.return_value = mock_syncer
+
+    save_datalab_api_key("preexisting-active-datalab-key")
+    try:
+        response = client.post(
+            "/rag/converter",
+            json={
+                "converter_id": "datalab",
+                "document_converter_mode": "cloud",
+                "datalab_api_key": "",
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "success"
+        # Must preserve existing active key without clobbering or removing from environment
+        assert get_datalab_api_key() == "preexisting-active-datalab-key"
+        # Must NOT include datalab_api_key in config updates
+        mock_save.assert_called_once_with({
+            "document_converter_id": "datalab",
+            "document_converter_mode": "cloud",
+        })
+    finally:
+        save_datalab_api_key(None)
+
+
 def test_is_mcp_server_enabled_getter(tmp_path):
     """Verify is_mcp_server_enabled getter returns True by default and respects configured boolean."""
     import json

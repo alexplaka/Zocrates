@@ -587,6 +587,102 @@ async function runTests() {
     assert.ok(badge.textContent.includes("401 Unauthorized"));
   });
 
+  // Test 9c: testDatalabKeyBtn tests key and syncs via syncDatalabApiKey on success
+  await testAsync("testDatalabKeyBtn: clicking test button dispatches to /converters/test-connection and syncs key on success", async () => {
+    resetSpies();
+
+    const datalabInput = env.document.getElementById("datalab-api-key-input");
+    const testBtn = env.document.getElementById("test-datalab-key-btn");
+    const badge = env.document.getElementById("datalab-key-status-badge");
+    assert.ok(testBtn, "test-datalab-key-btn must exist");
+    assert.ok(badge, "datalab-key-status-badge must exist");
+
+    datalabInput.value = "test-datalab-valid-key-xyz";
+
+    fetchHandler = async (url, options = {}) => {
+      fetchCalls.push({ url: String(url), options });
+      if (String(url).includes("/converters/test-connection")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            status: "success",
+            message: "Connected to Datalab API successfully. API key is valid.",
+          }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ status: "ok" }),
+      };
+    };
+
+    testBtn.dispatchEvent("click");
+    await new Promise((r) => setTimeout(r, 30));
+
+    assert.strictEqual(badge.style.display, "block");
+    assert.strictEqual(badge.className, "zc-text-success");
+    assert.ok(badge.textContent.includes("Connected to Datalab API successfully"));
+
+    // Verify /converters/test-connection was called
+    const testCall = fetchCalls.find((c) => c.url.includes("/converters/test-connection"));
+    assert.ok(testCall, "Must call /converters/test-connection");
+    const testBody = JSON.parse(testCall.options.body);
+    assert.strictEqual(testBody.datalab_api_key, "test-datalab-valid-key-xyz");
+
+    // Verify syncDatalabApiKey synced to /config
+    const configCall = fetchCalls.find((c) => c.url.includes("/config") && c.options.method === "POST");
+    assert.ok(configCall, "Must sync key to /config on test success");
+    const configBody = JSON.parse(configCall.options.body);
+    assert.strictEqual(configBody.datalab_api_key, "test-datalab-valid-key-xyz");
+
+    // Reset input for subsequent tests
+    datalabInput.value = "";
+  });
+
+  // Test 9d: testDatalabKeyBtn with empty key does NOT invoke syncDatalabApiKey on success
+  await testAsync("testDatalabKeyBtn: empty key does not call syncDatalabApiKey on success", async () => {
+    resetSpies();
+
+    const datalabInput = env.document.getElementById("datalab-api-key-input");
+    const testBtn = env.document.getElementById("test-datalab-key-btn");
+    const badge = env.document.getElementById("datalab-key-status-badge");
+    assert.ok(testBtn, "test-datalab-key-btn must exist");
+
+    datalabInput.value = "";
+
+    fetchHandler = async (url, options = {}) => {
+      fetchCalls.push({ url: String(url), options });
+      if (String(url).includes("/converters/test-connection")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            status: "success",
+            message: "Connection test succeeded",
+          }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ status: "ok" }),
+      };
+    };
+
+    testBtn.dispatchEvent("click");
+    await new Promise((r) => setTimeout(r, 30));
+
+    assert.strictEqual(badge.style.display, "block");
+    assert.strictEqual(badge.className, "zc-text-success");
+    assert.ok(badge.textContent.includes("Connection test succeeded"));
+
+    // Verify /config was NOT called to sync key
+    const configCall = fetchCalls.find((c) => c.url.includes("/config") && c.options.method === "POST");
+    assert.strictEqual(configCall, undefined, "Must NOT sync empty key to /config");
+  });
+
   // Test 10: Applying converter config calls /rag/converter and does NOT call IOUtils.writeUTF8
   await testAsync("applyConverterConfig: posts to /rag/converter and does NOT call IOUtils.writeUTF8", async () => {
     resetSpies();
@@ -621,6 +717,7 @@ async function runTests() {
     assert.strictEqual(body.document_converter_id, "docling");
     assert.strictEqual(body.document_converter_mode, "local");
     assert.strictEqual(body.datalab_merge_cross_page, false);
+    assert.strictEqual(body.datalab_api_key, undefined, "Empty datalab_api_key must be undefined in /rag/converter payload");
   });
 
   // Test 10b: Applying converter config with datalab_merge_cross_page toggled

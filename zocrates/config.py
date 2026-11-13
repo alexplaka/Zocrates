@@ -259,6 +259,7 @@ DEFAULT_GRAPH_RELATIONS: dict[str, Any] = {
     "shared_tags_score": 0.70,
     "include_human_curated": True,
     "include_shared_tags": True,
+    "include_automatic_tags_in_shared_tags": True,
     "min_shared_tags": 2,
     "sync_bundle_files": True,
 }

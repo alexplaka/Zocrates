@@ -648,6 +648,133 @@ async function runTests() {
     }
   });
 
+  // 6b. Sidebar Warm-Backend Credential Synchronization (syncWarmBackendCredentials)
+  await testAsync("sidebar syncWarmBackendCredentials: syncs missing credentials for warm-attached backends", async () => {
+    const sidebar = require("../../zotero-plugin/addon/sidebar.js");
+    global.Zotero.Prefs.set("extensions.zocrates.datalab_api_key", "dl-warm-sync-key", true);
+    global.Zotero.Prefs.set("extensions.zocrates.openalex_api_key", "oa-warm-sync-key", true);
+
+    let configCalls = [];
+    const originalFetch = global.fetch;
+    global.fetch = async (url, opts) => {
+      if (url.endsWith("/config") && opts && opts.method === "POST") {
+        configCalls.push({
+          url,
+          headers: opts.headers,
+          body: JSON.parse(opts.body),
+        });
+        return { ok: true, status: 200, json: async () => ({ status: "success" }) };
+      }
+      return { ok: true, status: 200, json: async () => ({}) };
+    };
+
+    try {
+      // 1. Both keys missing in backend (has_datalab_key: false, has_openalex_api_key: false)
+      configCalls = [];
+      await sidebar.syncWarmBackendCredentials({
+        status: "ready",
+        has_datalab_key: false,
+        has_openalex_api_key: false,
+      });
+      assert.strictEqual(configCalls.length, 1, "Must POST missing credentials to /config");
+      assert.strictEqual(configCalls[0].body.datalab_api_key, "dl-warm-sync-key");
+      assert.strictEqual(configCalls[0].body.openalex_api_key, "oa-warm-sync-key");
+
+      // 2. Only datalab missing in backend
+      configCalls = [];
+      await sidebar.syncWarmBackendCredentials({
+        status: "ready",
+        has_datalab_key: false,
+        has_openalex_api_key: true,
+      });
+      assert.strictEqual(configCalls.length, 1);
+      assert.strictEqual(configCalls[0].body.datalab_api_key, "dl-warm-sync-key");
+      assert.strictEqual(configCalls[0].body.openalex_api_key, undefined);
+
+      // 3. Backend already has all keys
+      configCalls = [];
+      await sidebar.syncWarmBackendCredentials({
+        status: "ready",
+        has_datalab_key: true,
+        has_openalex_api_key: true,
+      });
+      assert.strictEqual(configCalls.length, 0, "Must NOT call /config when backend already has all keys");
+
+      // 4. Backend not ready
+      configCalls = [];
+      await sidebar.syncWarmBackendCredentials({
+        status: "not_registered",
+        has_datalab_key: false,
+        has_openalex_api_key: false,
+      });
+      assert.strictEqual(configCalls.length, 0, "Must NOT call /config when backend is not ready");
+    } finally {
+      global.fetch = originalFetch;
+      global.Zotero.Prefs.clear("extensions.zocrates.datalab_api_key", true);
+      global.Zotero.Prefs.clear("extensions.zocrates.openalex_api_key", true);
+    }
+  });
+
+  // 6c. Sidebar checkBackendStatus Warm-Backend Credential Transition Gating
+  await testAsync("sidebar checkBackendStatus: warm-backend credential sync runs only on connection transition and when credentials exist", async () => {
+    const sidebar = require("../../zotero-plugin/addon/sidebar.js");
+    sidebar.resetPollingStateForTests();
+
+    global.Zotero.Prefs.set("extensions.zocrates.datalab_api_key", "dl-transition-key", true);
+
+    let configCalls = [];
+    const originalFetch = global.fetch;
+    global.fetch = async (url, opts) => {
+      const urlStr = String(url);
+      if (urlStr.endsWith("/health")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            status: "ready",
+            has_datalab_key: false,
+            has_openalex_api_key: true,
+          }),
+        };
+      }
+      if (urlStr.endsWith("/config") && opts && opts.method === "POST") {
+        configCalls.push({
+          url: urlStr,
+          body: JSON.parse(opts.body),
+        });
+        return { ok: true, status: 200, json: async () => ({ status: "success" }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ sessions: [] }) };
+    };
+
+    try {
+      // 1. First check: wasBackendOnline is null (transition from offline/initial) -> should sync
+      configCalls = [];
+      await sidebar.checkBackendStatus();
+      assert.strictEqual(configCalls.length, 1, "Must sync credentials on initial connect transition");
+      assert.strictEqual(configCalls[0].body.datalab_api_key, "dl-transition-key");
+
+      // 2. Second check: wasBackendOnline is now true -> must NOT sync again
+      configCalls = [];
+      await sidebar.checkBackendStatus();
+      assert.strictEqual(configCalls.length, 0, "Must NOT sync credentials on subsequent active poll when already connected");
+
+      // 3. Clear credentials, reset state, and test that no sync runs even on transition if no credentials exist
+      sidebar.resetPollingStateForTests();
+      global.Zotero.Prefs.clear("extensions.zocrates.datalab_api_key", true);
+      global.Zotero.Prefs.clear("extensions.zocrates.openalex_api_key", true);
+
+      configCalls = [];
+      await sidebar.checkBackendStatus();
+      assert.strictEqual(configCalls.length, 0, "Must NOT sync credentials when no local credentials exist");
+    } finally {
+      global.fetch = originalFetch;
+      global.Zotero.Prefs.clear("extensions.zocrates.datalab_api_key", true);
+      global.Zotero.Prefs.clear("extensions.zocrates.openalex_api_key", true);
+      sidebar.resetPollingStateForTests();
+    }
+  });
+
   // 7. Backend Connection Status Dot & Tooltip (setBackendStatus & injectToolbarButton)
   test("setBackendStatus: updates _backendStatus, button attribute, status dot, and tooltiptext", () => {
     const mockWin = env.window;

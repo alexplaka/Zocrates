@@ -268,6 +268,8 @@ Surviving citations carry calibrated probabilities into the Zotero desktop UI:
      `ⓘ Support Probability: 0.65`
    - **Low Support (< 0.50)**: Rendered with soft red styling (`var(--danger, #ef4444)`):  
      `Support Probability: 0.42`
+   - **In-Popover Sentence Attribution & Visual Legend**: When sentence attribution is cached for the current turn/claim, the passage quote automatically highlights supporting spans via `buildHighlightedPassage()` (`.sentence-attr-highlight`), while an emerald visual legend badge (`.sentence-attr-badge`) with a green underline appears in the badges row, allowing researchers to inspect sentence-level attribution directly within the popover while preserving 0ms opening latency (heavy inference execution remains deferred to the Inspector window).
+   - **Deep-Link to Claim Verification Inspector (`[🛡️ Inspect Claim]`)**: Action button in the popover footer that closes the popover, opens/focuses the Claim Verification Inspector dialog, and navigates directly to the cited claim row via `highlightAndScrollToClaim()`—automatically resetting active status/paper filters if the target row would otherwise be hidden, smoothly centering the row in the table viewport (`scrollIntoView`), and triggering a 2.6-second non-layout-shifting glow pulse animation (`.highlight-pulse`).
 2. **Occurrence-Specific Pill Tooltips**:
    In-text citation pills (`.citation-pill`) display a multiline hover tooltip indicating document title, exact section, and the occurrence's specific probability:
    ```text

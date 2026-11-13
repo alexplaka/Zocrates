@@ -3,7 +3,7 @@
  */
 
 const assert = require("assert");
-const { test, getTestStats, printTestSummary, setupMockEnvironment } = require("./test_helpers.js");
+const { test, testAsync, getTestStats, printTestSummary, setupMockEnvironment } = require("./test_helpers.js");
 
 async function runTests() {
   console.log("\n--- Suite: AutoConverter ---");
@@ -158,6 +158,168 @@ async function runTests() {
     assert.strictEqual(AutoConverter.getConverterDisplayName("docling"), "Docling (Local)");
     assert.strictEqual(AutoConverter.getConverterDisplayName("markitdown"), "MarkItDown (Local)");
     assert.strictEqual(AutoConverter.getConverterDisplayName("custom_engine"), "custom_engine");
+  });
+
+  // 5. Deletion & Rematerialization
+  await testAsync("notify: trash/delete on attachment of childless parent triggers rematerialize ingest", async () => {
+    AutoConverter.destroy();
+    const calls = [];
+    const origFetch = global.fetch;
+    global.fetch = async (url, opts) => {
+      calls.push({ url, opts });
+      return { ok: true, json: async () => ({ status: "success" }) };
+    };
+
+    try {
+      const parentItem = new Zotero.Item("journalArticle");
+      parentItem.key = "PARENT_CHILDLESS_KEY";
+      await parentItem.saveTx();
+
+      const attItem = new Zotero.Item("attachment");
+      attItem.key = "ATT_TO_DELETE";
+      attItem.parentItemID = parentItem.id;
+      attItem.attachmentContentType = "application/pdf";
+      attItem.deleted = true;
+      await attItem.saveTx();
+
+      parentItem._attachments = [attItem];
+
+      AutoConverter.notify("delete", "item", [attItem.id]);
+
+      const deleteCalls = calls.filter((c) => c.url.includes("/items/delete"));
+      const ingestCalls = calls.filter((c) => c.url.includes("/items/ingest"));
+
+      assert.strictEqual(deleteCalls.length, 1);
+      assert.deepStrictEqual(JSON.parse(deleteCalls[0].opts.body), { item_keys: ["ATT_TO_DELETE"] });
+      assert.strictEqual(ingestCalls.length, 1);
+      assert.deepStrictEqual(JSON.parse(ingestCalls[0].opts.body), { item_keys: ["PARENT_CHILDLESS_KEY"] });
+    } finally {
+      global.fetch = origFetch;
+    }
+  });
+
+  await testAsync("notify: trash/delete on attachment does NOT rematerialize parent if another convertible attachment remains", async () => {
+    AutoConverter.destroy();
+    const calls = [];
+    const origFetch = global.fetch;
+    global.fetch = async (url, opts) => {
+      calls.push({ url, opts });
+      return { ok: true, json: async () => ({ status: "success" }) };
+    };
+
+    try {
+      const parentItem = new Zotero.Item("journalArticle");
+      parentItem.key = "PARENT_WITH_REMAINING_KEY";
+      await parentItem.saveTx();
+
+      const attItem1 = new Zotero.Item("attachment");
+      attItem1.key = "ATT_DEL";
+      attItem1.parentItemID = parentItem.id;
+      attItem1.attachmentContentType = "application/pdf";
+      attItem1.deleted = true;
+      await attItem1.saveTx();
+
+      const attItem2 = new Zotero.Item("attachment");
+      attItem2.key = "ATT_ALIVE";
+      attItem2.parentItemID = parentItem.id;
+      attItem2.attachmentContentType = "application/pdf";
+      attItem2.deleted = false;
+      await attItem2.saveTx();
+
+      parentItem._attachments = [attItem1, attItem2];
+
+      AutoConverter.notify("delete", "item", [attItem1.id]);
+
+      const deleteCalls = calls.filter((c) => c.url.includes("/items/delete"));
+      const ingestCalls = calls.filter((c) => c.url.includes("/items/ingest"));
+
+      assert.strictEqual(deleteCalls.length, 1);
+      assert.deepStrictEqual(JSON.parse(deleteCalls[0].opts.body), { item_keys: ["ATT_DEL"] });
+      assert.strictEqual(ingestCalls.length, 0);
+    } finally {
+      global.fetch = origFetch;
+    }
+  });
+
+  await testAsync("notify: delete on [parent, attachment] in same batch dispatches zero /items/ingest calls", async () => {
+    AutoConverter.destroy();
+    const calls = [];
+    const origFetch = global.fetch;
+    global.fetch = async (url, opts) => {
+      calls.push({ url, opts });
+      return { ok: true, json: async () => ({ status: "success" }) };
+    };
+
+    try {
+      const parentItem = new Zotero.Item("journalArticle");
+      parentItem.key = "PARENT_BATCH_DEL_KEY";
+      parentItem.deleted = true;
+      await parentItem.saveTx();
+
+      const attItem = new Zotero.Item("attachment");
+      attItem.key = "ATT_BATCH_DEL_KEY";
+      attItem.parentItemID = parentItem.id;
+      attItem.attachmentContentType = "application/pdf";
+      attItem.deleted = true;
+      await attItem.saveTx();
+
+      parentItem._attachments = [attItem];
+
+      AutoConverter.notify("delete", "item", [parentItem.id, attItem.id]);
+
+      const deleteCalls = calls.filter((c) => c.url.includes("/items/delete"));
+      const ingestCalls = calls.filter((c) => c.url.includes("/items/ingest"));
+
+      assert.strictEqual(deleteCalls.length, 1);
+      assert.strictEqual(ingestCalls.length, 0);
+    } finally {
+      global.fetch = origFetch;
+    }
+  });
+
+  await testAsync("notify: linked URL attachment (attachmentLinkMode === 3) does NOT block rematerialization when PDF is deleted", async () => {
+    AutoConverter.destroy();
+    const calls = [];
+    const origFetch = global.fetch;
+    global.fetch = async (url, opts) => {
+      calls.push({ url, opts });
+      return { ok: true, json: async () => ({ status: "success" }) };
+    };
+
+    try {
+      const parentItem = new Zotero.Item("journalArticle");
+      parentItem.key = "PARENT_WITH_LINKED_URL_KEY";
+      await parentItem.saveTx();
+
+      const pdfAtt = new Zotero.Item("attachment");
+      pdfAtt.key = "ATT_PDF_DEL";
+      pdfAtt.parentItemID = parentItem.id;
+      pdfAtt.attachmentContentType = "application/pdf";
+      pdfAtt.deleted = true;
+      await pdfAtt.saveTx();
+
+      const urlAtt = new Zotero.Item("attachment");
+      urlAtt.key = "ATT_LINKED_URL";
+      urlAtt.parentItemID = parentItem.id;
+      urlAtt.attachmentContentType = "text/html";
+      urlAtt.attachmentLinkMode = 3;
+      urlAtt.deleted = false;
+      await urlAtt.saveTx();
+
+      parentItem._attachments = [pdfAtt, urlAtt];
+
+      AutoConverter.notify("delete", "item", [pdfAtt.id]);
+
+      const deleteCalls = calls.filter((c) => c.url.includes("/items/delete"));
+      const ingestCalls = calls.filter((c) => c.url.includes("/items/ingest"));
+
+      assert.strictEqual(deleteCalls.length, 1);
+      assert.deepStrictEqual(JSON.parse(deleteCalls[0].opts.body), { item_keys: ["ATT_PDF_DEL"] });
+      assert.strictEqual(ingestCalls.length, 1);
+      assert.deepStrictEqual(JSON.parse(ingestCalls[0].opts.body), { item_keys: ["PARENT_WITH_LINKED_URL_KEY"] });
+    } finally {
+      global.fetch = origFetch;
+    }
   });
 }
 

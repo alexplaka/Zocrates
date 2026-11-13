@@ -2435,6 +2435,172 @@ async function runTests() {
       wrapper.remove();
     }
   });
+
+  // 41. buildClaimsInspectorData: populates has_attachment on constructed rows
+  test("buildClaimsInspectorData: populates has_attachment on constructed rows", () => {
+    const origWinZot = typeof window !== "undefined" ? window.Zotero : undefined;
+    const mockZot = {
+      Libraries: { userLibraryID: 1 },
+      Items: {
+        getByLibraryAndKey: (libId, key) => {
+          if (key === "KEY_WITH_PDF") {
+            return { id: 101, isAttachment: () => false, getAttachments: () => [201] };
+          }
+          if (key === "KEY_NO_PDF") {
+            return { id: 102, isAttachment: () => false, getAttachments: () => [] };
+          }
+          if (key === "ATT_DIRECT") {
+            return { id: 201, isAttachment: () => true };
+          }
+          return null;
+        },
+      },
+    };
+    if (typeof window !== "undefined") window.Zotero = mockZot;
+
+    try {
+      // Branch 1: citation_verification assessments present
+      const metaVer = {
+        citation_verification: {
+          assessments: [
+            { chunk_index: 1, occurrence: 1, claim: "Paper with PDF attachment", item_key: "KEY_WITH_PDF" },
+            { chunk_index: 2, occurrence: 1, claim: "Abstract-only paper without PDF", item_key: "KEY_NO_PDF" },
+            { chunk_index: 3, occurrence: 1, claim: "Pre-existing boolean false preserved", item_key: "KEY_WITH_PDF", has_attachment: false },
+            { chunk_index: 4, occurrence: 1, claim: "Pre-existing boolean true preserved", item_key: "KEY_NO_PDF", has_attachment: true },
+          ],
+        },
+      };
+
+      const dataVer = sidebar.buildClaimsInspectorData(metaVer);
+      assert.strictEqual(dataVer.assessments.length, 4);
+      assert.strictEqual(dataVer.assessments[0].has_attachment, true, "Item with PDF attachments must have has_attachment: true");
+      assert.strictEqual(dataVer.assessments[1].has_attachment, false, "Item without PDF attachments must have has_attachment: false");
+      assert.strictEqual(dataVer.assessments[2].has_attachment, false, "Pre-existing has_attachment: false must not be overwritten");
+      assert.strictEqual(dataVer.assessments[3].has_attachment, true, "Pre-existing has_attachment: true must not be overwritten");
+
+      // Branch 2: citations occurrences fallback
+      const metaCit = {
+        citations: [
+          {
+            index: 1,
+            item_key: "KEY_WITH_PDF",
+            occurrences: [{ occurrence: 1, claim: "Occurrence with PDF", support_probability: 0.9 }],
+          },
+          {
+            index: 2,
+            item_key: "KEY_NO_PDF",
+            occurrences: [{ occurrence: 1, claim: "Occurrence without PDF", support_probability: 0.85 }],
+          },
+        ],
+      };
+
+      const dataCit = sidebar.buildClaimsInspectorData(metaCit);
+      assert.strictEqual(dataCit.assessments.length, 2);
+      assert.strictEqual(dataCit.assessments[0].has_attachment, true, "Citation occurrence row with PDF must have has_attachment: true");
+      assert.strictEqual(dataCit.assessments[1].has_attachment, false, "Citation occurrence row without PDF must have has_attachment: false");
+
+      // Verify sidebar.checkItemHasAttachment is exposed on window and module.exports
+      assert.strictEqual(typeof sidebar.checkItemHasAttachment, "function", "checkItemHasAttachment must be exported in sidebar module.exports");
+      if (typeof window !== "undefined") {
+        assert.strictEqual(typeof window.checkItemHasAttachment, "function", "checkItemHasAttachment must be exposed on window");
+      }
+    } finally {
+      if (typeof window !== "undefined") {
+        if (origWinZot !== undefined) window.Zotero = origWinZot;
+        else delete window.Zotero;
+      }
+    }
+  });
+
+  // 42. claims.js: renderTable renders Open in Reader when has_attachment is true, and omits it when false
+  test("claims.js: renderTable renders Open in Reader when has_attachment is true, and omits it when false", () => {
+    const claims = require("../../zotero-plugin/addon/claims.js");
+
+    // Ensure claims table mock DOM container exists
+    let tbody = document.getElementById("claims-tbody");
+    if (!tbody) {
+      tbody = createMockElement("tbody");
+      tbody.id = "claims-tbody";
+      document.body.appendChild(tbody);
+    }
+
+    // Verify checkItemHasAttachment export
+    assert.strictEqual(typeof claims.checkItemHasAttachment, "function", "checkItemHasAttachment must be in claims module.exports");
+    assert.strictEqual(typeof claims.renderTable, "function", "renderTable must be in claims module.exports");
+
+    // Test checkItemHasAttachment unit behaviors
+    assert.strictEqual(claims.checkItemHasAttachment(null), false, "null item returns false");
+    assert.strictEqual(claims.checkItemHasAttachment(undefined), false, "undefined item returns false");
+    assert.strictEqual(claims.checkItemHasAttachment({ has_attachment: true }), true, "explicit true returns true");
+    assert.strictEqual(claims.checkItemHasAttachment({ has_attachment: false }), false, "explicit false returns false");
+
+    // Test delegation to sidebarWindow
+    const mockSidebar = {
+      checkItemHasAttachment: (it) => it.customFlag === "delegated_yes",
+    };
+    claims.updateClaimsData({
+      _sidebarWindow: mockSidebar,
+      threshold: 0.60,
+      assessments: [],
+    });
+    assert.strictEqual(claims.checkItemHasAttachment({ customFlag: "delegated_yes" }), true, "delegates to sidebar window");
+    assert.strictEqual(claims.checkItemHasAttachment({ customFlag: "no" }), false, "delegates to sidebar window false");
+
+    // Test renderTable rendering of source action buttons
+    const testClaimsPayload = {
+      threshold: 0.60,
+      assessments: [
+        {
+          _originalIndex: 1,
+          chunk_index: 10,
+          occurrence: 1,
+          claim: "Claim from paper with full PDF attachment",
+          verdict: "KEPT",
+          support_probability: 0.95,
+          item_key: "PAPER_WITH_PDF",
+          has_attachment: true,
+          title: "Full PDF Paper",
+          section: "Methods",
+        },
+        {
+          _originalIndex: 2,
+          chunk_index: 20,
+          occurrence: 1,
+          claim: "Claim from abstract/metadata-only paper",
+          verdict: "KEPT",
+          support_probability: 0.88,
+          item_key: "PAPER_NO_ATTACHMENT",
+          has_attachment: false,
+          title: "Metadata-Only Paper",
+          section: "Abstract",
+        },
+      ],
+    };
+
+    claims.updateClaimsData(testClaimsPayload);
+
+    // Row 10-1 (has_attachment: true)
+    const row1 = document.getElementById("claim-row-10-1");
+    assert.ok(row1, "Row 10-1 should be rendered");
+    const actions1 = row1.querySelector(".source-actions");
+    assert.ok(actions1, "Row 10-1 must contain .source-actions");
+    const btns1 = Array.from(actions1.querySelectorAll(".source-action-btn"));
+    const readerBtn1 = btns1.find(b => b.textContent.includes("Open in Reader") || b.innerHTML.includes("Open in Reader"));
+    const libBtn1 = btns1.find(b => b.textContent.includes("Select in Library") || b.innerHTML.includes("Select in Library"));
+    assert.ok(readerBtn1, "Row with has_attachment: true MUST render '📖 Open in Reader' button");
+    assert.ok(libBtn1, "Row with has_attachment: true MUST render '📁 Select in Library' button");
+
+    // Row 20-1 (has_attachment: false)
+    const row2 = document.getElementById("claim-row-20-1");
+    assert.ok(row2, "Row 20-1 should be rendered");
+    const actions2 = row2.querySelector(".source-actions");
+    assert.ok(actions2, "Row 20-1 must contain .source-actions");
+    const btns2 = Array.from(actions2.querySelectorAll(".source-action-btn"));
+    const readerBtn2 = btns2.find(b => b.textContent.includes("Open in Reader") || b.innerHTML.includes("Open in Reader"));
+    const libBtn2 = btns2.find(b => b.textContent.includes("Select in Library") || b.innerHTML.includes("Select in Library"));
+    assert.strictEqual(readerBtn2, undefined, "Row with has_attachment: false MUST NOT render '📖 Open in Reader' button");
+    assert.ok(libBtn2, "Row with has_attachment: false MUST still render '📁 Select in Library' button");
+  });
 }
 
 if (require.main === module) {
