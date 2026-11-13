@@ -187,7 +187,9 @@ async function runTests() {
 
     const inspectBtn = footerDiv.querySelector(".popover-inspect-claim-btn");
     assert.ok(inspectBtn, "popover-inspect-claim-btn should exist in footer");
-    assert.strictEqual(inspectBtn.textContent, "🛡️ Inspect Claim");
+    assert.strictEqual(inspectBtn.textContent, "Inspect Claim");
+    assert.ok(inspectBtn.querySelector(".claims-inspector-icon"), "Shield icon SVG must exist");
+    assert.strictEqual(inspectBtn.querySelector(".claims-inspector-label")?.textContent, "Inspect Claim");
     assert.strictEqual(inspectBtn.getAttribute("title"), "Inspect claim in Claim Verification Inspector");
 
     const readerBtn = footerDiv.querySelector(".popover-open-reader-btn");
@@ -1297,7 +1299,9 @@ async function runTests() {
     assert.strictEqual(badge.textContent, "✓ Support Probability: 0.92");
     const inspBtn = popover.querySelector(".popover-inspect-claim-btn");
     assert.ok(inspBtn, "Inspect button should render in footer");
-    assert.strictEqual(inspBtn.textContent, "🛡️ Inspect Claim");
+    assert.strictEqual(inspBtn.textContent, "Inspect Claim");
+    assert.ok(inspBtn.querySelector(".claims-inspector-icon"), "Shield icon SVG must exist");
+    assert.strictEqual(inspBtn.querySelector(".claims-inspector-label")?.textContent, "Inspect Claim");
     sidebar.closeEvidencePopover();
   });
 
@@ -2283,7 +2287,9 @@ async function runTests() {
       assert.ok(footer, "Evidence popover footer must be rendered");
       const inspectBtn = footer.querySelector(".popover-inspect-claim-btn");
       assert.ok(inspectBtn, "Inspect claim button must exist in footer");
-      assert.strictEqual(inspectBtn.textContent, "🛡️ Inspect Claim");
+      assert.strictEqual(inspectBtn.textContent, "Inspect Claim");
+      assert.ok(inspectBtn.querySelector(".claims-inspector-icon"), "Shield icon SVG must exist");
+      assert.strictEqual(inspectBtn.querySelector(".claims-inspector-label")?.textContent, "Inspect Claim");
       assert.strictEqual(inspectBtn.getAttribute("title"), "Inspect claim in Claim Verification Inspector");
 
       // Click inspect button in footer
@@ -2351,7 +2357,9 @@ async function runTests() {
       assert.ok(footer, "Evidence popover footer must be rendered");
       const inspectBtn = footer.querySelector(".popover-inspect-claim-btn");
       assert.ok(inspectBtn, "Inspect claim button must be rendered in footer");
-      assert.strictEqual(inspectBtn.textContent, "🛡️ Inspect Claim");
+      assert.strictEqual(inspectBtn.textContent, "Inspect Claim");
+      assert.ok(inspectBtn.querySelector(".claims-inspector-icon"), "Shield icon SVG must exist");
+      assert.strictEqual(inspectBtn.querySelector(".claims-inspector-label")?.textContent, "Inspect Claim");
 
       // Click inspect button in footer
       inspectBtn.dispatchEvent("click");
