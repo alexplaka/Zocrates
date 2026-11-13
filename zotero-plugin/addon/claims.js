@@ -794,6 +794,12 @@
         tr.className = "row-rejected";
       }
 
+      tr.id = "claim-row-" + item.chunk_index + "-" + item.occurrence;
+      tr.setAttribute("data-chunk-index", String(item.chunk_index !== undefined ? item.chunk_index : ""));
+      tr.setAttribute("data-occurrence", String(item.occurrence !== undefined ? item.occurrence : ""));
+      const claimIdx = item.claim_index !== undefined ? item.claim_index : (item._originalIndex !== undefined ? item._originalIndex : "");
+      tr.setAttribute("data-claim-index", String(claimIdx));
+
       // 1. # Column (Clean sequential claim index only)
       const tdIdx = document.createElement("td");
       tdIdx.className = "col-idx";
@@ -1139,6 +1145,75 @@
     });
   }
 
+  function highlightAndScrollToClaim(chunkIndex, occurrence, claimIndex) {
+    if (chunkIndex === undefined && occurrence === undefined && claimIndex === undefined) {
+      return null;
+    }
+
+    function findRow() {
+      if (chunkIndex !== undefined && occurrence !== undefined && chunkIndex !== null && occurrence !== null) {
+        const idTarget = document.getElementById("claim-row-" + chunkIndex + "-" + occurrence);
+        if (idTarget) return idTarget;
+        const selTarget = document.querySelector(`tr[data-chunk-index="${chunkIndex}"][data-occurrence="${occurrence}"]`);
+        if (selTarget) return selTarget;
+      }
+      if (claimIndex !== undefined && claimIndex !== null) {
+        const claimTarget = document.querySelector(`tr[data-claim-index="${claimIndex}"]`);
+        if (claimTarget) return claimTarget;
+      }
+      return null;
+    }
+
+    let targetRow = findRow();
+
+    // If the target row is hidden due to activeStatusFilter or activePaperFilter, reset filters to "all" and re-render
+    if (!targetRow && (activeStatusFilter !== "all" || activePaperFilter !== "" || activeSearchQuery !== "")) {
+      activeStatusFilter = "all";
+      activePaperFilter = "";
+      activeSearchQuery = "";
+
+      const searchInput = document.getElementById("claims-search-input");
+      if (searchInput) searchInput.value = "";
+
+      document.querySelectorAll(".filter-tab").forEach(tab => {
+        tab.classList.toggle("active", (tab.getAttribute("data-filter") || "all") === "all");
+      });
+
+      const paperSelect = document.getElementById("claims-paper-filter");
+      if (paperSelect) paperSelect.value = "";
+
+      const labelSpan = document.getElementById("claims-source-label");
+      if (labelSpan) {
+        const totalClaims = currentClaimsData?.assessments?.length || 0;
+        labelSpan.textContent = `All Sources (${totalClaims})`;
+      }
+
+      populatePaperFilter(currentClaimsData?.assessments);
+      renderTableRows();
+      targetRow = findRow();
+    }
+
+    if (targetRow) {
+      if (typeof targetRow.scrollIntoView === "function") {
+        targetRow.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+      targetRow.classList.remove("highlight-pulse");
+      if (typeof targetRow.offsetWidth === "number") {
+        void targetRow.offsetWidth;
+      }
+      targetRow.classList.add("highlight-pulse");
+      if (targetRow._pulseTimer) {
+        clearTimeout(targetRow._pulseTimer);
+      }
+      targetRow._pulseTimer = setTimeout(() => {
+        targetRow.classList.remove("highlight-pulse");
+        targetRow._pulseTimer = null;
+      }, 2600);
+    }
+
+    return targetRow;
+  }
+
   function renderSortIndicators() {
     document.querySelectorAll("table.claims-table th.sortable").forEach(th => {
       const field = th.getAttribute("data-sort");
@@ -1482,6 +1557,15 @@
     applyTheme();
     renderAll();
     updateAttributionHeaderStats();
+
+    const tChunk = data.targetChunkIndex !== undefined ? data.targetChunkIndex : undefined;
+    const tOcc = data.targetOccurrence !== undefined ? data.targetOccurrence : undefined;
+    const tClaim = data.targetClaimIndex !== undefined ? data.targetClaimIndex : undefined;
+    if (tChunk !== undefined || tClaim !== undefined) {
+      setTimeout(() => {
+        highlightAndScrollToClaim(tChunk, tOcc, tClaim);
+      }, 50);
+    }
   };
 
   // Re-check on focus if parent pushed newer data
@@ -1514,6 +1598,21 @@
     currentClaimsData = data;
     renderAll();
     updateAttributionHeaderStats();
+
+    if (data) {
+      const tChunk = data.targetChunkIndex !== undefined ? data.targetChunkIndex : undefined;
+      const tOcc = data.targetOccurrence !== undefined ? data.targetOccurrence : undefined;
+      const tClaim = data.targetClaimIndex !== undefined ? data.targetClaimIndex : undefined;
+      if (tChunk !== undefined || tClaim !== undefined) {
+        setTimeout(() => {
+          highlightAndScrollToClaim(tChunk, tOcc, tClaim);
+        }, 50);
+      }
+    }
+  }
+
+  if (typeof window !== "undefined") {
+    window.highlightAndScrollToClaim = highlightAndScrollToClaim;
   }
 
   if (document.readyState === "loading") {
@@ -1533,6 +1632,7 @@
       updateAttributionHeaderStats,
       getSidebarWindow,
       updateClaimsData: (typeof window !== "undefined" ? window.updateClaimsData : null),
+      highlightAndScrollToClaim,
       initColumnResizing,
       setupEventListeners,
       renderSortIndicators,

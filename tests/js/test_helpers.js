@@ -410,6 +410,9 @@ function createMockElement(tag, ns) {
     blur() {
       this._focused = false;
     },
+    scrollIntoView(options) {
+      this._scrolledIntoView = options || true;
+    },
     getBoundingClientRect() {
       return {
         left: this.offsetLeft,
@@ -557,6 +560,11 @@ function createMockElement(tag, ns) {
     },
     appendChild(child) {
       this._innerHTML = undefined;
+      if (this._text !== undefined && this._text !== "") {
+        const tn = createMockTextNode(this._text);
+        tn.parentElement = this;
+        this.children.push(tn);
+      }
       this._text = undefined;
       if (typeof child === "object" && child) {
         child.parentElement = this;
@@ -1022,7 +1030,7 @@ function setupMockEnvironment() {
         const found = findElementById(root, id);
         if (found) return found;
       }
-      if (DYNAMIC_IDS.has(id)) {
+      if (DYNAMIC_IDS.has(id) || (typeof id === "string" && id.startsWith("claim-row-"))) {
         return null;
       }
       if (!elementsById.has(id)) {

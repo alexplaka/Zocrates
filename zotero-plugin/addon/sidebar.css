@@ -3721,6 +3721,71 @@ figure th {
   border: 1px solid color-mix(in srgb, var(--danger, #ef4444) 30%, transparent);
 }
 
+.evidence-support-badge.clickable {
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+}
+
+.evidence-support-badge.clickable:hover {
+  filter: brightness(1.15);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  border-color: currentColor;
+}
+
+.badge-link-icon {
+  font-size: 0.9em;
+  opacity: 0.8;
+  display: inline-block;
+  line-height: 1;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.evidence-support-badge.clickable:hover .badge-link-icon {
+  opacity: 1;
+  transform: translate(1px, -1px);
+}
+
+.evidence-support-badge.inspect-claim-badge {
+  background-color: color-mix(in srgb, var(--primary, #6366f1) 15%, transparent);
+  color: var(--primary, #6366f1);
+  border: 1px solid color-mix(in srgb, var(--primary, #6366f1) 30%, transparent);
+}
+
+.evidence-support-badge.inspect-claim-badge.clickable {
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+  user-select: none;
+}
+
+.evidence-support-badge.inspect-claim-badge.clickable:hover {
+  filter: brightness(1.15);
+  box-shadow: 0 1px 4px rgba(99, 102, 241, 0.25);
+  border-color: var(--primary, #6366f1);
+}
+
+.evidence-support-badge.sentence-attr-badge,
+.evidence-support-badge.attr-active {
+  background-color: rgba(16, 185, 129, 0.22);
+  color: var(--text-main);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  border-bottom: 2px solid #10b981;
+  text-decoration: underline;
+  text-decoration-color: #10b981;
+  text-underline-offset: 3px;
+  cursor: default;
+}
+
+body[data-theme="zotero-light"] .evidence-support-badge.sentence-attr-badge,
+body[data-theme="zotero-light"] .evidence-support-badge.attr-active,
+body[data-theme="light"] .evidence-support-badge.sentence-attr-badge,
+body[data-theme="light"] .evidence-support-badge.attr-active,
+body[data-theme="sepia"] .evidence-support-badge.sentence-attr-badge,
+body[data-theme="sepia"] .evidence-support-badge.attr-active {
+  background-color: rgba(16, 185, 129, 0.18);
+  border-bottom: 2px solid #059669;
+  text-decoration-color: #059669;
+}
+
 .evidence-popover-body {
   flex: 1 1 auto;
   min-height: 40px;
@@ -3747,22 +3812,26 @@ figure th {
 
 .evidence-popover-footer {
   display: flex;
-  gap: 8px;
-  margin-top: 4px;
+  gap: 6px;
+  margin-top: 6px;
   flex-shrink: 0;
 }
 
 .evidence-popover-btn {
   appearance: none;
   -moz-appearance: none;
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 4px;
-  padding: 6px 10px;
-  font-size: calc(11.5px * var(--chat-font-scale, 1));
+  padding: 5px 6px;
+  font-size: calc(11px * var(--chat-font-scale, 1));
   font-weight: 500;
+  white-space: normal;
+  line-height: 1.25;
+  text-align: center;
   border-radius: 4px;
   border: 1px solid var(--border);
   background: var(--bg-card-hover);
