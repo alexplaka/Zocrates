@@ -1109,3 +1109,112 @@ async def test_library_syncer_ingest_item_and_standalone_attachment(tmp_path: Pa
             mock_super.assert_called_once_with("META_101", syncer)
 
 
+def test_delete_attachment_rematerializes_childless_parent(tmp_path: Path):
+    """Verify that calling POST /items/delete on an attachment whose parent now has zero attachments causes the parent to automatically rematerialize its metadata bundle."""
+    from zocrates.fast_api_app import app, verify_auth
+    from zocrates.rag.zotero_db import ZoteroAttachment, ZoteroItem
+
+    client = TestClient(app)
+    mock_syncer = MagicMock()
+    mock_syncer._ingest_item = AsyncMock(return_value="processed")
+
+    parent_item = ZoteroItem(
+        item_id=42,
+        item_key="PARENT42",
+        item_type="journalArticle",
+        title="Orphaned Paper Title",
+    )
+
+    # When deleting ATT_KEY, its metadata in conversion_meta records parent_item_key="PARENT42"
+    mock_syncer.processor.get_metadata.side_effect = lambda k: (
+        {"parent_item_key": "PARENT42"} if k == "ATT_KEY" else None
+    )
+    # After purge, parent has no child attachments in conversion_meta
+    mock_syncer.processor.has_child_attachments.return_value = False
+
+    # In Zotero DB, parent exists
+    mock_syncer.db.get_item_by_key.side_effect = lambda k: (
+        parent_item if k == "PARENT42" else None
+    )
+    # In Zotero DB, parent has no valid attachments on disk
+    mock_syncer.db.get_attachments.return_value = []
+
+    app.dependency_overrides[verify_auth] = lambda: True
+    try:
+        # Case 1: Childless parent -> rematerialization is triggered
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            resp = client.post(
+                "/items/delete",
+                json={"item_keys": ["ATT_KEY"]},
+                headers={"Authorization": "Bearer test-token"},
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["status"] == "success"
+            assert data["purged"] == ["ATT_KEY"]
+            mock_syncer.purge_item.assert_called_once_with("ATT_KEY", regenerate_index=False)
+            mock_syncer._ingest_item.assert_called_once_with(
+                42, "PARENT42", "Orphaned Paper Title", evaluate_edges=True
+            )
+
+        # Case 2: Parent still has another valid attachment on disk -> rematerialization is skipped
+        mock_syncer._ingest_item.reset_mock()
+        live_att_file = tmp_path / "other.pdf"
+        live_att_file.write_bytes(b"%PDF-1.4 file")
+        live_att = ZoteroAttachment(
+            item_id=99,
+            item_key="ATT_OTHER",
+            parent_item_id=42,
+            parent_item_key="PARENT42",
+            content_type="application/pdf",
+            path=live_att_file,
+        )
+        mock_syncer.db.get_attachments.return_value = [live_att]
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            resp2 = client.post(
+                "/items/delete",
+                json={"item_keys": ["ATT_KEY"]},
+                headers={"Authorization": "Bearer test-token"},
+            )
+            assert resp2.status_code == 200
+            mock_syncer._ingest_item.assert_not_called()
+
+        # Case 3: Deleting note or metadata bundle does not trigger candidate parent rematerialization
+        mock_syncer._ingest_item.reset_mock()
+        mock_syncer.db.get_attachments.return_value = []
+        mock_syncer.processor.get_metadata.side_effect = lambda k: {
+            "parent_item_key": "PARENT42",
+            "content_type": "text/note" if k == "NOTE_KEY" else "text/zotero-metadata",
+        }
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            resp3 = client.post(
+                "/items/delete",
+                json={"item_keys": ["NOTE_KEY"]},
+                headers={"Authorization": "Bearer test-token"},
+            )
+            assert resp3.status_code == 200
+            mock_syncer._ingest_item.assert_not_called()
+
+        # Case 4: If _ingest_item returns "skipped", rematerialized_any is False (no root index regen)
+        mock_syncer._ingest_item.reset_mock()
+        mock_syncer.processor.regenerate_root_index.reset_mock()
+        mock_syncer.processor.get_metadata.side_effect = lambda k: {
+            "parent_item_key": "PARENT42",
+            "content_type": "application/pdf",
+        }
+        mock_syncer._ingest_item = AsyncMock(return_value="skipped")
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            resp4 = client.post(
+                "/items/delete",
+                json={"item_keys": ["ATT_KEY"]},
+                headers={"Authorization": "Bearer test-token"},
+            )
+            assert resp4.status_code == 200
+            mock_syncer._ingest_item.assert_called_once()
+            # regenerate_root_index called once for purge_keys, but NOT again for rematerialization
+            assert mock_syncer.processor.regenerate_root_index.call_count == 1
+    finally:
+        app.dependency_overrides.pop(verify_auth, None)
+
+
+

@@ -2990,12 +2990,28 @@ async def delete_items(request: ItemDeleteRequest) -> dict:
 
     valid_keys = [k for k in request.item_keys if _validate_item_key(k)]
 
-    def _purge_worker() -> list[str]:
+    def _purge_worker() -> tuple[list[str], list[str]]:
         """Purge requested items from disk and sync indexes synchronously.
 
         Returns:
-            List of successfully purged item keys.
+            Tuple of (purged_keys, candidate_parent_keys).
         """
+        candidate_parents: set[str] = set()
+        if hasattr(syncer, "processor") and hasattr(syncer.processor, "get_metadata"):
+            for k in valid_keys:
+                try:
+                    meta = syncer.processor.get_metadata(k)
+                    if isinstance(meta, dict):
+                        p_key = meta.get("parent_item_key")
+                        if (
+                            p_key
+                            and p_key not in valid_keys
+                            and meta.get("content_type") not in ("text/note", "text/zotero-metadata")
+                        ):
+                            candidate_parents.add(p_key)
+                except Exception as exc:
+                    logger.warning("Failed to inspect metadata for item %s: %s", k, exc)
+
         purged_keys: list[str] = []
         for key in valid_keys:
             try:
@@ -3005,9 +3021,45 @@ async def delete_items(request: ItemDeleteRequest) -> dict:
                 logger.error("Failed to purge item %s: %s", key, exc)
         if purged_keys:
             syncer.processor.regenerate_root_index()
-        return purged_keys
+        return purged_keys, list(candidate_parents)
 
-    purged = await asyncio.to_thread(_purge_worker)
+    purged, candidate_parent_keys = await asyncio.to_thread(_purge_worker)
+
+    rematerialized_any = False
+    for p_key in candidate_parent_keys:
+        if p_key and getattr(syncer, "db", None) and hasattr(syncer, "processor"):
+            try:
+                p_item = syncer.db.get_item_by_key(p_key)
+                if p_item and not syncer.processor.has_child_attachments(p_key):
+                    atts = (
+                        syncer.db.get_attachments(p_item.item_id)
+                        if hasattr(syncer.db, "get_attachments")
+                        else []
+                    )
+                    valid_atts = [
+                        a for a in atts
+                        if getattr(a, "path", None) and (
+                            a.path.exists() if callable(getattr(a.path, "exists", None)) else False
+                        )
+                    ]
+                    if not valid_atts:
+                        ingest_coro = syncer._ingest_item(
+                            p_item.item_id,
+                            p_key,
+                            getattr(p_item, "title", "") or "",
+                            evaluate_edges=True,
+                        )
+                        res = await ingest_coro if inspect.isawaitable(ingest_coro) else ingest_coro
+                        if res == "processed":
+                            rematerialized_any = True
+            except Exception as exc:
+                logger.warning("Failed to rematerialize childless parent %s: %s", p_key, exc)
+
+    if rematerialized_any and hasattr(syncer, "processor") and hasattr(syncer.processor, "regenerate_root_index"):
+        try:
+            await asyncio.to_thread(syncer.processor.regenerate_root_index)
+        except Exception as exc:
+            logger.warning("Failed to regenerate root index after rematerialization: %s", exc)
 
     return {"status": "success", "purged": purged}
 

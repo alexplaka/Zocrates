@@ -367,6 +367,7 @@ var AutoConverter = {
 
     if (event === "trash" || event === "delete") {
       let keys = new Set();
+      let candidateParentIDs = new Set();
       for (let id of ids) {
         try {
           let item = Zotero.Items.get(id);
@@ -396,6 +397,9 @@ var AutoConverter = {
           }
 
           if (item) {
+            if (typeof item.isAttachment === "function" && item.isAttachment() && item.parentItemID) {
+              candidateParentIDs.add(item.parentItemID);
+            }
             if (item.key) keys.add(item.key);
             if (typeof item.isRegularItem === "function" && item.isRegularItem()) {
               if (typeof item.getAttachments === "function") {
@@ -449,6 +453,40 @@ var AutoConverter = {
           }).catch((err) => {
             Zotero.debug("Zocrates: AutoConverter failed to purge deleted items: " + err);
           });
+
+          if (candidateParentIDs.size > 0) {
+            let deletionBatchSet = new Set(ids);
+            for (let parentID of candidateParentIDs) {
+              if (deletionBatchSet.has(parentID)) continue;
+              try {
+                let parent = Zotero.Items.get(parentID);
+                if (parent && !parent.deleted && !keys.has(parent.key) && typeof parent.isRegularItem === "function" && parent.isRegularItem()) {
+                  let attIDs = typeof parent.getAttachments === "function" ? (parent.getAttachments() || []) : [];
+                  let hasLiveAtt = false;
+                  for (let attID of attIDs) {
+                    if (!deletionBatchSet.has(attID)) {
+                      let att = Zotero.Items.get(attID);
+                      if (att && !att.deleted && isConvertibleAttachment(att) && att.attachmentLinkMode !== 3) {
+                        hasLiveAtt = true;
+                        break;
+                      }
+                    }
+                  }
+                  if (!hasLiveAtt && parent.key) {
+                    fetchFn(`${serverUrl}/items/ingest`, {
+                      method: "POST",
+                      headers: this.getAuthHeaders({ "Content-Type": "application/json" }),
+                      body: JSON.stringify({ item_keys: [parent.key] }),
+                    }).catch((err) => {
+                      Zotero.debug("Zocrates: AutoConverter failed to rematerialize childless parent: " + err);
+                    });
+                  }
+                }
+              } catch (e) {
+                Zotero.debug("Zocrates: AutoConverter parent rematerialize error for parentID " + parentID + ": " + e);
+              }
+            }
+          }
         }
       }
       return;
