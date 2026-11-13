@@ -5816,6 +5816,9 @@ function closeEvidencePopover() {
 
 function checkItemHasAttachment(citationOrKey) {
   if (!citationOrKey) return false;
+  if (typeof citationOrKey === "object" && typeof citationOrKey.has_attachment === "boolean") {
+    return citationOrKey.has_attachment;
+  }
   const citation = typeof citationOrKey === "object" ? citationOrKey : null;
   const key = citation ? (citation.attachment_key || citation.item_key) : citationOrKey;
   if (!key) return false;
@@ -8130,6 +8133,12 @@ function buildClaimsInspectorData(meta) {
       }
     });
   }
+
+  rows.forEach(r => {
+    if (r.has_attachment === undefined) {
+      r.has_attachment = checkItemHasAttachment({ item_key: r.item_key, attachment_key: r.attachment_key });
+    }
+  });
 
   // Determine or compute summary stats
   let summary = (ver && ver.summary) ? Object.assign({}, ver.summary) : null;
@@ -15248,6 +15257,7 @@ if (typeof window !== "undefined") {
   window.ensureClaimsInspectorBtn = ensureClaimsInspectorBtn;
   window.selectItemInLibrary = selectItemInLibrary;
   window.openItemInReader = openItemInReader;
+  window.checkItemHasAttachment = checkItemHasAttachment;
   window.buildHighlightedPassage = buildHighlightedPassage;
   try {
     Object.defineProperty(window, "sessions", {
@@ -15302,6 +15312,7 @@ if (typeof module !== "undefined" && module.exports) {
     findOutlineDestination,
     findHtmlSnapshotHeading,
     openItemInReader,
+    checkItemHasAttachment,
     stripCitationsFromText,
     buildReferencesMarkdown,
     getMessageTextForCopy,

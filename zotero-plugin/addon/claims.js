@@ -117,6 +117,54 @@
     return Object.assign({}, extraHeaders);
   }
 
+  function checkItemHasAttachment(item) {
+    if (!item) return false;
+    if (typeof item === "object" && typeof item.has_attachment === "boolean") {
+      return item.has_attachment;
+    }
+    try {
+      const sidebarWin = getSidebarWindow();
+      if (typeof sidebarWin?.checkItemHasAttachment === "function") {
+        return Boolean(sidebarWin.checkItemHasAttachment(item));
+      }
+    } catch (_) {}
+
+    try {
+      const zot = (typeof Zotero !== "undefined" ? Zotero : null) ||
+                  (typeof window !== "undefined" ? (window.Zotero || window.opener?.Zotero) : null);
+      const key = (typeof item === "object") ? (item.attachment_key || item.item_key) : item;
+      if (!key) return false;
+
+      let foundItem = null;
+      if (zot && zot.Items) {
+        const userLibID = zot.Libraries?.userLibraryID;
+        if (userLibID !== undefined && typeof zot.Items.getByLibraryAndKey === "function") {
+          foundItem = zot.Items.getByLibraryAndKey(userLibID, key);
+        }
+        if (!foundItem && zot.Libraries?.getAll && typeof zot.Items.getByLibraryAndKey === "function") {
+          for (const lib of zot.Libraries.getAll()) {
+            const cand = zot.Items.getByLibraryAndKey(lib.id, key);
+            if (cand) {
+              foundItem = cand;
+              break;
+            }
+          }
+        }
+      }
+
+      if (foundItem) {
+        return Boolean(foundItem.isAttachment?.() || (typeof foundItem.getAttachments === "function" && foundItem.getAttachments()?.length > 0));
+      }
+
+      if (typeof item === "object" && item.attachment_key && item.attachment_key !== item.item_key) {
+        return true;
+      }
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   function buildHighlightedPassage(sourceText, spans, supportingIndices) {
     if (!sourceText || !Array.isArray(spans) || spans.length === 0) {
       return sourceText || "";
@@ -873,17 +921,20 @@
         const actionsDiv = document.createElement("div");
         actionsDiv.className = "source-actions";
 
-        const readerBtn = document.createElement("button");
-        readerBtn.className = "source-action-btn";
-        readerBtn.innerHTML = `📖 Open in Reader`;
-        readerBtn.title = "Open paper at this section in Zotero PDF Reader";
-        readerBtn.addEventListener("click", (e) => {
-          e.stopPropagation();
-          const targetKey = attKey || itemKey;
-          const sidebarWin = getSidebarWindow();
-          sidebarWin?.openItemInReader(targetKey, sectionText);
-        });
-        actionsDiv.appendChild(readerBtn);
+        const hasAttachment = checkItemHasAttachment(item);
+        if (hasAttachment === true) {
+          const readerBtn = document.createElement("button");
+          readerBtn.className = "source-action-btn";
+          readerBtn.innerHTML = `📖 Open in Reader`;
+          readerBtn.title = "Open paper at this section in Zotero PDF Reader";
+          readerBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const targetKey = attKey || itemKey;
+            const sidebarWin = getSidebarWindow();
+            sidebarWin?.openItemInReader(targetKey, sectionText);
+          });
+          actionsDiv.appendChild(readerBtn);
+        }
 
         const libBtn = document.createElement("button");
         libBtn.className = "source-action-btn";
@@ -1613,6 +1664,7 @@
 
   if (typeof window !== "undefined") {
     window.highlightAndScrollToClaim = highlightAndScrollToClaim;
+    window.checkItemHasAttachment = checkItemHasAttachment;
   }
 
   if (document.readyState === "loading") {
@@ -1623,6 +1675,9 @@
 
   if (typeof module !== "undefined" && module.exports) {
     module.exports = {
+      checkItemHasAttachment,
+      renderTable: renderTableRows,
+      renderTableRows,
       buildHighlightedPassage,
       renderRichContent,
       sanitizeHTML,
