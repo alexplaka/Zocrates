@@ -351,7 +351,7 @@ def test_document_converters_vc_redist_runtime_error_on_onnxruntime_dll_failure(
         with pytest.raises(RuntimeError) as exc_info:
             dc.__getattr__("MarkItDown")
         assert "Microsoft Visual C++ 2015–2022 Redistributable (x64) is required on Windows" in str(exc_info.value)
-        assert "https://aka.ms/vs/17/release/vc_redist.x64.exe" in str(exc_info.value)
+        assert "https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170#latest-supported-redistributable-version" in str(exc_info.value)
         assert str(exc_info.value) == VC_REDIST_WINDOWS_MSG
 
     # 2. Test MarkItDownConverter.convert() during convert execution
@@ -363,7 +363,7 @@ def test_document_converters_vc_redist_runtime_error_on_onnxruntime_dll_failure(
     with pytest.raises(RuntimeError) as exc_info:
         mid_conv.convert("TEST_ITEM", dummy_doc, "application/pdf", cache_bundle_dir)
     assert "Microsoft Visual C++ 2015–2022 Redistributable (x64) is required on Windows" in str(exc_info.value)
-    assert "https://aka.ms/vs/17/release/vc_redist.x64.exe" in str(exc_info.value)
+    assert "https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170#latest-supported-redistributable-version" in str(exc_info.value)
 
     # 3. Test DoclingLocalConverter.convert() during layout analysis / converter call
     docling_conv = DoclingLocalConverter()
@@ -375,7 +375,7 @@ def test_document_converters_vc_redist_runtime_error_on_onnxruntime_dll_failure(
     with pytest.raises(RuntimeError) as exc_info:
         docling_conv.convert("TEST_ITEM", dummy_doc, "application/pdf", cache_bundle_dir)
     assert "Microsoft Visual C++ 2015–2022 Redistributable (x64) is required on Windows" in str(exc_info.value)
-    assert "https://aka.ms/vs/17/release/vc_redist.x64.exe" in str(exc_info.value)
+    assert "https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170#latest-supported-redistributable-version" in str(exc_info.value)
 
 
 

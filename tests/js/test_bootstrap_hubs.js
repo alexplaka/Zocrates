@@ -21,8 +21,10 @@ async function runTests() {
     setSubprocessForTesting,
     setBackendStatus,
     injectToolbarButton,
+    getWindowsArchitecture,
     isVcRedistInstalledWindows,
     ensureVcRedistWindows,
+    VC_REDIST_DOC_URL,
   } = require("../../zotero-plugin/addon/bootstrap.js");
 
   // 1. Zotero.Zocrates.Notifier
@@ -1588,11 +1590,16 @@ async function runTests() {
     const targetPath = binDir + sep + "uv.exe";
 
     // Mock fetch returning archive buffer (> 1MB)
+    const mockBuf = new ArrayBuffer(1024 * 1024 + 50);
+    const mockHash = await bootstrap.computeBufferSha256Hex(mockBuf);
+    const prevHash = bootstrap.PINNED_UV_HASHES["x86_64-pc-windows-msvc"];
+    bootstrap.PINNED_UV_HASHES["x86_64-pc-windows-msvc"] = mockHash;
+
     global.fetch = async (url) => {
       return {
         ok: true,
         status: 200,
-        arrayBuffer: async () => new ArrayBuffer(1024 * 1024 + 50),
+        arrayBuffer: async () => mockBuf,
       };
     };
 
@@ -1680,6 +1687,7 @@ async function runTests() {
         "targetPath must NOT be removed during placement when extractedBinary === targetPath"
       );
     } finally {
+      bootstrap.PINNED_UV_HASHES["x86_64-pc-windows-msvc"] = prevHash;
       global.fetch = prevFetch;
       global.IOUtils = prevIOUtils;
       global.Services.appinfo = prevAppInfo;
@@ -1750,6 +1758,28 @@ async function runTests() {
     }
   });
 
+  test("getWindowsArchitecture: resolves arm64, x86, and x64 correctly with fallback", () => {
+    const prevAppInfo = global.Services.appinfo;
+    try {
+      global.Services.appinfo = { XPCOMABI: "x86_64-gcc3" };
+      assert.strictEqual(getWindowsArchitecture(), "x64");
+
+      global.Services.appinfo = { XPCOMABI: "aarch64-unknown-linux" };
+      assert.strictEqual(getWindowsArchitecture(), "arm64");
+
+      global.Services.appinfo = { XPCOMABI: "arm64-gcc3" };
+      assert.strictEqual(getWindowsArchitecture(), "arm64");
+
+      global.Services.appinfo = { XPCOMABI: "x86-msvc" };
+      assert.strictEqual(getWindowsArchitecture(), "x86");
+
+      global.Services.appinfo = null;
+      assert.strictEqual(getWindowsArchitecture(), "x64");
+    } finally {
+      global.Services.appinfo = prevAppInfo;
+    }
+  });
+
   await testAsync("ensureVcRedistWindows: returns true immediately if not Windows or already installed", async () => {
     const prevAppInfo = global.Services.appinfo;
     const prevZoteroIsWin = env.zotero.isWin;
@@ -1783,155 +1813,48 @@ async function runTests() {
     }
   });
 
-  await testAsync("ensureVcRedistWindows: downloads, validates MZ, runs PowerShell with UAC elevation, and cleans up", async () => {
+  await testAsync("ensureVcRedistWindows: on Windows when missing throws VCRUNTIME_MISSING with arch and docUrl and adds warning notification", async () => {
     const prevAppInfo = global.Services.appinfo;
     const prevZoteroIsWin = env.zotero.isWin;
     const prevEnv = global.Services.env;
     const prevIOUtils = global.IOUtils;
+    let fetchCalled = false;
     const prevFetch = global.fetch;
-
-    const files = new Map();
-    let removedInstaller = false;
-    const progressEvents = [];
-    const installerPath = "C:\\zocrates-data\\bin\\vc_redist.x64.exe";
-
-    const prevNotify = env.zotero.Zocrates?.notifyBootstrapProgress;
-    if (!env.zotero.Zocrates) env.zotero.Zocrates = {};
-    env.zotero.Zocrates.notifyBootstrapProgress = (step, detail) => {
-      progressEvents.push({ step, detail });
-    };
-
-    let powershellCommandExecuted = null;
-    let powershellArgsExecuted = null;
-
-    bootstrap.setSubprocessForTesting({
-      async pathSearch(cmd) { return cmd; },
-      async call(opts) {
-        powershellCommandExecuted = opts.command;
-        powershellArgsExecuted = opts.arguments;
-        // Simulate installer run: mark DLL as installed
-        files.set("c:\\windows\\system32\\vcruntime140_1.dll", true);
-        return {
-          stdout: null,
-          stderr: null,
-          async wait() { return { exitCode: 0 }; },
-        };
-      },
-    });
-
-    // Valid PE payload > 5MB starting with MZ
-    const validPayload = new Uint8Array(6 * 1024 * 1024);
-    validPayload[0] = 0x4d; // 'M'
-    validPayload[1] = 0x5a; // 'Z'
-
-    global.fetch = async (url) => {
-      assert.strictEqual(url, "https://aka.ms/vs/17/release/vc_redist.x64.exe");
-      return {
-        ok: true,
-        status: 200,
-        async arrayBuffer() { return validPayload.buffer; },
-      };
-    };
-
-    global.IOUtils = {
-      async makeDirectory(p) { files.set(p, "<dir>"); },
-      async write(p, bytes) { files.set(p, bytes); },
-      async exists(p) { return files.has(p.toLowerCase()); },
-      async remove(p, opts) {
-        if (p === installerPath) removedInstaller = true;
-        files.delete(p.toLowerCase());
-      },
-    };
-
-    try {
-      global.Services.appinfo = { OS: "WINNT" };
-      env.zotero.isWin = true;
-      global.Services.env = {
-        get(key) { return key === "SystemRoot" ? "C:\\Windows" : null; },
-      };
-
-      const result = await ensureVcRedistWindows("C:\\zocrates-data", "\\");
-
-      assert.strictEqual(result, true, "ensureVcRedistWindows must return true upon successful install");
-      assert.strictEqual(removedInstaller, true, "Installer binary must be removed in finally block");
-      assert.ok(progressEvents.some(e => e.step === "preparing" && e.detail && e.detail.label.includes("Visual C++")));
-
-      assert.ok(powershellCommandExecuted, "PowerShell must be called");
-      assert.ok(powershellArgsExecuted.includes("-NoProfile"), "Must include -NoProfile");
-      assert.ok(powershellArgsExecuted.includes("-NonInteractive"), "Must include -NonInteractive");
-      const cmdStr = powershellArgsExecuted[powershellArgsExecuted.indexOf("-Command") + 1];
-      assert.ok(cmdStr.includes("Start-Process"), "Command must invoke Start-Process");
-      assert.ok(cmdStr.includes("-Verb RunAs"), "Command must request UAC elevation (-Verb RunAs)");
-      assert.ok(cmdStr.includes("'/install','/passive','/norestart'"), "Command must pass required argument list");
-      assert.ok(cmdStr.includes("exit $p.ExitCode"), "Command must exit with process exit code");
-    } finally {
-      bootstrap.setSubprocessForTesting(null);
-      global.Services.appinfo = prevAppInfo;
-      env.zotero.isWin = prevZoteroIsWin;
-      global.Services.env = prevEnv;
-      global.IOUtils = prevIOUtils;
-      global.fetch = prevFetch;
-      if (prevNotify) {
-        env.zotero.Zocrates.notifyBootstrapProgress = prevNotify;
-      } else if (env.zotero.Zocrates) {
-        delete env.zotero.Zocrates.notifyBootstrapProgress;
-      }
-    }
-  });
-
-  await testAsync("ensureVcRedistWindows: handles invalid download without throwing and adds warning notification", async () => {
-    const prevAppInfo = global.Services.appinfo;
-    const prevZoteroIsWin = env.zotero.isWin;
-    const prevEnv = global.Services.env;
-    const prevIOUtils = global.IOUtils;
-    const prevFetch = global.fetch;
-
-    const files = new Map();
-    let removedInstaller = false;
-    const installerPath = "C:\\zocrates-data\\bin\\vc_redist.x64.exe";
+    global.fetch = async () => { fetchCalled = true; throw new Error("fetch must not be called"); };
 
     const notifier = initNotifier(env.zotero);
     notifier.clear();
 
-    // Payload too small (<5MB)
-    const smallPayload = new Uint8Array(1024);
-    smallPayload[0] = 0x4d;
-    smallPayload[1] = 0x5a;
-
-    global.fetch = async (url) => {
-      return {
-        ok: true,
-        status: 200,
-        async arrayBuffer() { return smallPayload.buffer; },
-      };
-    };
-
-    global.IOUtils = {
-      async makeDirectory(p) { files.set(p, "<dir>"); },
-      async write(p, bytes) { files.set(p, bytes); },
-      async exists(p) { return false; },
-      async remove(p, opts) {
-        if (p === installerPath) removedInstaller = true;
-        files.delete(p.toLowerCase());
-      },
-    };
-
     try {
-      global.Services.appinfo = { OS: "WINNT" };
+      global.Services.appinfo = { OS: "WINNT", XPCOMABI: "x86_64-gcc3" };
       env.zotero.isWin = true;
       global.Services.env = {
         get(key) { return key === "SystemRoot" ? "C:\\Windows" : null; },
       };
+      global.IOUtils = {
+        async exists(p) { return false; },
+      };
 
-      const result = await ensureVcRedistWindows("C:\\zocrates-data", "\\");
-
-      assert.strictEqual(result, false, "Must return false when download validation fails");
-      assert.strictEqual(removedInstaller, true, "Installer must be removed in finally");
+      let threw = false;
+      try {
+        await ensureVcRedistWindows("C:\\zocrates-data", "\\");
+      } catch (err) {
+        threw = true;
+        assert.strictEqual(err.code, "VCRUNTIME_MISSING");
+        assert.strictEqual(err.arch, "X64");
+        assert.strictEqual(err.docUrl, VC_REDIST_DOC_URL);
+        assert.ok(err.message.includes("Microsoft Visual C++ 2015–2022 Redistributable (X64)"));
+        assert.ok(err.message.includes(VC_REDIST_DOC_URL));
+      }
+      assert.strictEqual(threw, true, "ensureVcRedistWindows must throw VCRUNTIME_MISSING when runtime is missing on Windows");
+      assert.strictEqual(fetchCalled, false, "Must not attempt automatic downloading");
 
       const notifications = notifier.getAll();
       assert.strictEqual(notifications.length, 1, "Must add 1 warning notification");
       assert.strictEqual(notifications[0].type, "warning");
-      assert.ok(notifications[0].text.includes("vc_redist.x64.exe"));
+      assert.ok(notifications[0].text.includes("Microsoft Visual C++ 2015–2022 Redistributable (X64)"));
+      assert.ok(notifications[0].text.includes(VC_REDIST_DOC_URL));
+      assert.ok(!notifications[0].text.includes(".exe"), "Notification must link to documentation page, not direct .exe");
     } finally {
       global.Services.appinfo = prevAppInfo;
       env.zotero.isWin = prevZoteroIsWin;
@@ -1941,75 +1864,318 @@ async function runTests() {
     }
   });
 
-  await testAsync("ensureVcRedistWindows: handles UAC elevation decline without throwing and adds warning notification", async () => {
+  await testAsync("ensureVcRedistWindows: detects ARM64 architecture and specifies ARM64 in error and notification", async () => {
     const prevAppInfo = global.Services.appinfo;
     const prevZoteroIsWin = env.zotero.isWin;
     const prevEnv = global.Services.env;
     const prevIOUtils = global.IOUtils;
-    const prevFetch = global.fetch;
-
-    const files = new Map();
-    let removedInstaller = false;
-    const installerPath = "C:\\zocrates-data\\bin\\vc_redist.x64.exe";
 
     const notifier = initNotifier(env.zotero);
     notifier.clear();
 
-    const validPayload = new Uint8Array(6 * 1024 * 1024);
-    validPayload[0] = 0x4d;
-    validPayload[1] = 0x5a;
-
-    global.fetch = async () => ({
-      ok: true,
-      status: 200,
-      async arrayBuffer() { return validPayload.buffer; },
-    });
-
-    global.IOUtils = {
-      async makeDirectory(p) { files.set(p, "<dir>"); },
-      async write(p, bytes) { files.set(p, bytes); },
-      async exists(p) { return false; },
-      async remove(p, opts) {
-        if (p === installerPath) removedInstaller = true;
-        files.delete(p.toLowerCase());
-      },
-    };
-
-    // Subprocess fails (UAC canceled or exit code non-zero)
-    bootstrap.setSubprocessForTesting({
-      async pathSearch(cmd) { return cmd; },
-      async call(opts) {
-        return {
-          stdout: null,
-          stderr: null,
-          async wait() { return { exitCode: 1223 }; }, // ERROR_CANCELLED
-        };
-      },
-    });
-
     try {
-      global.Services.appinfo = { OS: "WINNT" };
+      global.Services.appinfo = { OS: "WINNT", XPCOMABI: "aarch64-unknown" };
       env.zotero.isWin = true;
       global.Services.env = {
         get(key) { return key === "SystemRoot" ? "C:\\Windows" : null; },
       };
+      global.IOUtils = {
+        async exists(p) { return false; },
+      };
 
-      const result = await ensureVcRedistWindows("C:\\zocrates-data", "\\");
-
-      assert.strictEqual(result, false, "Must return false when installer fails / UAC canceled");
-      assert.strictEqual(removedInstaller, true, "Installer must be removed in finally");
+      let threw = false;
+      try {
+        await ensureVcRedistWindows("C:\\zocrates-data", "\\");
+      } catch (err) {
+        threw = true;
+        assert.strictEqual(err.code, "VCRUNTIME_MISSING");
+        assert.strictEqual(err.arch, "ARM64");
+        assert.strictEqual(err.docUrl, VC_REDIST_DOC_URL);
+        assert.ok(err.message.includes("(ARM64)"));
+      }
+      assert.strictEqual(threw, true);
 
       const notifications = notifier.getAll();
-      assert.strictEqual(notifications.length, 1, "Must add warning notification");
-      assert.strictEqual(notifications[0].type, "warning");
-      assert.ok(notifications[0].text.includes("vc_redist.x64.exe"));
+      assert.strictEqual(notifications.length, 1);
+      assert.ok(notifications[0].text.includes("(ARM64)"));
     } finally {
-      bootstrap.setSubprocessForTesting(null);
       global.Services.appinfo = prevAppInfo;
       env.zotero.isWin = prevZoteroIsWin;
       global.Services.env = prevEnv;
       global.IOUtils = prevIOUtils;
+    }
+  });
+
+  // --- Pinned uv 0.13.8 & Graceful Fallback Tests ---
+
+  test("resolveUvTargetTriple: resolves target triples across architectures and OSes", () => {
+    const { resolveUvTargetTriple } = bootstrap;
+    // macOS (Darwin)
+    assert.strictEqual(resolveUvTargetTriple("Darwin", "aarch64-gcc3"), "aarch64-apple-darwin");
+    assert.strictEqual(resolveUvTargetTriple("Darwin", "arm64"), "aarch64-apple-darwin");
+    assert.strictEqual(resolveUvTargetTriple("Darwin", "x86_64-gcc3"), "x86_64-apple-darwin");
+
+    // Windows (WINNT)
+    assert.strictEqual(resolveUvTargetTriple("WINNT", "aarch64-msvc"), "aarch64-pc-windows-msvc");
+    assert.strictEqual(resolveUvTargetTriple("WINNT", "arm64"), "aarch64-pc-windows-msvc");
+    assert.strictEqual(resolveUvTargetTriple("WINNT", "x86_64-msvc"), "x86_64-pc-windows-msvc");
+
+    // Linux
+    assert.strictEqual(resolveUvTargetTriple("Linux", "aarch64-unknown-linux"), "aarch64-unknown-linux-gnu");
+    assert.strictEqual(resolveUvTargetTriple("Linux", "arm64"), "aarch64-unknown-linux-gnu");
+    assert.strictEqual(resolveUvTargetTriple("Linux", "x86_64-gcc3"), "x86_64-unknown-linux-gnu");
+
+    // Fallback using Services.appinfo when args omitted
+    const prevAppInfo = global.Services.appinfo;
+    try {
+      global.Services.appinfo = { OS: "Darwin", XPCOMABI: "x86_64-gcc3" };
+      assert.strictEqual(resolveUvTargetTriple(), "x86_64-apple-darwin");
+
+      global.Services.appinfo = { OS: "Linux", XPCOMABI: "aarch64-gcc3" };
+      assert.strictEqual(resolveUvTargetTriple(), "aarch64-unknown-linux-gnu");
+    } finally {
+      global.Services.appinfo = prevAppInfo;
+    }
+  });
+
+  await testAsync("computeBufferSha256Hex: computes lowercase hex SHA-256 via subtle and XPCOM fallback", async () => {
+    const { computeBufferSha256Hex } = bootstrap;
+    const testData = new Uint8Array([104, 101, 108, 108, 111, 32, 119, 111, 114, 108, 100]); // "hello world"
+    const expectedHex = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9";
+
+    // 1. WebCrypto
+    const hash = await computeBufferSha256Hex(testData);
+    assert.strictEqual(hash, expectedHex, "Must compute correct SHA-256 for hello world");
+
+    const bufHash = await computeBufferSha256Hex(testData.buffer);
+    assert.strictEqual(bufHash, expectedHex, "Must handle ArrayBuffer input");
+
+    // 2. XPCOM fallback
+    const prevCrypto = global.crypto;
+    const prevCc = global.Cc;
+    const prevCi = global.Ci;
+    try {
+      let hashData = [];
+      const mockCryptoHash = {
+        SHA256: 2,
+        init(alg) { hashData = []; },
+        update(bytes, len) {
+          hashData = Array.from(bytes.slice(0, len));
+        },
+        finish(ascii) {
+          const nodeCrypto = require("crypto");
+          const buf = nodeCrypto.createHash("sha256").update(Buffer.from(hashData)).digest();
+          return Array.from(buf).map(b => String.fromCharCode(b)).join("");
+        },
+      };
+
+      global.Cc = {
+        "@mozilla.org/security/hash;1": {
+          createInstance() { return mockCryptoHash; },
+        },
+      };
+      global.Ci = { nsICryptoHash: "nsICryptoHash" };
+      delete global.crypto;
+
+      const xpcomHash = await computeBufferSha256Hex(testData);
+      assert.strictEqual(xpcomHash, expectedHex, "XPCOM fallback must return matching hex hash");
+    } finally {
+      if (prevCrypto !== undefined) global.crypto = prevCrypto;
+      global.Cc = prevCc;
+      global.Ci = prevCi;
+    }
+  });
+
+  await testAsync("downloadStandaloneUv: SHA-256 verification passes on match and throws on mismatch", async () => {
+    const prevFetch = global.fetch;
+    const prevIOUtils = global.IOUtils;
+    const prevAppInfo = global.Services.appinfo;
+    const prevZoteroIsWin = env.zotero.isWin;
+
+    const files = new Map();
+    let removedTempDir = false;
+    let removedArchive = false;
+
+    global.Services.appinfo = {
+      OS: "Linux",
+      XPCOMABI: "x86_64-gcc3",
+    };
+    env.zotero.isWin = false;
+
+    const binDir = "/mock/zocrates-data/bin";
+    const sep = "/";
+    const targetPath = binDir + sep + "uv";
+
+    const mockBuf = new ArrayBuffer(1024 * 1024 + 100);
+    const actualHash = await bootstrap.computeBufferSha256Hex(mockBuf);
+    const prevHash = bootstrap.PINNED_UV_HASHES["x86_64-unknown-linux-gnu"];
+
+    global.IOUtils = {
+      async makeDirectory(p) { files.set(p, "<dir>"); },
+      async write(p, buf) { files.set(p, buf); },
+      async exists(p) { return files.has(p); },
+      async remove(p, opts) {
+        if (String(p).includes(".tar.gz")) removedArchive = true;
+        if (String(p).includes("uv-x86_64-unknown-linux-gnu")) removedTempDir = true;
+        files.delete(p);
+      },
+      async move(src, dst) { files.set(dst, files.get(src)); files.delete(src); },
+      async stat(p) { return { size: 15 * 1024 * 1024 }; },
+      async read(p) { return new Uint8Array([0x7f, 0x45, 0x4c, 0x46]); },
+      async setPermissions() {},
+      async getChildren(p) { return []; },
+    };
+
+    bootstrap.setSubprocessForTesting({
+      async pathSearch(cmd) { return cmd === "tar" ? "/usr/bin/tar" : null; },
+      async call() {
+        files.set(targetPath, "uv-binary");
+        return { wait: async () => ({ exitCode: 0 }), stdout: null, stderr: null };
+      },
+    });
+
+    global.fetch = async () => ({
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => mockBuf,
+    });
+
+    try {
+      // Case 1: Mismatch throw
+      bootstrap.PINNED_UV_HASHES["x86_64-unknown-linux-gnu"] = "0000000000000000000000000000000000000000000000000000000000000000";
+      let threwMismatch = false;
+      try {
+        await bootstrap.downloadStandaloneUv(binDir, sep, targetPath);
+      } catch (err) {
+        threwMismatch = true;
+        assert.ok(err.message.includes("SHA-256 mismatch"));
+        assert.ok(err.message.includes("0000000000000000000000000000000000000000000000000000000000000000"));
+        assert.ok(err.message.includes(actualHash));
+      }
+      assert.strictEqual(threwMismatch, true, "Must throw on SHA-256 mismatch");
+      assert.strictEqual(removedArchive, true, "Archive must be cleaned up in finally on mismatch");
+
+      // Case 2: Matching hash passes
+      bootstrap.PINNED_UV_HASHES["x86_64-unknown-linux-gnu"] = actualHash;
+      removedArchive = false;
+      removedTempDir = false;
+
+      await bootstrap.downloadStandaloneUv(binDir, sep, targetPath);
+      assert.strictEqual(files.has(targetPath), true, "targetPath must exist on success");
+      assert.strictEqual(removedArchive, true, "Archive must be cleaned up in finally on success");
+      assert.strictEqual(removedTempDir, true, "Temporary extract dir must be cleaned up in finally on success");
+    } finally {
+      bootstrap.PINNED_UV_HASHES["x86_64-unknown-linux-gnu"] = prevHash;
+      bootstrap.setSubprocessForTesting(null);
       global.fetch = prevFetch;
+      global.IOUtils = prevIOUtils;
+      global.Services.appinfo = prevAppInfo;
+      env.zotero.isWin = prevZoteroIsWin;
+    }
+  });
+
+  await testAsync("resolveUvBinary: throws UV_MISSING with metadata and adds warning notification when download fails", async () => {
+    const prevFetch = global.fetch;
+    const prevIOUtils = global.IOUtils;
+    const prevAppInfo = global.Services.appinfo;
+    const prevZoteroIsWin = env.zotero.isWin;
+
+    const notifier = initNotifier(env.zotero);
+    notifier.clear();
+
+    global.Services.appinfo = {
+      OS: "Linux",
+      XPCOMABI: "x86_64-gcc3",
+    };
+    env.zotero.isWin = false;
+
+    global.IOUtils = {
+      async exists() { return false; },
+      async makeDirectory() {},
+      async remove() {},
+    };
+
+    bootstrap.setSubprocessForTesting({
+      async pathSearch() { return null; },
+      async call() { throw new Error("command not found"); },
+    });
+
+    global.fetch = async () => ({
+      ok: false,
+      status: 404,
+    });
+
+    try {
+      let threw = false;
+      try {
+        await bootstrap.resolveUvBinary("/mock/zocrates-data", "/");
+      } catch (err) {
+        threw = true;
+        assert.strictEqual(err.code, "UV_MISSING");
+        assert.strictEqual(err.uvVersion, bootstrap.PINNED_UV_VERSION);
+        assert.strictEqual(err.triple, "x86_64-unknown-linux-gnu");
+        assert.strictEqual(err.docUrl, bootstrap.UV_INSTALL_DOC_URL);
+        assert.strictEqual(err.installCmd, "curl -LsSf https://astral.sh/uv/install.sh | sh");
+      }
+      assert.strictEqual(threw, true, "resolveUvBinary must throw UV_MISSING when download fails");
+
+      const notifs = notifier.getAll();
+      assert.strictEqual(notifs.length, 1, "Must add warning notification");
+      assert.strictEqual(notifs[0].type, "warning");
+      assert.ok(notifs[0].text.includes("curl -LsSf https://astral.sh/uv/install.sh | sh"));
+    } finally {
+      bootstrap.setSubprocessForTesting(null);
+      global.fetch = prevFetch;
+      global.IOUtils = prevIOUtils;
+      global.Services.appinfo = prevAppInfo;
+      env.zotero.isWin = prevZoteroIsWin;
+    }
+  });
+
+  await testAsync("isUvAvailable: detects uv across tiers without downloading", async () => {
+    const prevIOUtils = global.IOUtils;
+    const prevAppInfo = global.Services.appinfo;
+    const prevZoteroIsWin = env.zotero.isWin;
+
+    try {
+      global.Services.appinfo = { OS: "Linux", XPCOMABI: "x86_64-gcc3" };
+      env.zotero.isWin = false;
+
+      // Case 1: Neither PATH nor disk files available -> false
+      global.IOUtils = {
+        async exists() { return false; },
+      };
+      bootstrap.setSubprocessForTesting({
+        async pathSearch() { return null; },
+        async call() { throw new Error("not found"); },
+      });
+      const availNone = await bootstrap.isUvAvailable("/mock/zocrates-data", "/");
+      assert.strictEqual(availNone, false, "Must return false when uv is not found");
+
+      // Case 2: Available in bundled <zocrates-data>/bin/uv
+      global.IOUtils = {
+        async exists(p) { return p === "/mock/zocrates-data/bin/uv"; },
+        async stat(p) { return { size: 15 * 1024 * 1024 }; },
+        async read(p) { return new Uint8Array([0x7f, 0x45, 0x4c, 0x46]); },
+      };
+      const availBundled = await bootstrap.isUvAvailable("/mock/zocrates-data", "/");
+      assert.strictEqual(availBundled, true, "Must return true when bundled uv exists and verifies");
+
+      // Case 3: Available via PATH
+      global.IOUtils = {
+        async exists() { return false; },
+      };
+      bootstrap.setSubprocessForTesting({
+        async pathSearch(cmd) { return cmd === "uv" ? "/usr/local/bin/uv" : null; },
+        async call() { return { wait: async () => ({ exitCode: 0 }), stdout: null, stderr: null }; },
+      });
+      const availPath = await bootstrap.isUvAvailable("/mock/zocrates-data", "/");
+      assert.strictEqual(availPath, true, "Must return true when uv is on PATH");
+    } finally {
+      bootstrap.setSubprocessForTesting(null);
+      global.IOUtils = prevIOUtils;
+      global.Services.appinfo = prevAppInfo;
+      env.zotero.isWin = prevZoteroIsWin;
     }
   });
 }

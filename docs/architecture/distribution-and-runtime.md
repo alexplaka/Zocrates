@@ -110,21 +110,25 @@ sequenceDiagram
 
 ### Bootstrap Steps in Detail
 
-1. **Package Manager Detection (`uv`)**:
-   `bootstrap.js` checks candidate locations using absolute paths:
-   * First: `<zotero-data-dir>/zocrates-data/bin/uv`
-   * Second: Common user bin paths (`~/.local/bin/uv`, `~/.cargo/bin/uv`) or system `PATH`
-   * If absent: Downloads the platform-specific standalone static executable (~30 MB) directly into `<zotero-data-dir>/zocrates-data/bin/uv`.
-2. **Python 3.13 Runtime Provisioning**:
+1. **Windows Visual C++ Runtime Prerequisite Check**:
+   On Windows hosts, `bootstrap.js` probes for `C:\Windows\System32\vcruntime140_1.dll`. If missing, silent elevated execution is avoided; provisioning pauses and the onboarding UI renders a prerequisite guidance card with detected architecture (`X64`, `ARM64`, or `X86`), an official Microsoft documentation link (`https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170#latest-supported-redistributable-version`), and a "Check & Continue" button backed by 3-second auto-detection polling.
+2. **Package Manager Detection & Pinned Provisioning (`uv 0.13.8`)**:
+   `bootstrap.js` probes candidate locations across multiple tiers:
+   * **Tier 1 (Host PATH)**: via `Subprocess.pathSearch("uv")` or `uv --version`.
+   * **Tier 2 (Hermetic Cache)**: `<zotero-data-dir>/zocrates-data/bin/uv` (validated with magic bytes and size checks).
+   * **Tier 3 (User Paths)**: `~/.local/bin/uv`, `~/.cargo/bin/uv`, or Windows `%LOCALAPPDATA%\Microsoft\WinGet\Links\uv.exe`.
+   * **Tier 4 (Pinned Official Download & In-Memory SHA-256 Verification)**: If absent from host tiers, downloads standalone `uv` pinned to version **`0.13.8`** from Astral's GitHub release for the detected triple (`aarch64-apple-darwin`, `x86_64-apple-darwin`, `aarch64-pc-windows-msvc`, `x86_64-pc-windows-msvc`, `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu`). The buffer is verified against hardcoded SHA-256 digests in memory before writing to disk, with unconditional extraction cleanup in `finally`.
+   * **Offline / Firewall Prerequisite Fallback**: If Tier 4 download fails, onboarding displays a guided card with the copyable platform install command, official Astral documentation link, "Check & Continue" button, and 3-second auto-detection polling.
+3. **Python 3.13 Runtime Provisioning**:
    The extension invokes `<bin>/uv python install 3.13`. `uv` downloads and manages an official, relocatable standalone CPython 3.13 build (from `indygreg/python-build-standalone`), isolating it completely from any host-installed Python versions.
-3. **Environment Creation & Constrained Wheel Installation**:
+4. **Environment Creation & Constrained Wheel Installation**:
    The extension creates the virtual environment and installs the packaged wheel against the pinned constraints:
    ```bash
    <bin>/uv venv --python 3.13 <zotero-data-dir>/zocrates-data/.venv
    <bin>/uv pip install --python <zotero-data-dir>/zocrates-data/.venv --constraint <zotero-data-dir>/zocrates-data/constraints.txt <zotero-data-dir>/zocrates-data/zocrates-<version>-py3-none-any.whl
    ```
    `uv` installs Zocrates and pulls all required dependencies (`torch`, `transformers`, `fastapi`, `chromadb`, `docling`) strictly inside `<zotero-data-dir>/zocrates-data/.venv/lib/python3.13/site-packages/`.
-4. **Onboarding Progress Display**:
+5. **Onboarding Progress Display**:
    During initial provisioning, `sidebar.html` renders a non-blocking onboarding progress card displaying the current phase and progress rather than connection errors.
 
 ---

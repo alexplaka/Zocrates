@@ -124,6 +124,8 @@ try {
 // checkBackendStatus success path. handleChatSubmit refuses to POST while it
 // is false, so click and Ctrl/Cmd+Enter submits are inert during install.
 let backendReadyForChat = false;
+let vcRedistCheckTimer = null;
+let uvCheckTimer = null;
 
 // UI Elements
 const statusDot = document.getElementById("status-dot");
@@ -2107,6 +2109,14 @@ const BOOTSTRAP_STEP_WIDTHS = {
 };
 
 function removeBootstrapProgressCard() {
+  if (vcRedistCheckTimer) {
+    clearInterval(vcRedistCheckTimer);
+    vcRedistCheckTimer = null;
+  }
+  if (uvCheckTimer) {
+    clearInterval(uvCheckTimer);
+    uvCheckTimer = null;
+  }
   // Phase 7 gate composition: while onboarding is mid-flow (CONFIGURE wizard
   // or PROCESS conversion), this routine must NOT dissolve the card nor lift
   // the chat gate — the 10s /status poll would otherwise dismiss the wizard
@@ -2133,6 +2143,17 @@ function applyBootstrapProgressStateToCard(evt) {
   const failedIndex = isError && evt.detail && evt.detail.failedStep
     ? Math.min(BOOTSTRAP_STEP_KEYS.indexOf(evt.detail.failedStep), 2)
     : -1;
+
+  if (!isError) {
+    if (vcRedistCheckTimer) {
+      clearInterval(vcRedistCheckTimer);
+      vcRedistCheckTimer = null;
+    }
+    if (uvCheckTimer) {
+      clearInterval(uvCheckTimer);
+      uvCheckTimer = null;
+    }
+  }
 
   // Row 3 doubles as "Starting backend server…" in the final stage.
   const engineLabel = document.getElementById("bootstrap-step-label-engine");
@@ -2164,15 +2185,245 @@ function applyBootstrapProgressStateToCard(evt) {
 
   const errBox = document.getElementById("bootstrap-card-error");
   if (errBox) {
+    const retryBtn = errBox.querySelector(".bootstrap-retry-btn");
     if (isError) {
       errBox.classList.remove("hidden");
       const msg = document.getElementById("bootstrap-error-message");
-      if (msg) {
-        msg.textContent = evt.detail && evt.detail.message
-          ? String(evt.detail.message)
-          : "Backend setup failed. Please try again.";
+      const isVcMissing = Boolean(
+        evt.detail && (
+          evt.detail.code === "VCRUNTIME_MISSING" ||
+          (evt.detail.error || evt.detail.message || "").includes("Visual C++")
+        )
+      );
+      const isUvMissing = Boolean(
+        evt.detail && (
+          evt.detail.code === "UV_MISSING" ||
+          (evt.detail.error || evt.detail.message || "").includes("uv package manager")
+        )
+      );
+
+      if (isVcMissing) {
+        if (uvCheckTimer) {
+          clearInterval(uvCheckTimer);
+          uvCheckTimer = null;
+        }
+        if (msg) {
+          msg.textContent = "";
+
+          const zot = resolveZotero();
+          const rawArch = (evt.detail && evt.detail.arch) ||
+            (zot?.Zocrates?.getWindowsArchitecture && zot.Zocrates.getWindowsArchitecture()) ||
+            "x64";
+          const archLabel = String(rawArch).toUpperCase();
+          const docUrl = (evt.detail && evt.detail.docUrl) ||
+            (zot?.Zocrates?.VC_REDIST_DOC_URL) ||
+            "https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170#latest-supported-redistributable-version";
+
+          const title = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+          title.className = "vc-redist-title";
+          title.textContent = "Microsoft Visual C++ Runtime Required";
+
+          const desc = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+          desc.className = "vc-redist-desc";
+          desc.textContent = "Microsoft Visual C++ 2015–2022 Redistributable (" + archLabel + ") is required on Windows to run the local Python engine.";
+
+          const archInst = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+          archInst.className = "vc-redist-arch-inst";
+          archInst.textContent = "Detected architecture: " + archLabel + ". On Microsoft's documentation page, download and install the " + archLabel + " version:";
+
+          const linkWrap = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+          linkWrap.className = "vc-redist-link-wrap";
+          const link = document.createElementNS("http://www.w3.org/1999/xhtml", "a");
+          link.href = docUrl;
+          link.setAttribute("href", docUrl);
+          link.className = "onboarding-link";
+          link.setAttribute("class", "onboarding-link");
+          link.target = "_blank";
+          link.setAttribute("target", "_blank");
+          link.textContent = "Microsoft Visual C++ Redistributable Documentation & Downloads ↗";
+          linkWrap.appendChild(link);
+
+          const nextStep = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+          nextStep.className = "vc-redist-next-step";
+          nextStep.textContent = "After installing, click “Check & Continue” below.";
+
+          msg.appendChild(title);
+          msg.appendChild(desc);
+          msg.appendChild(archInst);
+          msg.appendChild(linkWrap);
+          msg.appendChild(nextStep);
+        }
+
+        if (retryBtn) {
+          retryBtn.textContent = "Check & Continue";
+        }
+
+        if (!vcRedistCheckTimer) {
+          vcRedistCheckTimer = setInterval(async () => {
+            try {
+              const zot = resolveZotero();
+              if (zot?.Zocrates?.isVcRedistInstalledWindows) {
+                const installed = await zot.Zocrates.isVcRedistInstalledWindows();
+                if (installed) {
+                  if (vcRedistCheckTimer) {
+                    clearInterval(vcRedistCheckTimer);
+                    vcRedistCheckTimer = null;
+                  }
+                  if (zot.Zocrates.retryBackendLaunch) {
+                    zot.Zocrates.retryBackendLaunch();
+                  }
+                }
+              }
+            } catch (e) {
+              console.warn("Zocrates: vc_redist auto-detection check failed:", e);
+            }
+          }, 3000);
+        }
+      } else if (isUvMissing) {
+        if (vcRedistCheckTimer) {
+          clearInterval(vcRedistCheckTimer);
+          vcRedistCheckTimer = null;
+        }
+        if (msg) {
+          msg.textContent = "";
+
+          const zot = resolveZotero();
+          const uvVersion = (evt.detail && evt.detail.uvVersion) || (zot?.Zocrates?.PINNED_UV_VERSION) || "0.13.8";
+          const triple = (evt.detail && evt.detail.triple) || "";
+          const docUrl = (evt.detail && evt.detail.docUrl) || (zot?.Zocrates?.UV_INSTALL_DOC_URL) || "https://docs.astral.sh/uv/getting-started/installation/";
+          const isWin = (typeof zot?.isWin !== "undefined")
+            ? zot.isWin
+            : (typeof navigator !== "undefined" && navigator.platform && navigator.platform.toLowerCase().includes("win"));
+          const installCmd = (evt.detail && evt.detail.installCmd) || (
+            isWin
+              ? 'powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"'
+              : "curl -LsSf https://astral.sh/uv/install.sh | sh"
+          );
+
+          const title = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+          title.className = "uv-missing-title";
+          title.textContent = "uv Package Manager Required";
+
+          const desc = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+          desc.className = "uv-missing-desc";
+          desc.textContent = "Zocrates was unable to automatically download the pinned uv package manager (v" + uvVersion + ")" + (triple ? " for your system (" + triple + ")." : ".");
+
+          const codeWrap = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+          codeWrap.className = "uv-install-code-wrap";
+
+          const codeEl = document.createElementNS("http://www.w3.org/1999/xhtml", "code");
+          codeEl.className = "uv-install-code";
+          codeEl.textContent = installCmd;
+
+          const copyBtn = document.createElementNS("http://www.w3.org/1999/xhtml", "button");
+          copyBtn.className = "uv-install-copy-btn";
+          copyBtn.title = "Copy command";
+          copyBtn.setAttribute("title", "Copy command");
+          copyBtn.innerHTML = '<svg class="copy-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg><svg class="check-icon hidden" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>';
+
+          copyBtn.addEventListener("click", async () => {
+            try {
+              await copyTextToClipboard(installCmd);
+              const copyIcon = copyBtn.querySelector(".copy-icon");
+              const checkIcon = copyBtn.querySelector(".check-icon");
+              if (copyIcon && checkIcon) {
+                copyIcon.classList.add("hidden");
+                checkIcon.classList.remove("hidden");
+                copyBtn.title = "Copied!";
+                copyBtn.setAttribute("title", "Copied!");
+                setTimeout(() => {
+                  copyIcon.classList.remove("hidden");
+                  checkIcon.classList.add("hidden");
+                  copyBtn.title = "Copy command";
+                  copyBtn.setAttribute("title", "Copy command");
+                }, 2000);
+              }
+            } catch (err) {
+              console.warn("Zocrates: failed to copy uv install command:", err);
+            }
+          });
+
+          codeWrap.appendChild(codeEl);
+          codeWrap.appendChild(copyBtn);
+
+          const linkWrap = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+          linkWrap.className = "uv-missing-link-wrap";
+          const link = document.createElementNS("http://www.w3.org/1999/xhtml", "a");
+          link.href = docUrl;
+          link.setAttribute("href", docUrl);
+          link.className = "onboarding-link";
+          link.setAttribute("class", "onboarding-link");
+          link.target = "_blank";
+          link.setAttribute("target", "_blank");
+          link.textContent = "Astral uv Installation Documentation ↗";
+          linkWrap.appendChild(link);
+
+          const nextStep = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+          nextStep.className = "uv-missing-next-step";
+          nextStep.textContent = "After installing uv, click “Check & Continue” below.";
+
+          msg.appendChild(title);
+          msg.appendChild(desc);
+          msg.appendChild(codeWrap);
+          msg.appendChild(linkWrap);
+          msg.appendChild(nextStep);
+        }
+
+        if (retryBtn) {
+          retryBtn.textContent = "Check & Continue";
+        }
+
+        if (!uvCheckTimer) {
+          uvCheckTimer = setInterval(async () => {
+            try {
+              const zot = resolveZotero();
+              if (zot?.Zocrates?.isUvAvailable) {
+                const available = await zot.Zocrates.isUvAvailable();
+                if (available) {
+                  if (uvCheckTimer) {
+                    clearInterval(uvCheckTimer);
+                    uvCheckTimer = null;
+                  }
+                  if (zot.Zocrates.retryBackendLaunch) {
+                    zot.Zocrates.retryBackendLaunch();
+                  }
+                }
+              }
+            } catch (e) {
+              console.warn("Zocrates: uv auto-detection check failed:", e);
+            }
+          }, 3000);
+        }
+      } else {
+        if (vcRedistCheckTimer) {
+          clearInterval(vcRedistCheckTimer);
+          vcRedistCheckTimer = null;
+        }
+        if (uvCheckTimer) {
+          clearInterval(uvCheckTimer);
+          uvCheckTimer = null;
+        }
+        if (retryBtn) {
+          retryBtn.textContent = "Retry";
+        }
+        if (msg) {
+          msg.textContent = evt.detail && evt.detail.message
+            ? String(evt.detail.message)
+            : "Backend setup failed. Please try again.";
+        }
       }
     } else {
+      if (vcRedistCheckTimer) {
+        clearInterval(vcRedistCheckTimer);
+        vcRedistCheckTimer = null;
+      }
+      if (uvCheckTimer) {
+        clearInterval(uvCheckTimer);
+        uvCheckTimer = null;
+      }
+      if (retryBtn) {
+        retryBtn.textContent = "Retry";
+      }
       errBox.classList.add("hidden");
     }
   }
@@ -2660,6 +2911,7 @@ const ONBOARDING_PRESETS = {
     fields: {
       provider: "openrouter_llm",
       model: "openrouter/~z-ai/glm-flash-latest",
+      synthesisModel: "openrouter/google/gemini-3.8-flash",
       embedMode: "cloud",
       cloudEmbeddingModel: "openrouter/voyageai/voyage-4",
       vlmChoice: "openrouter",
@@ -2691,6 +2943,7 @@ const ONBOARDING_PRESETS = {
     fields: {
       provider: "openrouter_llm",
       model: "nvidia/nemotron-3.5-lightning:free",
+      synthesisModel: "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
       embedMode: "cloud",
       cloudEmbeddingModel: "openrouter/nvidia/nemotron-3-embed-1b:free",
       vlmChoice: "openrouter",
@@ -2721,6 +2974,7 @@ const ONBOARDING_PRESETS = {
     fields: {
       provider: "ollama",
       model: "",
+      synthesisModel: "",
       embedMode: "local",
       cloudEmbeddingModel: "",
       vlmChoice: "disable",
@@ -2745,6 +2999,7 @@ function mapPresetToWizardFields(presetKey) {
   return {
     provider: def.fields.provider,
     model: def.fields.model,
+    synthesisModel: (def.fields && def.fields.synthesisModel) || "",
     baseUrlVisible: def.fields.provider !== "openrouter_llm",
     embedMode: def.fields.embedMode,
     cloudEmbeddingModel: def.fields.cloudEmbeddingModel,
@@ -2776,7 +3031,9 @@ function buildOnboardingFinishPayloads(selection, presetDef) {
   if (isLocalProvider && selection.baseUrl) llmConfig.llm_base_url = selection.baseUrl;
   if (selection.openrouterKey) llmConfig.openrouter_api_key = selection.openrouterKey;
   if (!presetDef.manual) {
-    llmConfig.override_agent_models = presetDef.llmConfig.override_agent_models;
+    llmConfig.override_agent_models = presetDef.llmConfig && presetDef.llmConfig.override_agent_models
+      ? JSON.parse(JSON.stringify(presetDef.llmConfig.override_agent_models))
+      : undefined;
   } else {
     // Offline path: reset every role to inherit the local main model — the
     // shipped defaults pin the synthesizers to OpenRouter-hosted Gemini,
@@ -2788,6 +3045,17 @@ function buildOnboardingFinishPayloads(selection, presetDef) {
       online_search: { model: null, thinking_level: "low" },
       online_synthesizer: { model: null, thinking_level: "high" },
     };
+  }
+  if (selection && selection.synthesisModel !== undefined) {
+    const synthModel = (typeof selection.synthesisModel === "string" ? selection.synthesisModel.trim() : "") || null;
+    if (llmConfig.override_agent_models) {
+      if (llmConfig.override_agent_models.library_synthesizer) {
+        llmConfig.override_agent_models.library_synthesizer.model = synthModel;
+      }
+      if (llmConfig.override_agent_models.online_synthesizer) {
+        llmConfig.override_agent_models.online_synthesizer.model = synthModel;
+      }
+    }
   }
   for (const key of [
     "reranker_model",
@@ -2927,7 +3195,7 @@ function renderOnboardingWizardCard() {
   const aiSection = el(wizard, "div", "onboarding-section");
   el(aiSection, "div", "onboarding-section-title", "AI Engine");
   el(aiSection, "div", "onboarding-helper",
-    "OpenRouter is the default engine. An API key is required even for :free models. Choose Ollama/vLLM/OpenAI-compatible to run a local server instead (its base URL is needed then).");
+    "OpenRouter is the default engine. An API key is required even for :free models. Choose Ollama/vLLM/OpenAI-compatible to run a local server instead (default base URLs are used if left blank).");
   const providerField = labeledField(aiSection, "Provider");
   const providerSelect = el(providerField, "select", "onboarding-select");
   for (const [val, label] of [
@@ -2940,9 +3208,49 @@ function renderOnboardingWizardCard() {
     opt.value = val;
   }
   providerSelect.addEventListener("change", () => {
-    if (w.baseUrlRow) w.baseUrlRow.style.display = providerSelect.value === "openrouter_llm" ? "none" : "flex";
+    const prev = w.prevProvider || "openrouter_llm";
+    const curr = providerSelect.value;
+    const isLocal = curr === "ollama" || curr === "vllm" || curr === "openai_compatible";
+    const wasOpenRouter = prev === "openrouter_llm";
+
+    if (wasOpenRouter && isLocal) {
+      const val = (w.modelInput && typeof w.modelInput.value === "string") ? w.modelInput.value.trim() : "";
+      if (val.includes("openrouter") || val.includes("nvidia")) {
+        if (w.modelInput) w.modelInput.value = "";
+      }
+      if (w.synthesisModelInput && typeof w.synthesisModelInput.value === "string") {
+        const sVal = w.synthesisModelInput.value.toLowerCase();
+        if (sVal.includes("openrouter") || sVal.includes("google") || sVal.includes("gemini") || sVal.includes("nvidia") || sVal.includes("nemotron")) {
+          w.synthesisModelInput.value = "";
+        }
+      }
+    } else if (curr === "openrouter_llm" && prev !== "openrouter_llm") {
+      const val = (w.modelInput && typeof w.modelInput.value === "string") ? w.modelInput.value.trim() : "";
+      if (!val || val === "gemma4:12b") {
+        if (w.modelInput) {
+          if (w.activePresetKey === "free") {
+            w.modelInput.value = (ONBOARDING_PRESETS && ONBOARDING_PRESETS.free && ONBOARDING_PRESETS.free.fields.model) || "nvidia/nemotron-3.5-lightning:free";
+          } else {
+            w.modelInput.value = (ONBOARDING_PRESETS && ONBOARDING_PRESETS.recommended && ONBOARDING_PRESETS.recommended.fields.model) || "openrouter/~z-ai/glm-flash-latest";
+          }
+        }
+      }
+      if (w.synthesisModelInput && typeof w.synthesisModelInput.value === "string") {
+        const sVal = w.synthesisModelInput.value.trim();
+        if (!sVal) {
+          if (w.activePresetKey === "free") {
+            w.synthesisModelInput.value = "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free";
+          } else if (w.activePresetKey === "recommended" || !w.activePresetKey) {
+            w.synthesisModelInput.value = "openrouter/google/gemini-3.8-flash";
+          }
+        }
+      }
+    }
+    w.prevProvider = curr;
+    syncOnboardingAiEngineUi(w);
   });
   w.providerSelect = providerSelect;
+  w.prevProvider = providerSelect.value;
 
   const modelField = labeledField(aiSection, "Main model",
     "Model slug sent to the provider (OpenRouter presets use openrouter-prefixed slugs; local providers take their own model names).");
@@ -2951,7 +3259,24 @@ function renderOnboardingWizardCard() {
   modelInput.placeholder = "openrouter/~z-ai/glm-flash-latest";
   w.modelInput = modelInput;
 
-  const baseUrlRow = labeledField(aiSection, "Base URL",
+  const synthField = labeledField(aiSection, "Synthesis model (optional)");
+  const synthHelper = el(synthField, "div", "onboarding-helper");
+  synthHelper.appendChild(document.createTextNode(
+    "A high-performance reasoning model is recommended to evaluate retrieved evidence and synthesize findings. If left blank, inherits the main model. Check the "
+  ));
+  const gpqaLink = el(synthHelper, "a", "onboarding-link", "OpenRouter GPQA Diamond");
+  gpqaLink.href = "https://openrouter.ai/benchmarks/gpqa-diamond";
+  gpqaLink.target = "_blank";
+  gpqaLink.setAttribute("target", "_blank");
+  synthHelper.appendChild(document.createTextNode(
+    " benchmark for top-ranking knowledge-based reasoning models."
+  ));
+  const synthInput = el(synthField, "input", "onboarding-input");
+  synthInput.type = "text";
+  synthInput.placeholder = "openrouter/google/gemini-3.8-flash";
+  w.synthesisModelInput = synthInput;
+
+  const baseUrlRow = labeledField(aiSection, "Base URL (optional)",
     "e.g. http://localhost:11434 for Ollama.");
   const baseUrlInput = el(baseUrlRow, "input", "onboarding-input");
   baseUrlInput.type = "text";
@@ -2959,6 +3284,7 @@ function renderOnboardingWizardCard() {
   baseUrlRow.style.display = "none";
   w.baseUrlRow = baseUrlRow;
   w.baseUrlInput = baseUrlInput;
+  w.baseUrlHelper = baseUrlRow.querySelector("div.onboarding-helper");
 
   const keyField = labeledField(aiSection, "OpenRouter API key");
   const keyHelper = el(keyField, "div", "onboarding-helper");
@@ -3136,6 +3462,64 @@ function renderOnboardingWizardCard() {
   loadOnboardingWizardDefaults(w);
 }
 
+function syncOnboardingAiEngineUi(w) {
+  w = w || _onboardingWizardRefs;
+  if (!w || !w.providerSelect) return;
+  const provider = w.providerSelect.value;
+  const isLocal = provider === "ollama" || provider === "vllm" || provider === "openai_compatible";
+  if (isLocal) {
+    if (w.baseUrlRow) w.baseUrlRow.style.display = "flex";
+    if (w.modelInput) w.modelInput.placeholder = "gemma4:12b";
+    if (w.synthesisModelInput) {
+      const synthVal = typeof w.synthesisModelInput.value === "string" ? w.synthesisModelInput.value.toLowerCase() : "";
+      if (synthVal.includes("openrouter") || synthVal.includes("google") || synthVal.includes("gemini") || synthVal.includes("nvidia") || synthVal.includes("nemotron")) {
+        w.synthesisModelInput.value = "";
+      }
+      w.synthesisModelInput.placeholder = "Leave blank to inherit main model";
+    }
+    if (provider === "ollama") {
+      if (w.baseUrlInput) w.baseUrlInput.placeholder = "http://localhost:11434";
+      if (w.baseUrlHelper) {
+        w.baseUrlHelper.textContent = "Optional — leave blank for default (http://localhost:11434). Only change if running on a custom port or remote host.";
+      }
+    } else if (provider === "vllm") {
+      if (w.baseUrlInput) w.baseUrlInput.placeholder = "http://localhost:8000/v1";
+      if (w.baseUrlHelper) {
+        w.baseUrlHelper.textContent = "Optional — leave blank for default (http://localhost:8000/v1). Only change if running on a custom port or remote host.";
+      }
+    } else if (provider === "openai_compatible") {
+      if (w.baseUrlInput) w.baseUrlInput.placeholder = "http://localhost:8000/v1";
+      if (w.baseUrlHelper) {
+        w.baseUrlHelper.textContent = "Optional — leave blank for default (http://localhost:8000/v1), or specify your server endpoint (e.g. http://localhost:1234/v1 for LM Studio).";
+      }
+    }
+  } else if (provider === "openrouter_llm") {
+    if (w.baseUrlRow) w.baseUrlRow.style.display = "none";
+    if (w.modelInput) {
+      if (w.activePresetKey === "free") {
+        w.modelInput.placeholder = "nvidia/nemotron-3.5-lightning:free";
+      } else {
+        w.modelInput.placeholder = "openrouter/~z-ai/glm-flash-latest";
+      }
+    }
+    if (w.synthesisModelInput) {
+      const synthVal = typeof w.synthesisModelInput.value === "string" ? w.synthesisModelInput.value.trim() : "";
+      if (!synthVal) {
+        if (w.activePresetKey === "free") {
+          w.synthesisModelInput.value = "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free";
+        } else if (w.activePresetKey === "recommended" || !w.activePresetKey) {
+          w.synthesisModelInput.value = "openrouter/google/gemini-3.8-flash";
+        }
+      }
+      if (w.activePresetKey === "free") {
+        w.synthesisModelInput.placeholder = "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free";
+      } else {
+        w.synthesisModelInput.placeholder = "openrouter/google/gemini-3.8-flash";
+      }
+    }
+  }
+}
+
 function applyOnboardingPreset(key) {
   const mapping = mapPresetToWizardFields(key);
   const w = _onboardingWizardRefs;
@@ -3144,8 +3528,12 @@ function applyOnboardingPreset(key) {
   for (const cardBtn of w.presetCards || []) {
     cardBtn.classList.toggle("selected", cardBtn.dataset.presetKey === key);
   }
-  if (w.providerSelect) w.providerSelect.value = mapping.provider;
+  if (w.providerSelect) {
+    w.providerSelect.value = mapping.provider;
+    w.prevProvider = mapping.provider;
+  }
   if (w.modelInput) w.modelInput.value = mapping.model || "";
+  if (w.synthesisModelInput) w.synthesisModelInput.value = mapping.synthesisModel || "";
   if (w.baseUrlRow) w.baseUrlRow.style.display = mapping.baseUrlVisible ? "flex" : "none";
   if (mapping.embedMode === "cloud") {
     if (w.embedCloud) w.embedCloud.checked = true;
@@ -3170,6 +3558,7 @@ function applyOnboardingPreset(key) {
       w.presetWarning.style.display = "none";
     }
   }
+  syncOnboardingAiEngineUi(w);
 }
 
 function setOnboardingStatus(node, text, isFail) {
@@ -3343,6 +3732,7 @@ function collectOnboardingSelections() {
     preset: w.activePresetKey || null,
     provider: w.providerSelect ? w.providerSelect.value : "openrouter_llm",
     model: w.modelInput ? w.modelInput.value.trim() : "",
+    synthesisModel: w.synthesisModelInput ? w.synthesisModelInput.value.trim() : "",
     baseUrl: w.baseUrlInput ? w.baseUrlInput.value.trim() : "",
     openrouterKey: w.openrouterKey ? w.openrouterKey.value.trim() : "",
     embedMode: w.embedCloud && w.embedCloud.checked ? "cloud" : "local",
@@ -15350,7 +15740,22 @@ if (typeof module !== "undefined" && module.exports) {
     getBackendReadyForChat: () => backendReadyForChat,
     setBackendReadyForChat: (v) => { backendReadyForChat = v; },
     removeBootstrapProgressCard,
+    applyBootstrapProgressStateToCard,
     renderOrUpdateBootstrapProgressCard,
+    getVcRedistCheckTimer: () => vcRedistCheckTimer,
+    clearVcRedistCheckTimer: () => {
+      if (vcRedistCheckTimer) {
+        clearInterval(vcRedistCheckTimer);
+        vcRedistCheckTimer = null;
+      }
+    },
+    getUvCheckTimer: () => uvCheckTimer,
+    clearUvCheckTimer: () => {
+      if (uvCheckTimer) {
+        clearInterval(uvCheckTimer);
+        uvCheckTimer = null;
+      }
+    },
     handleBootstrapProgressEvent,
     handleOnboardingBootstrapDone,
     checkBackendStatus,
@@ -15396,6 +15801,9 @@ if (typeof module !== "undefined" && module.exports) {
     subscribeOnboardingStageBus,
     enterOnboardingConfigure,
     enterOnboardingProcess,
+    applyOnboardingPreset,
+    syncOnboardingAiEngineUi,
+    collectOnboardingSelections,
     testOnboardingConnection,
     readOnboardingSyncStream,
     finalizeFollowerAbortFallback: _finalizeFollowerAbortFallback,

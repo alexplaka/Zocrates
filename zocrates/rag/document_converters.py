@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 VC_REDIST_WINDOWS_MSG = (
     "Document conversion failed: Microsoft Visual C++ 2015–2022 Redistributable (x64) is required on Windows. "
-    "Please install it from https://aka.ms/vs/17/release/vc_redist.x64.exe and restart Zotero."
+    "Please install it from https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170#latest-supported-redistributable-version and restart Zotero."
 )
 
 
