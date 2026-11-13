@@ -2943,7 +2943,7 @@ const ONBOARDING_PRESETS = {
     fields: {
       provider: "openrouter_llm",
       model: "nvidia/nemotron-3.5-lightning:free",
-      synthesisModel: "",
+      synthesisModel: "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
       embedMode: "cloud",
       cloudEmbeddingModel: "openrouter/nvidia/nemotron-3-embed-1b:free",
       vlmChoice: "openrouter",
@@ -3220,7 +3220,7 @@ function renderOnboardingWizardCard() {
       }
       if (w.synthesisModelInput && typeof w.synthesisModelInput.value === "string") {
         const sVal = w.synthesisModelInput.value.toLowerCase();
-        if (sVal.includes("openrouter") || sVal.includes("google") || sVal.includes("gemini")) {
+        if (sVal.includes("openrouter") || sVal.includes("google") || sVal.includes("gemini") || sVal.includes("nvidia") || sVal.includes("nemotron")) {
           w.synthesisModelInput.value = "";
         }
       }
@@ -3228,13 +3228,21 @@ function renderOnboardingWizardCard() {
       const val = (w.modelInput && typeof w.modelInput.value === "string") ? w.modelInput.value.trim() : "";
       if (!val || val === "gemma4:12b") {
         if (w.modelInput) {
-          w.modelInput.value = (ONBOARDING_PRESETS && ONBOARDING_PRESETS.recommended && ONBOARDING_PRESETS.recommended.fields.model) || "openrouter/~z-ai/glm-flash-latest";
+          if (w.activePresetKey === "free") {
+            w.modelInput.value = (ONBOARDING_PRESETS && ONBOARDING_PRESETS.free && ONBOARDING_PRESETS.free.fields.model) || "nvidia/nemotron-3.5-lightning:free";
+          } else {
+            w.modelInput.value = (ONBOARDING_PRESETS && ONBOARDING_PRESETS.recommended && ONBOARDING_PRESETS.recommended.fields.model) || "openrouter/~z-ai/glm-flash-latest";
+          }
         }
       }
       if (w.synthesisModelInput && typeof w.synthesisModelInput.value === "string") {
         const sVal = w.synthesisModelInput.value.trim();
-        if (!sVal && (w.activePresetKey === "recommended" || !w.activePresetKey)) {
-          w.synthesisModelInput.value = "openrouter/google/gemini-3.8-flash";
+        if (!sVal) {
+          if (w.activePresetKey === "free") {
+            w.synthesisModelInput.value = "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free";
+          } else if (w.activePresetKey === "recommended" || !w.activePresetKey) {
+            w.synthesisModelInput.value = "openrouter/google/gemini-3.8-flash";
+          }
         }
       }
     }
@@ -3464,7 +3472,7 @@ function syncOnboardingAiEngineUi(w) {
     if (w.modelInput) w.modelInput.placeholder = "gemma4:12b";
     if (w.synthesisModelInput) {
       const synthVal = typeof w.synthesisModelInput.value === "string" ? w.synthesisModelInput.value.toLowerCase() : "";
-      if (synthVal.includes("openrouter") || synthVal.includes("google") || synthVal.includes("gemini")) {
+      if (synthVal.includes("openrouter") || synthVal.includes("google") || synthVal.includes("gemini") || synthVal.includes("nvidia") || synthVal.includes("nemotron")) {
         w.synthesisModelInput.value = "";
       }
       w.synthesisModelInput.placeholder = "Leave blank to inherit main model";
@@ -3496,10 +3504,18 @@ function syncOnboardingAiEngineUi(w) {
     }
     if (w.synthesisModelInput) {
       const synthVal = typeof w.synthesisModelInput.value === "string" ? w.synthesisModelInput.value.trim() : "";
-      if (!synthVal && (w.activePresetKey === "recommended" || !w.activePresetKey)) {
-        w.synthesisModelInput.value = "openrouter/google/gemini-3.8-flash";
+      if (!synthVal) {
+        if (w.activePresetKey === "free") {
+          w.synthesisModelInput.value = "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free";
+        } else if (w.activePresetKey === "recommended" || !w.activePresetKey) {
+          w.synthesisModelInput.value = "openrouter/google/gemini-3.8-flash";
+        }
       }
-      w.synthesisModelInput.placeholder = "openrouter/google/gemini-3.8-flash";
+      if (w.activePresetKey === "free") {
+        w.synthesisModelInput.placeholder = "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free";
+      } else {
+        w.synthesisModelInput.placeholder = "openrouter/google/gemini-3.8-flash";
+      }
     }
   }
 }

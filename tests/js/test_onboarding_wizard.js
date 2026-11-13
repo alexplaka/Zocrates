@@ -152,7 +152,7 @@ async function runTests() {
 
     const free = sidebar.mapPresetToWizardFields("free");
     assert.strictEqual(free.model, "nvidia/nemotron-3.5-lightning:free");
-    assert.strictEqual(free.synthesisModel, "");
+    assert.strictEqual(free.synthesisModel, "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free");
     assert.strictEqual(free.cloudEmbeddingModel, "openrouter/nvidia/nemotron-3-embed-1b:free");
     assert.strictEqual(free.vlmBackupModel, "openrouter/nvidia/nemotron-3.5-super-vl:free");
     assert.strictEqual(free.vlmMaxImagesPerDoc, 3);
@@ -1526,14 +1526,20 @@ async function runTests() {
       w.providerSelect.dispatchEvent("change");
       assert.strictEqual(w.modelInput.value, "openrouter/~z-ai/glm-flash-latest");
 
-      // 8. Free preset updates placeholder to nvidia free model and hides base URL row
-      sidebar.applyOnboardingPreset("free");
+      // 8. Free preset card click updates placeholder to nvidia free model and pre-fills free synthesis model
+      const freeCard = w.presetCards.find((btn) => btn.dataset.presetKey === "free");
+      assert.ok(freeCard, "free preset card must exist");
+      freeCard.dispatchEvent("click");
       assert.strictEqual(w.activePresetKey, "free");
       assert.strictEqual(w.modelInput.placeholder, "nvidia/nemotron-3.5-lightning:free");
       assert.strictEqual(w.baseUrlRow.style.display, "none");
       assert.strictEqual(w.modelInput.value, "nvidia/nemotron-3.5-lightning:free");
-      assert.strictEqual(w.synthesisModelInput.value, "", "free preset clears synthesis model");
-      assert.strictEqual(w.synthesisModelInput.placeholder, "openrouter/google/gemini-3.8-flash");
+      assert.strictEqual(
+        w.synthesisModelInput.value,
+        "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+        "clicking free preset card sets synthesisModel to openrouter/nvidia/nemotron-3-ultra-550b-a55b:free"
+      );
+      assert.strictEqual(w.synthesisModelInput.placeholder, "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free");
 
       // 9. From free preset, switching to local clears nvidia default slug
       w.providerSelect.value = "ollama";
@@ -1543,10 +1549,21 @@ async function runTests() {
       assert.strictEqual(w.synthesisModelInput.value, "");
       assert.strictEqual(w.synthesisModelInput.placeholder, "Leave blank to inherit main model");
 
+      // Switching back to openrouter_llm from local restores free synthesis model and placeholder
+      w.providerSelect.value = "openrouter_llm";
+      w.providerSelect.dispatchEvent("change");
+      assert.strictEqual(w.modelInput.value, "nvidia/nemotron-3.5-lightning:free");
+      assert.strictEqual(w.synthesisModelInput.value, "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free");
+      assert.strictEqual(w.synthesisModelInput.placeholder, "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free");
+
       // 10. Selections collection captures synthesisModel
       sidebar.applyOnboardingPreset("recommended");
       let sel = sidebar.collectOnboardingSelections();
       assert.strictEqual(sel.synthesisModel, "openrouter/google/gemini-3.8-flash");
+
+      sidebar.applyOnboardingPreset("free");
+      sel = sidebar.collectOnboardingSelections();
+      assert.strictEqual(sel.synthesisModel, "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free");
 
       sidebar.applyOnboardingPreset("offline");
       sel = sidebar.collectOnboardingSelections();
