@@ -1242,6 +1242,7 @@ function buildOnboardingSeedPayload(seededAtIso) {
     config_done_at: null,
     process_done_at: null,
     process_aborted: false,
+    process_skipped: false,
   };
 }
 
