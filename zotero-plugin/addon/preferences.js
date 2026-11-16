@@ -87,6 +87,9 @@ function initZocratesPreferences() {
   const llmProviderSelect = document.getElementById("llm-provider-select");
   const openrouterKeyGroup = document.getElementById("openrouter-key-group");
   const openrouterKeyMissingNotice = document.getElementById("openrouter-key-missing-notice");
+  const llmKeyMissingNotice = document.getElementById("llm-key-missing-notice");
+  const vlmKeyMissingNotice = document.getElementById("vlm-key-missing-notice");
+  const verificationKeyMissingNotice = document.getElementById("verification-key-missing-notice");
   const llmBaseUrlGroup = document.getElementById("llm-base-url-group");
   const llmBaseUrlInput = document.getElementById("llm-base-url-input");
   const llmModelGroup = document.getElementById("llm-model-group");
@@ -204,6 +207,10 @@ function initZocratesPreferences() {
     }
     if (vlmLocalModelGroup) {
       vlmLocalModelGroup.style.display = (provider === "ollama") ? "block" : "none";
+    }
+    if (vlmKeyMissingNotice) {
+      const keyVal = openRouterApiKeyInput ? openRouterApiKeyInput.value.trim() : "";
+      vlmKeyMissingNotice.style.display = (isEnabled && provider === "openrouter" && !keyVal) ? "block" : "none";
     }
   }
 
@@ -1212,6 +1219,9 @@ function initZocratesPreferences() {
       if (openrouterKeyMissingNotice) {
         openrouterKeyMissingNotice.style.display = keyVal ? "none" : "block";
       }
+      if (llmKeyMissingNotice) {
+        llmKeyMissingNotice.style.display = keyVal ? "none" : "block";
+      }
       if (llmBaseUrlGroup) llmBaseUrlGroup.style.display = "none";
       if (vllmGuidanceBox) vllmGuidanceBox.style.display = "none";
       if (llmFilterChipsContainer) llmFilterChipsContainer.style.display = "flex";
@@ -1221,6 +1231,7 @@ function initZocratesPreferences() {
       if (llmRefreshBtn) llmRefreshBtn.style.display = "inline-block";
     } else {
       if (openrouterKeyMissingNotice) openrouterKeyMissingNotice.style.display = "none";
+      if (llmKeyMissingNotice) llmKeyMissingNotice.style.display = "none";
       if (llmBaseUrlGroup) llmBaseUrlGroup.style.display = "flex";
       if (llmFilterChipsContainer) llmFilterChipsContainer.style.display = "none";
       if (llmModelSearchContainer) llmModelSearchContainer.style.display = "none";
@@ -2130,10 +2141,16 @@ function initZocratesPreferences() {
     openRouterApiKeyInput.addEventListener("input", () => {
       updateLlmDirtyState();
       updateEmbeddingDirtyState();
+      updateLlmUiVisibility();
+      updateVlmUiVisibility();
+      updateVerificationUiVisibility();
     });
     openRouterApiKeyInput.addEventListener("change", () => {
       updateLlmDirtyState();
       updateEmbeddingDirtyState();
+      updateLlmUiVisibility();
+      updateVlmUiVisibility();
+      updateVerificationUiVisibility();
     });
   }
 
@@ -2984,6 +3001,10 @@ function initZocratesPreferences() {
     if (verificationLocalUrlGroup) {
       verificationLocalUrlGroup.style.display = isLocal ? "block" : "none";
     }
+    if (verificationKeyMissingNotice) {
+      const keyVal = openRouterApiKeyInput ? openRouterApiKeyInput.value.trim() : "";
+      verificationKeyMissingNotice.style.display = (!isLocal && !keyVal) ? "block" : "none";
+    }
   }
 
   async function checkLayaStatus() {
@@ -3365,6 +3386,8 @@ function initZocratesPreferences() {
     updateMcpConfigSnippet,
     copyTextToClipboard,
     updateLlmUiVisibility,
+    updateVlmUiVisibility,
+    updateVerificationUiVisibility,
     updateVerificationModelMetadata,
     updateVerificationDirtyState,
     updateLlmModelMetadata,

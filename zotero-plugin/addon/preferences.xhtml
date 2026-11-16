@@ -667,6 +667,9 @@
               <html:option value="openrouter">OpenRouter (Remote Decision Models)</html:option>
               <html:option value="local_laya">Laya Local Server (Offline / Private uv Tool)</html:option>
             </html:select>
+            <html:div id="verification-key-missing-notice" style="display: none; font-size: 12px; margin-top: 4px;" class="zc-text-warning">
+              &#x26A0;&#xFE0F; OPENROUTER_API_KEY missing. Remote decision models disabled until a key is provided or the Laya local server is selected.
+            </html:div>
           </html:div>
 
           <!-- OpenRouter Model Group -->
@@ -768,6 +771,9 @@
           <html:option value="vllm">vLLM (Local Server)</html:option>
           <html:option value="openai_compatible">Custom OpenAI API</html:option>
         </html:select>
+        <html:div id="llm-key-missing-notice" style="display: none; font-size: 12px; margin-top: 4px;" class="zc-text-warning">
+          &#x26A0;&#xFE0F; OPENROUTER_API_KEY missing. Remote models disabled until key is provided or a local provider is selected.
+        </html:div>
       </html:div>
 
       <!-- Base URL Input for Local Providers -->
@@ -928,6 +934,9 @@
               <html:input type="radio" name="vlm-captioning-provider" id="vlm-provider-ollama" value="ollama" />
               <html:span><html:b>Ollama</html:b> (Local)</html:span>
             </html:label>
+          </html:div>
+          <html:div id="vlm-key-missing-notice" style="display: none; font-size: 12px; margin-top: 4px;" class="zc-text-warning">
+            &#x26A0;&#xFE0F; OPENROUTER_API_KEY missing. VLM figure captioning disabled until a key is provided or the Ollama option is selected.
           </html:div>
 
           <!-- Cloud VLM Model Dropdowns -->

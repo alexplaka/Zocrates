@@ -525,6 +525,95 @@ async function runTests() {
     }
   });
 
+  // Test 9b-2: inline OPENROUTER_API_KEY missing notices in LLM and Document Converter cards
+  await testAsync("key-missing notices: LLM card and Document Converter VLM show inline warnings when the OpenRouter key is empty", async () => {
+    resetSpies();
+
+    const providerSelect = env.document.getElementById("llm-provider-select");
+    const keyInput = env.document.getElementById("openrouter-api-key-input");
+    const enableVlmCheckbox = env.document.getElementById("enable-vlm-captioning-checkbox");
+    const vlmProviderOllama = env.document.getElementById("vlm-provider-ollama");
+    const llmNotice = env.document.getElementById("llm-key-missing-notice");
+    const vlmNotice = env.document.getElementById("vlm-key-missing-notice");
+    const verificationProviderSelect = env.document.getElementById("verification-provider-select");
+    const verificationNotice = env.document.getElementById("verification-key-missing-notice");
+
+    // OpenRouter provider + empty key: all inline notices must be visible
+    providerSelect.value = "openrouter_llm";
+    keyInput.value = "";
+    enableVlmCheckbox.checked = true;
+    api.updateLlmUiVisibility();
+    api.updateVlmUiVisibility();
+    api.updateVerificationUiVisibility();
+    assert.strictEqual(
+      llmNotice.style.display,
+      "block",
+      "LLM card notice must be shown when provider is openrouter_llm and the key is empty"
+    );
+    assert.strictEqual(
+      vlmNotice.style.display,
+      "block",
+      "Document Converter VLM notice must be shown when VLM provider is openrouter and the key is empty"
+    );
+    assert.strictEqual(
+      verificationNotice.style.display,
+      "block",
+      "Citation Verification notice must be shown when provider is openrouter and the key is empty"
+    );
+
+    // A present key hides all inline notices
+    keyInput.value = "sk-or-v1-test-key";
+    api.updateLlmUiVisibility();
+    api.updateVlmUiVisibility();
+    api.updateVerificationUiVisibility();
+    assert.strictEqual(
+      llmNotice.style.display,
+      "none",
+      "LLM card notice must be hidden when a key is present"
+    );
+    assert.strictEqual(
+      vlmNotice.style.display,
+      "none",
+      "Document Converter VLM notice must be hidden when a key is present"
+    );
+    assert.strictEqual(
+      verificationNotice.style.display,
+      "none",
+      "Citation Verification notice must be hidden when a key is present"
+    );
+
+    // Local provider hides the LLM notice; Ollama VLM hides the VLM notice (empty key)
+    keyInput.value = "";
+    providerSelect.value = "ollama";
+    api.updateLlmUiVisibility();
+    assert.strictEqual(
+      llmNotice.style.display,
+      "none",
+      "LLM card notice must be hidden when a local provider is selected"
+    );
+    vlmProviderOllama.checked = true;
+    api.updateVlmUiVisibility();
+    assert.strictEqual(
+      vlmNotice.style.display,
+      "none",
+      "Document Converter VLM notice must be hidden when the Ollama VLM option is selected"
+    );
+
+    // Local Laya provider hides the Citation Verification notice (empty key)
+    verificationProviderSelect.value = "local_laya";
+    api.updateVerificationUiVisibility();
+    assert.strictEqual(
+      verificationNotice.style.display,
+      "none",
+      "Citation Verification notice must be hidden when the Laya local server is selected"
+    );
+
+    // Restore defaults
+    vlmProviderOllama.checked = false;
+    verificationProviderSelect.value = "openrouter";
+    providerSelect.value = "openrouter_llm";
+  });
+
   // Test 9c: test-openrouter-key-btn click dispatches to /llm/test_openrouter_key and updates openrouter-key-status-badge
   await testAsync("testOpenRouterKeyBtn: clicking test button dispatches to /llm/test_openrouter_key and updates status badge", async () => {
     resetSpies();
