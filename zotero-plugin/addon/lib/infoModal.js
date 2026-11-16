@@ -191,7 +191,32 @@ var InfoModal = {
         let rowEl = targetDoc.createElementNS(XHTMLNS, "div");
         rowEl.style.cssText = "word-break: break-word;";
 
-        let bullet = targetDoc.createTextNode("• ");
+        if (row.stack) {
+          // Stacked row: bullet + bold header on its own line, value indented below.
+          let headerLine = targetDoc.createElementNS(XHTMLNS, "div");
+          headerLine.appendChild(targetDoc.createTextNode("\u2022 "));
+          if (row.label) {
+            let bold = targetDoc.createElementNS(XHTMLNS, "b");
+            bold.style.cssText = "color: var(--text-main, #f1f5f9);";
+            bold.textContent = row.label.endsWith(":") ? row.label : row.label + ":";
+            headerLine.appendChild(bold);
+          }
+          rowEl.appendChild(headerLine);
+
+          let valueLine = targetDoc.createElementNS(XHTMLNS, "div");
+          let valueCss = "margin-left: 14px; color: var(--text-muted, #94a3b8);";
+          if (row.valueStyle) {
+            valueCss = row.valueStyle;
+          }
+          valueLine.style.cssText = valueCss;
+          valueLine.textContent = (row.value !== undefined && row.value !== null) ? String(row.value) : "";
+          rowEl.appendChild(valueLine);
+
+          modalBody.appendChild(rowEl);
+          continue;
+        }
+
+        let bullet = targetDoc.createTextNode("\u2022 ");
         rowEl.appendChild(bullet);
 
         if (row.label) {

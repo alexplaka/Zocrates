@@ -1980,18 +1980,27 @@ async function runTests() {
         modalText.includes("Your configuration has been saved. Your library has not been converted or indexed yet, so library search will not find papers until indexing runs."),
         "modal body intro must match"
       );
+      // Stacked layout: bullet header and value live on separate lines (separate divs).
+      // (mock querySelectorAll lacks *= attribute support — filter by style text instead)
+      const stackedRows = Array.from(modalOverlay.querySelectorAll("div")).filter(
+        (d) => d.style && typeof d.style.cssText === "string" && d.style.cssText.includes("margin-left: 14px")
+      );
+      assert.strictEqual(stackedRows.length, 3, "three stacked value lines must exist");
       assert.ok(
-        modalText.includes("Convert selected items: right-click item(s) \u2192 Zocrates \u2192 Convert with\u2026"),
-        "bullet 1 must match"
+        modalText.includes("Convert selected items:") && modalText.includes("right-click item(s) \u2192 Zocrates \u2192 Convert with\u2026"),
+        "bullet 1 (header + stacked value) must match"
       );
       assert.ok(
-        modalText.includes("Index your whole library later: \u22ee menu \u2192 Update Library Index"),
-        "bullet 2 must match"
+        modalText.includes("Index your whole library later:") && modalText.includes("\u22ee menu \u2192 Update Library Index"),
+        "bullet 2 (header + stacked value) must match"
       );
       assert.ok(
-        modalText.includes("Change models or add API keys: \u22ee menu \u2192 Zocrates Settings"),
-        "bullet 3 must match"
+        modalText.includes("Change models or add API keys:") && modalText.includes("\u22ee menu \u2192 Zocrates Settings"),
+        "bullet 3 (header + stacked value) must match"
       );
+      // Each stacked value line must sit in a different parent row (separate-line layout).
+      assert.notStrictEqual(stackedRows[0].parentElement, stackedRows[1].parentElement, "bullets must render as separate rows");
+      assert.notStrictEqual(stackedRows[1].parentElement, stackedRows[2].parentElement, "bullets must render as separate rows");
       assert.ok(
         modalText.includes("You can explore the plugin now and index whenever you are ready."),
         "closing line must match"

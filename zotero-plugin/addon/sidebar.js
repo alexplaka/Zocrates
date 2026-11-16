@@ -3751,14 +3751,17 @@ function showOnboardingSkipIndexingModal() {
       {
         label: "Convert selected items",
         value: "right-click item(s) \u2192 Zocrates \u2192 Convert with\u2026",
+        stack: true,
       },
       {
         label: "Index your whole library later",
         value: "\u22ee menu \u2192 Update Library Index",
+        stack: true,
       },
       {
         label: "Change models or add API keys",
         value: "\u22ee menu \u2192 Zocrates Settings",
+        stack: true,
       },
       "You can explore the plugin now and index whenever you are ready.",
     ],
