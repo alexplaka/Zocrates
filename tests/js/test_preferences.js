@@ -1781,6 +1781,283 @@ async function runTests() {
       "Configured embedding model present in the catalog must be selected"
     );
   });
+
+  // Static XHTML option list of verification-model-select, used by the legacy-pref tests.
+  const STATIC_VERIFICATION_MODELS = [
+    "~typesafe/jev-latest",
+    "typesafe/jev-1.14",
+    "typesafe/jev-1.13",
+    "inception/mercury-decide",
+  ];
+
+  function materializeStaticVerificationModelOptions(modelSelect) {
+    modelSelect.innerHTML = "";
+    for (const value of STATIC_VERIFICATION_MODELS) {
+      const opt = env.document.createElementNS("http://www.w3.org/1999/xhtml", "option");
+      opt.value = value;
+      opt.textContent = value;
+      modelSelect.appendChild(opt);
+    }
+    modelSelect.value = STATIC_VERIFICATION_MODELS[0];
+  }
+
+  function setVerificationCardState(state) {
+    env.document.getElementById("citation-verification-enabled-toggle").checked = state.enabled;
+    env.document.getElementById("verification-provider-select").value = state.provider;
+    env.document.getElementById("verification-model-select").value = state.model;
+    env.document.getElementById("verification-threshold-input").value = state.threshold;
+    env.document.getElementById("auto-start-laya-toggle").checked = state.autoStart;
+    const applyBtn = env.document.getElementById("verification-apply-btn");
+    const warning = env.document.getElementById("verification-unsaved-warning");
+    applyBtn.disabled = false;
+    applyBtn.removeAttribute("disabled");
+    warning.style.display = "block";
+    return { applyBtn, warning };
+  }
+
+  function installVerificationBackendShape(shape) {
+    fetchHandler = async (url) => {
+      const urlStr = String(url);
+      if (urlStr.includes("/status")) {
+        return { ok: true, status: 200, json: async () => ({ status: "ok", ...shape }) };
+      }
+      if (urlStr.includes("/config")) {
+        return { ok: true, status: 200, json: async () => ({ status: "success", ...shape }) };
+      }
+      if (urlStr.includes("/llm/openrouter_models")) {
+        return { ok: true, status: 200, json: async () => ({ status: "no_key", models: [] }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ status: "ok" }) };
+    };
+  }
+
+  // Test 34: local_laya backend with a persisted "laya" model keeps the card clean even when
+  // the remote model select is deselected (Gecko assigns value "" when no option matches).
+  await testAsync("fetchStatus/fetchLlmConfig: persisted 'laya' with local_laya keeps verification clean despite a deselected model select", async () => {
+    resetSpies();
+
+    const modelSelect = env.document.getElementById("verification-model-select");
+    modelSelect.innerHTML = "";
+
+    // Prod-test shape: stale pref had deselected the select (selectedIndex = -1, value "").
+    const { applyBtn, warning } = setVerificationCardState({
+      enabled: true,
+      provider: "local_laya",
+      model: "",
+      threshold: "0.60",
+      autoStart: true,
+    });
+    modelSelect.selectedIndex = -1;
+
+    installVerificationBackendShape({
+      citation_verification_enabled: true,
+      citation_verification_provider: "local_laya",
+      citation_verification_model: "laya",
+      citation_verification_threshold: 0.60,
+      citation_verification_auto_start_local: true,
+    });
+
+    await api.fetchStatus();
+
+    assert.strictEqual(modelSelect.value, "", "fetchStatus must never assign 'laya' to the remote model select");
+    assert.strictEqual(applyBtn.disabled, true, "local_laya with a persisted 'laya' model must not leave verification dirty");
+    assert.strictEqual(warning.style.display, "none", "Unsaved warning must stay hidden when the persisted model is 'laya'");
+
+    // Same guarantee on the /config (fetchLlmConfig) path.
+    applyBtn.disabled = false;
+    warning.style.display = "block";
+    await api.fetchLlmConfig();
+
+    assert.strictEqual(modelSelect.value, "", "fetchLlmConfig must never assign 'laya' to the remote model select");
+    assert.strictEqual(applyBtn.disabled, true, "fetchLlmConfig must keep local_laya verification clean");
+    assert.strictEqual(warning.style.display, "none", "fetchLlmConfig must hide the unsaved warning for local_laya");
+  });
+
+  // Test 35: a stale legacy pref outside the static option list must neither deselect the
+  // select nor fake an unsaved change on open, and the backend shape must then settle clean.
+  await testAsync("loadPreferences: stale legacy pref value leaves the select at its static default and does not dirty the card", async () => {
+    resetSpies();
+
+    const modelSelect = env.document.getElementById("verification-model-select");
+    materializeStaticVerificationModelOptions(modelSelect);
+
+    const { applyBtn, warning } = setVerificationCardState({
+      enabled: true,
+      provider: "openrouter",
+      model: STATIC_VERIFICATION_MODELS[0],
+      threshold: "0.60",
+      autoStart: true,
+    });
+
+    const previousPrefs = {
+      provider: env.zotero.Prefs.get("extensions.zocrates.citationVerificationProvider", true),
+      model: env.zotero.Prefs.get("extensions.zocrates.citationVerificationModel", true),
+      threshold: env.zotero.Prefs.get("extensions.zocrates.citationVerificationThreshold", true),
+    };
+
+    env.zotero.Prefs.set("extensions.zocrates.citationVerificationProvider", "openrouter", true);
+    env.zotero.Prefs.set("extensions.zocrates.citationVerificationModel", "respan/span-01-lite:free", true);
+    env.zotero.Prefs.set("extensions.zocrates.citationVerificationThreshold", 0.60, true);
+
+    try {
+      api.loadPreferences();
+
+      assert.strictEqual(
+        modelSelect.value,
+        STATIC_VERIFICATION_MODELS[0],
+        "A legacy pref value with no matching option must leave the select at its static default"
+      );
+      assert.strictEqual(applyBtn.disabled, true, "Load alone must not mark verification dirty");
+      assert.strictEqual(warning.style.display, "none", "Load alone must not show the unsaved warning");
+
+      // The backend is authoritative: it reports local_laya, which must also settle clean.
+      installVerificationBackendShape({
+        citation_verification_enabled: true,
+        citation_verification_provider: "local_laya",
+        citation_verification_model: "laya",
+        citation_verification_threshold: 0.60,
+        citation_verification_auto_start_local: true,
+      });
+
+      await api.fetchStatus();
+
+      assert.strictEqual(
+        env.document.getElementById("verification-provider-select").value,
+        "local_laya",
+        "fetchStatus must apply the persisted local_laya provider"
+      );
+      assert.strictEqual(applyBtn.disabled, true, "Persisted laya/local_laya must end the open sequence clean");
+      assert.strictEqual(warning.style.display, "none", "Persisted laya/local_laya must hide the unsaved warning");
+    } finally {
+      env.zotero.Prefs.clear("extensions.zocrates.citationVerificationProvider", true);
+      env.zotero.Prefs.clear("extensions.zocrates.citationVerificationModel", true);
+      env.zotero.Prefs.clear("extensions.zocrates.citationVerificationThreshold", true);
+      if (previousPrefs.provider !== undefined) {
+        env.zotero.Prefs.set("extensions.zocrates.citationVerificationProvider", previousPrefs.provider, true);
+      }
+      if (previousPrefs.model !== undefined) {
+        env.zotero.Prefs.set("extensions.zocrates.citationVerificationModel", previousPrefs.model, true);
+      }
+      if (previousPrefs.threshold !== undefined) {
+        env.zotero.Prefs.set("extensions.zocrates.citationVerificationThreshold", previousPrefs.threshold, true);
+      }
+      env.document.getElementById("verification-provider-select").value = "openrouter";
+      modelSelect.value = STATIC_VERIFICATION_MODELS[0];
+    }
+  });
+
+  // Test 36: openrouter provider semantics are unchanged (prefix-tolerant match, real change dirty).
+  await testAsync("updateVerificationDirtyState: openrouter model matching stays prefix-tolerant and still flags a real change", async () => {
+    resetSpies();
+
+    const modelSelect = env.document.getElementById("verification-model-select");
+    materializeStaticVerificationModelOptions(modelSelect);
+
+    const { applyBtn, warning } = setVerificationCardState({
+      enabled: true,
+      provider: "openrouter",
+      model: "typesafe/jev-1.14",
+      threshold: "0.60",
+      autoStart: true,
+    });
+
+    installVerificationBackendShape({
+      citation_verification_enabled: true,
+      citation_verification_provider: "openrouter",
+      citation_verification_model: "openrouter/typesafe/jev-1.14",
+      citation_verification_threshold: 0.60,
+      citation_verification_auto_start_local: true,
+    });
+
+    await api.fetchStatus();
+
+    assert.strictEqual(modelSelect.value, "openrouter/typesafe/jev-1.14", "fetchStatus must apply the persisted remote model");
+    assert.strictEqual(applyBtn.disabled, true, "Identical openrouter model must stay clean");
+
+    modelSelect.value = "typesafe/jev-1.14";
+    api.updateVerificationDirtyState();
+    assert.strictEqual(applyBtn.disabled, true, "Prefix-only difference must not enable Apply");
+    assert.strictEqual(warning.style.display, "none", "Prefix-only difference must not show the unsaved warning");
+
+    modelSelect.value = "upstage/solar-decide";
+    api.updateVerificationDirtyState();
+    assert.strictEqual(applyBtn.disabled, false, "A genuinely different remote model must enable Apply");
+    assert.strictEqual(warning.style.display, "block", "A genuinely different remote model must show the unsaved warning");
+
+    modelSelect.value = "openrouter/typesafe/jev-1.14";
+    api.updateVerificationDirtyState();
+    assert.strictEqual(applyBtn.disabled, true, "Restoring the persisted model must return to clean");
+  });
+
+  // Test 37: the Apply handler records "laya" for local_laya instead of the deselected select value.
+  await testAsync("verification apply button: local_laya bookkeeping records 'laya' and leaves the card clean", async () => {
+    resetSpies();
+
+    const modelSelect = env.document.getElementById("verification-model-select");
+    materializeStaticVerificationModelOptions(modelSelect);
+
+    const { applyBtn, warning } = setVerificationCardState({
+      enabled: true,
+      provider: "openrouter",
+      model: "inception/mercury-decide",
+      threshold: "0.60",
+      autoStart: true,
+    });
+
+    fetchHandler = async (url, options = {}) => {
+      const urlStr = String(url);
+      if (urlStr.includes("/status")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            status: "ok",
+            citation_verification_enabled: true,
+            citation_verification_provider: "openrouter",
+            citation_verification_model: "inception/mercury-decide",
+            citation_verification_threshold: 0.60,
+            citation_verification_auto_start_local: true,
+          }),
+        };
+      }
+      fetchCalls.push({ url: urlStr, options });
+      return { ok: true, status: 200, json: async () => ({ status: "success" }) };
+    };
+
+    await api.fetchStatus();
+    assert.strictEqual(applyBtn.disabled, true, "Baseline openrouter state must be clean");
+
+    // Switch to the local provider with the remote select deselected, then apply.
+    env.document.getElementById("verification-provider-select").value = "local_laya";
+    modelSelect.value = "";
+    modelSelect.selectedIndex = -1;
+    api.updateVerificationDirtyState();
+    assert.strictEqual(applyBtn.disabled, false, "Switching to local_laya must mark the card dirty");
+
+    applyBtn.dispatchEvent("click");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const postCall = fetchCalls.find((c) => c.url.includes("/config") && c.options && c.options.method === "POST");
+    assert.ok(postCall, "Apply must dispatch POST /config");
+    assert.strictEqual(
+      JSON.parse(postCall.options.body).citation_verification_model,
+      "laya",
+      "Apply must persist 'laya' for the local_laya provider"
+    );
+    assert.strictEqual(applyBtn.disabled, true, "Apply bookkeeping must record 'laya' so the card is clean");
+    assert.strictEqual(warning.style.display, "none", "Apply must hide the unsaved warning");
+
+    // The deselected remote select must not resurrect a phantom dirty state after Apply.
+    modelSelect.value = "";
+    modelSelect.selectedIndex = -1;
+    api.updateVerificationDirtyState();
+    assert.strictEqual(applyBtn.disabled, true, "A deselected remote select must stay clean while local_laya is active");
+
+    env.zotero.Prefs.clear("extensions.zocrates.citationVerificationProvider", true);
+    env.zotero.Prefs.clear("extensions.zocrates.citationVerificationModel", true);
+    env.document.getElementById("verification-provider-select").value = "openrouter";
+    modelSelect.value = STATIC_VERIFICATION_MODELS[0];
+  });
   } finally {
     global.fetch = origFetch;
     global.IOUtils = origIOUtils;

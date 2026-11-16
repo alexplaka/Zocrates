@@ -285,11 +285,30 @@ function initZocratesPreferences() {
     }
   }
 
+  // The model value Apply persists for the current provider selection: a local_laya provider
+  // always persists "laya", which the verification-model select can never hold.
+  function getEffectiveVerificationModel() {
+    const provider = verificationProviderSelect ? verificationProviderSelect.value : "openrouter";
+    if (provider === "local_laya") return "laya";
+    const selectValue = verificationModelSelect ? String(verificationModelSelect.value || "").trim() : "";
+    return (selectValue && selectValue !== "laya") ? selectValue : "inception/mercury-decide";
+  }
+
+  // Resolves a persisted backend/pref model into the value the dirty check compares against.
+  // Mirrors syncVerificationSettings() so bookkeeping matches what was actually persisted:
+  // with a local_laya provider the backend holds "laya", never the select's value.
+  function resolveSavedVerificationModel(persistedModel) {
+    const provider = verificationProviderSelect ? verificationProviderSelect.value : "openrouter";
+    const persisted = typeof persistedModel === "string" ? persistedModel.trim() : "";
+    if (provider !== "local_laya" && persisted && persisted !== "laya") return persisted;
+    return getEffectiveVerificationModel();
+  }
+
   function updateVerificationDirtyState() {
     if (!verificationApplyBtn) return;
     const currentEnabled = verificationEnabledToggle ? verificationEnabledToggle.checked : false;
     const currentProvider = verificationProviderSelect ? verificationProviderSelect.value : "openrouter";
-    const currentModel = verificationModelSelect ? verificationModelSelect.value : "inception/mercury-decide";
+    const currentModel = getEffectiveVerificationModel();
     const currentThreshold = verificationThresholdInput ? parseFloat(verificationThresholdInput.value) : 0.60;
     const currentAutoStart = autoStartLayaToggle ? autoStartLayaToggle.checked : true;
 
@@ -765,8 +784,15 @@ function initZocratesPreferences() {
           verificationProviderSelect.value = citationVerificationProvider;
         }
         const citationVerificationModel = Zotero.Prefs.get("extensions.zocrates.citationVerificationModel", true);
+        // Only mirror pref values that exist as options: assigning an unknown value to a
+        // select deselects it (value ""), which would fake an unsaved change on open.
+        let appliedVerificationModel = "";
         if (verificationModelSelect && citationVerificationModel && citationVerificationModel !== "laya") {
-          verificationModelSelect.value = citationVerificationModel;
+          const hasOption = Array.from(verificationModelSelect.options || []).some((o) => o.value === citationVerificationModel);
+          if (hasOption) {
+            verificationModelSelect.value = citationVerificationModel;
+            appliedVerificationModel = citationVerificationModel;
+          }
         }
         const citationVerificationThreshold = Zotero.Prefs.get("extensions.zocrates.citationVerificationThreshold", true);
         if (verificationThresholdInput && citationVerificationThreshold !== undefined && citationVerificationThreshold !== null) {
@@ -783,7 +809,7 @@ function initZocratesPreferences() {
         }
         savedVerificationEnabled = verificationEnabledToggle ? verificationEnabledToggle.checked : false;
         savedVerificationProvider = verificationProviderSelect ? verificationProviderSelect.value : "openrouter";
-        savedVerificationModel = (citationVerificationModel && citationVerificationModel !== "laya") ? citationVerificationModel : (verificationModelSelect && verificationModelSelect.value && verificationModelSelect.value !== "laya" ? verificationModelSelect.value : "inception/mercury-decide");
+        savedVerificationModel = resolveSavedVerificationModel(appliedVerificationModel);
         savedVerificationThreshold = verificationThresholdInput ? parseFloat(verificationThresholdInput.value) : 0.60;
         savedVerificationAutoStart = autoStartLayaToggle ? autoStartLayaToggle.checked : true;
         updateVerificationUiVisibility();
@@ -958,9 +984,7 @@ function initZocratesPreferences() {
       }
       savedVerificationEnabled = verificationEnabledToggle ? verificationEnabledToggle.checked : false;
       savedVerificationProvider = verificationProviderSelect ? verificationProviderSelect.value : "openrouter";
-      savedVerificationModel = (data.citation_verification_model && data.citation_verification_model !== "laya")
-        ? data.citation_verification_model
-        : (verificationModelSelect && verificationModelSelect.value && verificationModelSelect.value !== "laya" ? verificationModelSelect.value : "inception/mercury-decide");
+      savedVerificationModel = resolveSavedVerificationModel(data.citation_verification_model);
       savedVerificationThreshold = verificationThresholdInput ? parseFloat(verificationThresholdInput.value) : 0.60;
       savedVerificationAutoStart = autoStartLayaToggle ? autoStartLayaToggle.checked : true;
       updateVerificationUiVisibility();
@@ -1092,9 +1116,7 @@ function initZocratesPreferences() {
       }
       savedVerificationEnabled = verificationEnabledToggle ? verificationEnabledToggle.checked : false;
       savedVerificationProvider = verificationProviderSelect ? verificationProviderSelect.value : "openrouter";
-      savedVerificationModel = (data.citation_verification_model && data.citation_verification_model !== "laya")
-        ? data.citation_verification_model
-        : (verificationModelSelect && verificationModelSelect.value && verificationModelSelect.value !== "laya" ? verificationModelSelect.value : "inception/mercury-decide");
+      savedVerificationModel = resolveSavedVerificationModel(data.citation_verification_model);
       savedVerificationThreshold = verificationThresholdInput ? parseFloat(verificationThresholdInput.value) : 0.60;
       savedVerificationAutoStart = autoStartLayaToggle ? autoStartLayaToggle.checked : true;
       updateVerificationUiVisibility();
@@ -3228,7 +3250,7 @@ function initZocratesPreferences() {
 
       savedVerificationEnabled = verificationEnabledToggle ? verificationEnabledToggle.checked : false;
       savedVerificationProvider = verificationProviderSelect ? verificationProviderSelect.value : "openrouter";
-      savedVerificationModel = verificationModelSelect ? verificationModelSelect.value : "inception/mercury-decide";
+      savedVerificationModel = getEffectiveVerificationModel();
       savedVerificationThreshold = verificationThresholdInput ? parseFloat(verificationThresholdInput.value) : 0.60;
       savedVerificationAutoStart = autoStartLayaToggle ? autoStartLayaToggle.checked : true;
 
