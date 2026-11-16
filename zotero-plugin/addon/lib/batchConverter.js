@@ -827,10 +827,10 @@ var BatchConverter = {
         return;
       }
 
-      // 2. Pre-flight confirmation dialog for Datalab or multi-item selections
-      if (!options.skipConfirm && (converterId === "datalab" || keys.length > 1)) {
+      // 2. Pre-flight confirmation dialog for all conversions unless suppressed
+      if (!options.skipConfirm) {
         let promptLines = [
-          `Re-convert document(s) with ${converterLabel}?`,
+          `Convert ${keys.length} document${keys.length === 1 ? "" : "s"} with ${converterLabel}?`,
           "",
           `• Selected items: ${keys.length}`,
         ];
