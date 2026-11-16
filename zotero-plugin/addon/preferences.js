@@ -87,6 +87,12 @@ function initZocratesPreferences() {
   const llmProviderSelect = document.getElementById("llm-provider-select");
   const openrouterKeyGroup = document.getElementById("openrouter-key-group");
   const openrouterKeyMissingNotice = document.getElementById("openrouter-key-missing-notice");
+  const llmKeyMissingNotice = document.getElementById("llm-key-missing-notice");
+  const llmCatalogMissingNotice = document.getElementById("llm-catalog-missing-notice");
+  const vlmKeyMissingNotice = document.getElementById("vlm-key-missing-notice");
+  const vlmCatalogMissingNotice = document.getElementById("vlm-catalog-missing-notice");
+  const verificationKeyMissingNotice = document.getElementById("verification-key-missing-notice");
+  const verificationCatalogMissingNotice = document.getElementById("verification-catalog-missing-notice");
   const llmBaseUrlGroup = document.getElementById("llm-base-url-group");
   const llmBaseUrlInput = document.getElementById("llm-base-url-input");
   const llmModelGroup = document.getElementById("llm-model-group");
@@ -106,6 +112,7 @@ function initZocratesPreferences() {
   const vllmGuidanceBox = document.getElementById("vllm-guidance-box");
 
   const embeddingKeyMissingNotice = document.getElementById("embedding-key-missing-notice");
+  const embeddingCatalogMissingNotice = document.getElementById("embedding-catalog-missing-notice");
   const embeddingModelGroup = document.getElementById("embedding-model-group");
   const embeddingModelSelect = document.getElementById("embedding-model-select") || document.getElementById("cloud-embedding-model-select");
   const embeddingModelMetadataBox = document.getElementById("embedding-model-metadata-box");
@@ -205,6 +212,11 @@ function initZocratesPreferences() {
     if (vlmLocalModelGroup) {
       vlmLocalModelGroup.style.display = (provider === "ollama") ? "block" : "none";
     }
+    if (vlmKeyMissingNotice) {
+      const keyVal = openRouterApiKeyInput ? openRouterApiKeyInput.value.trim() : "";
+      vlmKeyMissingNotice.style.display = (isEnabled && provider === "openrouter" && !keyVal) ? "block" : "none";
+    }
+    updateCatalogMissingNotices();
   }
 
   function modelsMatch(m1, m2) {
@@ -216,6 +228,79 @@ function initZocratesPreferences() {
     const strip1 = s1.replace(/^openrouter\//, "");
     const strip2 = s2.replace(/^openrouter\//, "");
     return strip1 === strip2;
+  }
+
+  // Finds a catalog entry for `modelId`, tolerating an openrouter/ prefix on either side.
+  // Returns null when the catalog holds no such model.
+  function findCatalogModel(rawModels, modelId) {
+    if (!modelId || !Array.isArray(rawModels) || rawModels.length === 0) return null;
+    const target = String(modelId).trim();
+    if (!target) return null;
+    const targetStripped = target.replace(/^openrouter\//, "");
+    for (const m of rawModels) {
+      const id = (m && m.id) ? String(m.id) : "";
+      if (id === target || id.replace(/^openrouter\//, "") === targetStripped) return m;
+    }
+    return null;
+  }
+
+  // A configured model is only "missing" when a catalog actually arrived and lacks it.
+  // No catalog (no API key) or no configured model means nothing to compare, so the
+  // key-missing notices remain the only relevant signal.
+  function isModelInCatalog(model, rawModels) {
+    if (!model || !Array.isArray(rawModels) || rawModels.length === 0) return true;
+    return findCatalogModel(rawModels, model) !== null;
+  }
+
+  // A configured model absent from the catalog must never look valid: say so inline.
+  function setCatalogMissingNotice(noticeEl, isMissing, modelId, subject) {
+    if (!noticeEl) return;
+    if (!isMissing) {
+      noticeEl.style.display = "none";
+      return;
+    }
+    noticeEl.textContent = `\u26A0\uFE0F Configured model "${modelId}" was not found in the OpenRouter catalog. It may be misspelled or discontinued \u2014 select a replacement to ensure ${subject} works.`;
+    noticeEl.style.display = "block";
+  }
+
+  // Recomputes the four "configured model not in catalog" notices from current UI state.
+  // Every provider/mode/key change and every catalog render funnels through here.
+  function updateCatalogMissingNotices() {
+    const llmModel = (llmProviderSelect ? llmProviderSelect.value : "openrouter_llm") === "openrouter_llm"
+      ? getEffectiveLlmModel()
+      : "";
+    setCatalogMissingNotice(llmCatalogMissingNotice, !!llmModel && !isModelInCatalog(llmModel, rawLlmModels), llmModel, "chat");
+
+    const embeddingModel = (modeSelect ? modeSelect.value : "local") === "cloud"
+      ? getEffectiveEmbeddingModel()
+      : "";
+    setCatalogMissingNotice(
+      embeddingCatalogMissingNotice,
+      !!embeddingModel && !isModelInCatalog(embeddingModel, rawEmbeddingModels),
+      embeddingModel,
+      "embeddings"
+    );
+
+    const verificationIsLocal = !!verificationProviderSelect && verificationProviderSelect.value === "local_laya";
+    const verificationModel = verificationIsLocal ? "" : getEffectiveVerificationModel();
+    setCatalogMissingNotice(
+      verificationCatalogMissingNotice,
+      !!verificationModel && !isModelInCatalog(verificationModel, rawDecisionModels),
+      verificationModel,
+      "citation verification"
+    );
+
+    let missingVlmModel = "";
+    if ((enableVlmCheckbox ? enableVlmCheckbox.checked : true) && getEffectiveVlmProvider() === "openrouter") {
+      const primary = vlmPrimaryModelSelect ? String(vlmPrimaryModelSelect.value || "").trim() : "";
+      const backup = vlmBackupModelSelect ? String(vlmBackupModelSelect.value || "").trim() : "";
+      if (primary && !isModelInCatalog(primary, rawLlmModels)) {
+        missingVlmModel = primary;
+      } else if (backup && !isModelInCatalog(backup, rawLlmModels)) {
+        missingVlmModel = backup;
+      }
+    }
+    setCatalogMissingNotice(vlmCatalogMissingNotice, !!missingVlmModel, missingVlmModel, "VLM figure captioning");
   }
 
   function getEffectiveLlmModel() {
@@ -285,17 +370,36 @@ function initZocratesPreferences() {
     }
   }
 
+  // The model value Apply persists for the current provider selection: a local_laya provider
+  // always persists "laya", which the verification-model select can never hold.
+  function getEffectiveVerificationModel() {
+    const provider = verificationProviderSelect ? verificationProviderSelect.value : "openrouter";
+    if (provider === "local_laya") return "laya";
+    const selectValue = verificationModelSelect ? String(verificationModelSelect.value || "").trim() : "";
+    return (selectValue && selectValue !== "laya") ? selectValue : "inception/mercury-decide";
+  }
+
+  // Resolves a persisted backend/pref model into the value the dirty check compares against.
+  // Mirrors syncVerificationSettings() so bookkeeping matches what was actually persisted:
+  // with a local_laya provider the backend holds "laya", never the select's value.
+  function resolveSavedVerificationModel(persistedModel) {
+    const provider = verificationProviderSelect ? verificationProviderSelect.value : "openrouter";
+    const persisted = typeof persistedModel === "string" ? persistedModel.trim() : "";
+    if (provider !== "local_laya" && persisted && persisted !== "laya") return persisted;
+    return getEffectiveVerificationModel();
+  }
+
   function updateVerificationDirtyState() {
     if (!verificationApplyBtn) return;
     const currentEnabled = verificationEnabledToggle ? verificationEnabledToggle.checked : false;
     const currentProvider = verificationProviderSelect ? verificationProviderSelect.value : "openrouter";
-    const currentModel = verificationModelSelect ? verificationModelSelect.value : "inception/mercury-decide";
+    const currentModel = getEffectiveVerificationModel();
     const currentThreshold = verificationThresholdInput ? parseFloat(verificationThresholdInput.value) : 0.60;
     const currentAutoStart = autoStartLayaToggle ? autoStartLayaToggle.checked : true;
 
     const enabledMatches = (currentEnabled === savedVerificationEnabled);
     const providerMatches = (currentProvider === savedVerificationProvider);
-    const modelMatches = (currentModel === savedVerificationModel);
+    const modelMatches = modelsMatch(currentModel, savedVerificationModel);
     const thresholdMatches = Math.abs(currentThreshold - savedVerificationThreshold) < 0.001;
     const autoStartMatches = (currentAutoStart === savedVerificationAutoStart);
 
@@ -765,8 +869,15 @@ function initZocratesPreferences() {
           verificationProviderSelect.value = citationVerificationProvider;
         }
         const citationVerificationModel = Zotero.Prefs.get("extensions.zocrates.citationVerificationModel", true);
+        // Only mirror pref values that exist as options: assigning an unknown value to a
+        // select deselects it (value ""), which would fake an unsaved change on open.
+        let appliedVerificationModel = "";
         if (verificationModelSelect && citationVerificationModel && citationVerificationModel !== "laya") {
-          verificationModelSelect.value = citationVerificationModel;
+          const hasOption = Array.from(verificationModelSelect.options || []).some((o) => o.value === citationVerificationModel);
+          if (hasOption) {
+            verificationModelSelect.value = citationVerificationModel;
+            appliedVerificationModel = citationVerificationModel;
+          }
         }
         const citationVerificationThreshold = Zotero.Prefs.get("extensions.zocrates.citationVerificationThreshold", true);
         if (verificationThresholdInput && citationVerificationThreshold !== undefined && citationVerificationThreshold !== null) {
@@ -783,7 +894,7 @@ function initZocratesPreferences() {
         }
         savedVerificationEnabled = verificationEnabledToggle ? verificationEnabledToggle.checked : false;
         savedVerificationProvider = verificationProviderSelect ? verificationProviderSelect.value : "openrouter";
-        savedVerificationModel = (citationVerificationModel && citationVerificationModel !== "laya") ? citationVerificationModel : (verificationModelSelect && verificationModelSelect.value && verificationModelSelect.value !== "laya" ? verificationModelSelect.value : "inception/mercury-decide");
+        savedVerificationModel = resolveSavedVerificationModel(appliedVerificationModel);
         savedVerificationThreshold = verificationThresholdInput ? parseFloat(verificationThresholdInput.value) : 0.60;
         savedVerificationAutoStart = autoStartLayaToggle ? autoStartLayaToggle.checked : true;
         updateVerificationUiVisibility();
@@ -958,9 +1069,7 @@ function initZocratesPreferences() {
       }
       savedVerificationEnabled = verificationEnabledToggle ? verificationEnabledToggle.checked : false;
       savedVerificationProvider = verificationProviderSelect ? verificationProviderSelect.value : "openrouter";
-      savedVerificationModel = (data.citation_verification_model && data.citation_verification_model !== "laya")
-        ? data.citation_verification_model
-        : (verificationModelSelect && verificationModelSelect.value && verificationModelSelect.value !== "laya" ? verificationModelSelect.value : "inception/mercury-decide");
+      savedVerificationModel = resolveSavedVerificationModel(data.citation_verification_model);
       savedVerificationThreshold = verificationThresholdInput ? parseFloat(verificationThresholdInput.value) : 0.60;
       savedVerificationAutoStart = autoStartLayaToggle ? autoStartLayaToggle.checked : true;
       updateVerificationUiVisibility();
@@ -1092,9 +1201,7 @@ function initZocratesPreferences() {
       }
       savedVerificationEnabled = verificationEnabledToggle ? verificationEnabledToggle.checked : false;
       savedVerificationProvider = verificationProviderSelect ? verificationProviderSelect.value : "openrouter";
-      savedVerificationModel = (data.citation_verification_model && data.citation_verification_model !== "laya")
-        ? data.citation_verification_model
-        : (verificationModelSelect && verificationModelSelect.value && verificationModelSelect.value !== "laya" ? verificationModelSelect.value : "inception/mercury-decide");
+      savedVerificationModel = resolveSavedVerificationModel(data.citation_verification_model);
       savedVerificationThreshold = verificationThresholdInput ? parseFloat(verificationThresholdInput.value) : 0.60;
       savedVerificationAutoStart = autoStartLayaToggle ? autoStartLayaToggle.checked : true;
       updateVerificationUiVisibility();
@@ -1190,6 +1297,9 @@ function initZocratesPreferences() {
       if (openrouterKeyMissingNotice) {
         openrouterKeyMissingNotice.style.display = keyVal ? "none" : "block";
       }
+      if (llmKeyMissingNotice) {
+        llmKeyMissingNotice.style.display = keyVal ? "none" : "block";
+      }
       if (llmBaseUrlGroup) llmBaseUrlGroup.style.display = "none";
       if (vllmGuidanceBox) vllmGuidanceBox.style.display = "none";
       if (llmFilterChipsContainer) llmFilterChipsContainer.style.display = "flex";
@@ -1199,6 +1309,7 @@ function initZocratesPreferences() {
       if (llmRefreshBtn) llmRefreshBtn.style.display = "inline-block";
     } else {
       if (openrouterKeyMissingNotice) openrouterKeyMissingNotice.style.display = "none";
+      if (llmKeyMissingNotice) llmKeyMissingNotice.style.display = "none";
       if (llmBaseUrlGroup) llmBaseUrlGroup.style.display = "flex";
       if (llmFilterChipsContainer) llmFilterChipsContainer.style.display = "none";
       if (llmModelSearchContainer) llmModelSearchContainer.style.display = "none";
@@ -1222,6 +1333,7 @@ function initZocratesPreferences() {
     }
 
     updateEmbeddingUiVisibility();
+    updateCatalogMissingNotices();
   }
 
   function updateEmbeddingUiVisibility() {
@@ -1254,6 +1366,8 @@ function initZocratesPreferences() {
         embeddingModelSelect.value = "jinaai/jina-embeddings-v5-text-nano";
       }
     }
+
+    updateCatalogMissingNotices();
   }
 
   function renderEmbeddingModels(activeModelToSelect = null) {
@@ -1272,16 +1386,30 @@ function initZocratesPreferences() {
     });
 
     if (currentSel) {
+      let matched = false;
       for (let i = 0; i < embeddingModelSelect.options.length; i++) {
         const val = embeddingModelSelect.options[i].value;
         if (val === currentSel || val === `openrouter/${currentSel}` || `openrouter/${val}` === currentSel) {
           embeddingModelSelect.selectedIndex = i;
+          embeddingModelSelect.value = val;
+          matched = true;
           break;
         }
+      }
+      if (!matched) {
+        // Mirror renderDecisionModels: a configured model the catalog does not list stays
+        // selectable (and is flagged by the catalog-missing notice) instead of silently
+        // collapsing to the first catalog entry.
+        const opt = document.createElementNS("http://www.w3.org/1999/xhtml", "option");
+        opt.value = currentSel;
+        opt.textContent = String(currentSel).replace(/^openrouter\//, "");
+        embeddingModelSelect.appendChild(opt);
+        embeddingModelSelect.value = currentSel;
       }
     }
     updateEmbeddingModelMetadata();
     updateEmbeddingDirtyState();
+    updateCatalogMissingNotices();
   }
 
   function renderDecisionModels(activeModelToSelect = null) {
@@ -1329,6 +1457,7 @@ function initZocratesPreferences() {
     }
     updateVerificationModelMetadata();
     updateVerificationDirtyState();
+    updateCatalogMissingNotices();
   }
 
   function renderModelMetadataBox(metadataBox, modsText, ctxText, priceText) {
@@ -1660,22 +1789,35 @@ function initZocratesPreferences() {
 
     // 5. Restore Selected Option
     if (desiredModel) {
-      let matched = false;
-      for (let i = 0; i < llmModelSelect.options.length; i++) {
-        const val = llmModelSelect.options[i].value;
+      const optionElems = llmModelSelect.querySelectorAll("option");
+      let matchedOption = null;
+      for (let i = 0; i < optionElems.length; i++) {
+        const val = optionElems[i].value;
         if (val === desiredModel || val === `openrouter/${desiredModel}` || `openrouter/${val}` === desiredModel) {
-          llmModelSelect.selectedIndex = i;
-          matched = true;
+          matchedOption = optionElems[i];
           break;
         }
       }
-      if (!matched && llmModelSelect.options.length > 0) {
-        llmModelSelect.selectedIndex = 0;
+      if (matchedOption) {
+        llmModelSelect.value = matchedOption.value;
+      } else {
+        // The configured model can be absent from the catalog (misspelled/discontinued slug) or
+        // merely excluded by the active vendor/free/search filter. Surface it as the first option
+        // so the card never silently presents an unrelated model as the configured choice.
+        const catalogModel = findCatalogModel(rawLlmModels, desiredModel);
+        const opt = document.createElementNS("http://www.w3.org/1999/xhtml", "option");
+        opt.value = desiredModel;
+        opt.textContent = catalogModel
+          ? getCleanModelDisplayName(catalogModel.name || catalogModel.id, getVendorName(catalogModel))
+          : String(desiredModel).replace(/^openrouter\//, "");
+        llmModelSelect.insertBefore(opt, llmModelSelect.firstChild);
+        llmModelSelect.value = desiredModel;
       }
     }
 
     updateLlmModelMetadata();
     updateLlmDirtyState();
+    updateCatalogMissingNotices();
   }
 
   function updateVlmModelMetadata(selectElem, metadataBox) {
@@ -1850,6 +1992,7 @@ function initZocratesPreferences() {
     }
 
     updateVlmModelMetadata(selectElem, metadataBox);
+    updateCatalogMissingNotices();
   }
 
   function renderVlmModels(desiredPrimary = null, desiredBackup = null) {
@@ -1857,6 +2000,40 @@ function initZocratesPreferences() {
     const bak = desiredBackup || (vlmBackupModelSelect ? vlmBackupModelSelect.value : savedVlmBackupModel);
     renderVlmDropdown(vlmPrimaryModelSelect, vlmPrimaryMetadataBox, pri, "openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free");
     renderVlmDropdown(vlmBackupModelSelect, vlmBackupMetadataBox, bak, "openrouter/qwen/qwen3.7-flash");
+  }
+
+  // Resolve the model <select> a given catalog target type renders into.
+  function getModelSelectForType(targetType) {
+    if (targetType === "embedding") return embeddingModelSelect;
+    if (targetType === "decision") return verificationModelSelect;
+    return llmModelSelect;
+  }
+
+  // no-key fallback: reflect the persisted config model so dirty checks pass — mirrors renderVlmDropdown pattern
+  function materializeConfiguredModelOption(targetType, desiredModel) {
+    if (!desiredModel) return;
+    const selectElem = getModelSelectForType(targetType);
+    if (!selectElem) return;
+    const desired = String(desiredModel).trim();
+    if (!desired) return;
+
+    const opts = (selectElem.options && selectElem.options.length > 0) ? selectElem.options : selectElem.children;
+    if (opts) {
+      for (let i = 0; i < opts.length; i++) {
+        const val = opts[i].value;
+        if (val === desired || val === `openrouter/${desired}` || `openrouter/${val}` === desired) {
+          selectElem.selectedIndex = i;
+          selectElem.value = val;
+          return;
+        }
+      }
+    }
+
+    const opt = document.createElementNS("http://www.w3.org/1999/xhtml", "option");
+    opt.value = desired;
+    opt.textContent = desired.replace(/^openrouter\//i, "");
+    selectElem.appendChild(opt);
+    selectElem.value = desired;
   }
 
   // Fetch OpenRouter model catalog for dropdown population
@@ -1870,7 +2047,13 @@ function initZocratesPreferences() {
       });
       if (!res.ok) return;
       const data = await res.json();
-      if ((data.status !== "ok" && data.status !== "success") || !Array.isArray(data.models)) return;
+      if ((data.status !== "ok" && data.status !== "success") || !Array.isArray(data.models)) {
+        // No catalog (e.g. no OpenRouter key): materialize the configured model so the
+        // select matches the saved config value and dirty checks stay clean. The ok-path
+        // render functions rebuild the option list, replacing this fallback option.
+        materializeConfiguredModelOption(targetType, activeModelToSelect);
+        return;
+      }
 
       if (targetType === "embedding") {
         rawEmbeddingModels = data.models;
@@ -2068,10 +2251,16 @@ function initZocratesPreferences() {
     openRouterApiKeyInput.addEventListener("input", () => {
       updateLlmDirtyState();
       updateEmbeddingDirtyState();
+      updateLlmUiVisibility();
+      updateVlmUiVisibility();
+      updateVerificationUiVisibility();
     });
     openRouterApiKeyInput.addEventListener("change", () => {
       updateLlmDirtyState();
       updateEmbeddingDirtyState();
+      updateLlmUiVisibility();
+      updateVlmUiVisibility();
+      updateVerificationUiVisibility();
     });
   }
 
@@ -2113,6 +2302,7 @@ function initZocratesPreferences() {
     llmModelSelect.addEventListener("change", () => {
       updateLlmModelMetadata();
       updateLlmDirtyState();
+      updateCatalogMissingNotices();
     });
   }
 
@@ -2188,6 +2378,7 @@ function initZocratesPreferences() {
     embeddingModelSelect.addEventListener("change", () => {
       updateEmbeddingModelMetadata();
       updateEmbeddingDirtyState();
+      updateCatalogMissingNotices();
     });
   }
 
@@ -2425,6 +2616,7 @@ function initZocratesPreferences() {
     vlmPrimaryModelSelect.addEventListener("change", () => {
       updateVlmModelMetadata(vlmPrimaryModelSelect, vlmPrimaryMetadataBox);
       updateConverterDirtyState();
+      updateCatalogMissingNotices();
     });
   }
 
@@ -2432,6 +2624,7 @@ function initZocratesPreferences() {
     vlmBackupModelSelect.addEventListener("change", () => {
       updateVlmModelMetadata(vlmBackupModelSelect, vlmBackupMetadataBox);
       updateConverterDirtyState();
+      updateCatalogMissingNotices();
     });
   }
 
@@ -2922,6 +3115,11 @@ function initZocratesPreferences() {
     if (verificationLocalUrlGroup) {
       verificationLocalUrlGroup.style.display = isLocal ? "block" : "none";
     }
+    if (verificationKeyMissingNotice) {
+      const keyVal = openRouterApiKeyInput ? openRouterApiKeyInput.value.trim() : "";
+      verificationKeyMissingNotice.style.display = (!isLocal && !keyVal) ? "block" : "none";
+    }
+    updateCatalogMissingNotices();
   }
 
   async function checkLayaStatus() {
@@ -3136,6 +3334,7 @@ function initZocratesPreferences() {
     verificationModelSelect.addEventListener("change", () => {
       updateVerificationDirtyState();
       updateVerificationModelMetadata();
+      updateCatalogMissingNotices();
     });
   }
   if (verificationLocalUrlInput) {
@@ -3188,7 +3387,7 @@ function initZocratesPreferences() {
 
       savedVerificationEnabled = verificationEnabledToggle ? verificationEnabledToggle.checked : false;
       savedVerificationProvider = verificationProviderSelect ? verificationProviderSelect.value : "openrouter";
-      savedVerificationModel = verificationModelSelect ? verificationModelSelect.value : "inception/mercury-decide";
+      savedVerificationModel = getEffectiveVerificationModel();
       savedVerificationThreshold = verificationThresholdInput ? parseFloat(verificationThresholdInput.value) : 0.60;
       savedVerificationAutoStart = autoStartLayaToggle ? autoStartLayaToggle.checked : true;
 
@@ -3303,13 +3502,19 @@ function initZocratesPreferences() {
     updateMcpConfigSnippet,
     copyTextToClipboard,
     updateLlmUiVisibility,
+    updateVlmUiVisibility,
+    updateVerificationUiVisibility,
     updateVerificationModelMetadata,
+    updateCatalogMissingNotices,
+    isModelInCatalog,
+    updateVerificationDirtyState,
     updateLlmModelMetadata,
     updateEmbeddingModelMetadata,
     updateVlmModelMetadata,
     fetchOpenRouterModels,
     renderModelMetadataBox,
     renderDecisionModels,
+    renderFilteredLlmModels,
   };
 }
 

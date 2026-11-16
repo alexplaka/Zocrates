@@ -2706,13 +2706,25 @@ async function writeOnboardingState(stage, extra = {}) {
     stage,
     seeded_at: prev.seeded_at || nowIso,
     config_done_at: prev.config_done_at || null,
-    process_done_at: prev.process_done_at || null,
-    process_aborted: Boolean(prev.process_aborted),
+    process_done_at: stage === "ready" ? (prev.process_done_at || null) : null,
+    process_aborted: stage === "ready" ? Boolean(prev.process_aborted) : false,
+    process_skipped: stage === "ready" ? Boolean(prev.process_skipped) : false,
   };
   if (stage === "process" && !next.config_done_at) next.config_done_at = nowIso;
   if (stage === "ready") {
-    if (!next.process_done_at) next.process_done_at = nowIso;
-    if (extra.process_aborted) next.process_aborted = true;
+    if (extra.process_skipped) {
+      next.process_skipped = true;
+      next.process_done_at = null;
+      next.process_aborted = Boolean(extra.process_aborted);
+      // Skipped-indexing exit: config writes succeeded before this call, so
+      // stamp the bookkeeping (only when explicitly signaled — auto-graduation
+      // ready transitions do not save config and must not stamp).
+      if (extra.config_saved && !next.config_done_at) next.config_done_at = nowIso;
+    } else {
+      next.process_skipped = false;
+      next.process_aborted = Boolean(extra.process_aborted);
+      if (!next.process_done_at) next.process_done_at = nowIso;
+    }
   }
   if (extra.preset_applied) next.preset_applied = extra.preset_applied;
   next.stage = stage;
@@ -2913,7 +2925,7 @@ const ONBOARDING_PRESETS = {
       model: "openrouter/~z-ai/glm-flash-latest",
       synthesisModel: "openrouter/google/gemini-3.8-flash",
       embedMode: "cloud",
-      cloudEmbeddingModel: "openrouter/voyageai/voyage-4",
+      cloudEmbeddingModel: "openrouter/mongodb/voyage-4",
       vlmChoice: "openrouter",
       vlmModel: "openrouter/deepseek/deepseek-v4.1-flash",
       vlmBackupModel: "openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
@@ -3329,7 +3341,7 @@ function renderOnboardingWizardCard() {
     "OpenRouter embedding slug (the OpenRouter key above is reused). The vector dimension is auto-resolved per model.");
   const cloudModelInput = el(cloudRow, "input", "onboarding-input");
   cloudModelInput.type = "text";
-  cloudModelInput.placeholder = "openrouter/voyageai/voyage-4";
+  cloudModelInput.placeholder = "openrouter/mongodb/voyage-4";
   w.cloudEmbeddingRow = cloudRow;
   w.cloudEmbeddingModel = cloudModelInput;
   w.dimensionLine = el(embSection, "div", "onboarding-hardware-line");
@@ -3446,16 +3458,24 @@ function renderOnboardingWizardCard() {
   layaRow.style.display = "none";
 
   // --- Footer ---
+  w.footerHint = el(card, "div", "onboarding-footer-hint",
+    "Your tier selection and settings are saved either way \u2014 the only difference is whether library indexing starts now.");
   const footer = el(card, "div", "onboarding-wizard-footer");
-  w.skipBtn = el(footer, "button", "onboarding-secondary-btn", "Skip \u2014 use defaults");
-  w.skipBtn.type = "button";
-  const saveBtn = el(footer, "button", "onboarding-primary-btn", "Save & start indexing");
+  const skipIndexingBtn = el(footer, "button", "onboarding-secondary-btn");
+  skipIndexingBtn.type = "button";
+  skipIndexingBtn.disabled = false;
+  skipIndexingBtn.appendChild(document.createTextNode("Save & "));
+  el(skipIndexingBtn, "strong", null, "Skip Indexing");
+  w.skipIndexingBtn = skipIndexingBtn;
+  const saveBtn = el(footer, "button", "onboarding-primary-btn");
   saveBtn.type = "button";
   saveBtn.disabled = false;
+  saveBtn.appendChild(document.createTextNode("Save & "));
+  el(saveBtn, "strong", null, "Start Indexing");
   w.saveBtn = saveBtn;
   w.status = el(card, "div", "onboarding-wizard-status");
   saveBtn.addEventListener("click", () => finishOnboardingConfigure(false));
-  w.skipBtn.addEventListener("click", () => finishOnboardingConfigure(true));
+  skipIndexingBtn.addEventListener("click", () => finishOnboardingConfigure(true));
 
   // Recommended pre-selected, per plan §5.1.
   applyOnboardingPreset("recommended");
@@ -3642,56 +3662,191 @@ async function loadOnboardingWizardDefaults(w) {
   }
 }
 
-async function finishOnboardingConfigure(skip) {
+function hasOpenRouterDependency(selection) {
+  if (!selection || typeof selection !== "object") return false;
+  if (selection.provider === "openrouter_llm") return true;
+  if (
+    selection.embedMode === "cloud" &&
+    typeof selection.cloudEmbeddingModel === "string" &&
+    selection.cloudEmbeddingModel.toLowerCase().includes("openrouter")
+  ) {
+    return true;
+  }
+  if (selection.vlmChoice === "openrouter") return true;
+  if (selection.preset === "recommended" || selection.preset === "free") {
+    for (const val of Object.values(ONBOARDING_PRESETS[selection.preset]?.llmConfig || {})) {
+      if (typeof val === "string") {
+        const lower = val.toLowerCase();
+        if (
+          lower.includes("openrouter") ||
+          lower.includes("inception") ||
+          lower.includes("typesafe")
+        ) {
+          return true;
+        }
+      }
+    }
+    const isLocalProvider = Boolean(selection.provider && selection.provider !== "openrouter_llm");
+    const isLocalEmbeddings = selection.embedMode === "local";
+    const isLocalOrDisabledVlm = selection.vlmChoice === "disable" || selection.vlmChoice === "ollama";
+    if (!(isLocalProvider && isLocalEmbeddings && isLocalOrDisabledVlm)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function showOnboardingMissingKeyModal(skipIndexing) {
+  const modal = getInfoModal();
+  if (!modal || typeof modal.show !== "function") {
+    console.warn("Zocrates: info modal unavailable; proceeding without missing-key warning");
+    return Promise.resolve(true);
+  }
+  const baseBody = "This configuration uses OpenRouter services. Those features will not work until you add an API key in Zocrates Settings (\u22ee menu). Free models also require a key.";
+  const bodyText = skipIndexing
+    ? baseBody
+    : baseBody + " Indexing may fail until a key is configured.";
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const settle = (proceed) => {
+      if (settled) return;
+      settled = true;
+      resolve(Boolean(proceed));
+    };
+    modal.show({
+      window,
+      title: "OpenRouter API Key Missing",
+      rows: [bodyText],
+      onClose: () => settle(false),
+      buttons: [
+        {
+          label: "Go Back",
+          className: "onboarding-modal-go-back-btn",
+          onClick: () => {
+            settle(false);
+          },
+        },
+        {
+          label: "Continue Anyway",
+          className: "onboarding-modal-continue-btn",
+          primary: true,
+          onClick: () => {
+            settle(true);
+          },
+        },
+      ],
+    });
+  });
+}
+
+function showOnboardingSkipIndexingModal() {
+  const modal = getInfoModal();
+  if (!modal || typeof modal.show !== "function") return null;
+  return modal.show({
+    window,
+    title: "Setup saved \u2014 library indexing skipped",
+    rows: [
+      "Your configuration has been saved. Your library has not been converted or indexed yet, so library search will not find papers until indexing runs.",
+      {
+        label: "Convert selected items",
+        value: "right-click item(s) \u2192 Zocrates \u2192 Convert with\u2026",
+        stack: true,
+      },
+      {
+        label: "Index your whole library later",
+        value: "\u22ee menu \u2192 Update Library Index",
+        stack: true,
+      },
+      {
+        label: "Change models or add API keys",
+        value: "\u22ee menu \u2192 Zocrates Settings",
+        stack: true,
+      },
+      "You can explore the plugin now and index whenever you are ready.",
+    ],
+  });
+}
+
+async function finishOnboardingConfigure(skipIndexing = false) {
+  const skip = Boolean(skipIndexing);
   const w = _onboardingWizardRefs;
   const status = w && w.status;
   try {
     if (w) {
       if (w.saveBtn) w.saveBtn.disabled = true;
-      if (w.skipBtn) w.skipBtn.disabled = true;
+      if (w.skipIndexingBtn) w.skipIndexingBtn.disabled = true;
     }
-    if (!skip) {
-      const selection = collectOnboardingSelections();
-      if (selection.openrouterKey) {
-        saveStoredApiKey("openrouter_api_key", selection.openrouterKey);
+    const selection = collectOnboardingSelections();
+    const storedKey = (typeof loadStoredApiKey === "function" ? loadStoredApiKey("openrouter_api_key") : "") || "";
+    const hasKey = Boolean(
+      (selection.openrouterKey && selection.openrouterKey.trim()) ||
+      (typeof storedKey === "string" && storedKey.trim())
+    );
+    if (hasOpenRouterDependency(selection) && !hasKey) {
+      const proceed = await showOnboardingMissingKeyModal(skip);
+      if (!proceed) {
+        if (w) {
+          if (w.saveBtn) w.saveBtn.disabled = false;
+          if (w.skipIndexingBtn) w.skipIndexingBtn.disabled = false;
+        }
+        return;
       }
-      const payloads = buildOnboardingFinishPayloads(selection);
-      if (status) setOnboardingStatus(status, "Saving AI engine settings\u2026");
-      const llmRes = await fetch(`${BACKEND_URL}/config`, {
-        method: "POST",
-        headers: getAuthHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify(payloads.llmConfig),
-      });
-      if (!llmRes.ok) throw new Error(`AI engine settings failed (${llmRes.status})`);
-      if (status) setOnboardingStatus(status, "Switching embeddings\u2026");
-      const ragRes = await fetch(`${BACKEND_URL}/rag/model`, {
-        method: "POST",
-        headers: getAuthHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify(payloads.ragModel),
-      });
-      if (!ragRes.ok) throw new Error(`Embedding switch failed (${ragRes.status})`);
-      if (status) setOnboardingStatus(status, "Setting converter & captions\u2026");
-      const convRes = await fetch(`${BACKEND_URL}/rag/converter`, {
-        method: "POST",
-        headers: getAuthHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify(payloads.ragConverter),
-      });
-      if (!convRes.ok) throw new Error(`Converter update failed (${convRes.status})`);
-      if (payloads.layaFlow) {
-        if (status) setOnboardingStatus(status, "Setting up local citation verification (Laya)\u2026");
-        await ensureOnboardingLayaReady(status);
-      }
+    }
+    if (selection.openrouterKey) {
+      saveStoredApiKey("openrouter_api_key", selection.openrouterKey);
+    }
+    const payloads = buildOnboardingFinishPayloads(selection);
+    if (status) setOnboardingStatus(status, "Saving AI engine settings\u2026");
+    const llmRes = await fetch(`${BACKEND_URL}/config`, {
+      method: "POST",
+      headers: getAuthHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(payloads.llmConfig),
+    });
+    if (!llmRes.ok) throw new Error(`AI engine settings failed (${llmRes.status})`);
+    if (status) setOnboardingStatus(status, "Switching embeddings\u2026");
+    const ragRes = await fetch(`${BACKEND_URL}/rag/model`, {
+      method: "POST",
+      headers: getAuthHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(payloads.ragModel),
+    });
+    if (!ragRes.ok) throw new Error(`Embedding switch failed (${ragRes.status})`);
+    if (status) setOnboardingStatus(status, "Setting converter & captions\u2026");
+    const convRes = await fetch(`${BACKEND_URL}/rag/converter`, {
+      method: "POST",
+      headers: getAuthHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(payloads.ragConverter),
+    });
+    if (!convRes.ok) throw new Error(`Converter update failed (${convRes.status})`);
+    if (payloads.layaFlow) {
+      if (status) setOnboardingStatus(status, "Setting up local citation verification (Laya)\u2026");
+      await ensureOnboardingLayaReady(status);
     }
     const extra = {};
-    if (!skip && w && w.activePresetKey) extra.preset_applied = w.activePresetKey;
-    await writeOnboardingState("process", extra);
-    setOnboardingStage("process");
-    enterOnboardingProcess();
+    if (w && w.activePresetKey) extra.preset_applied = w.activePresetKey;
+    if (skip) {
+      extra.process_skipped = true;
+      extra.config_saved = true;
+      await writeOnboardingState("ready", extra);
+      setOnboardingStage("ready");
+      clearOnboardingContainerCards();
+      cleanupOnboardingResources();
+      removeBootstrapProgressCard();
+      try {
+        showOnboardingSkipIndexingModal();
+      } catch (e) {
+        console.warn("Zocrates: skip-indexing info modal failed:", e);
+      }
+    } else {
+      await writeOnboardingState("process", extra);
+      setOnboardingStage("process");
+      enterOnboardingProcess();
+    }
   } catch (e) {
     if (status) setOnboardingStatus(status, "Save failed: " + (e && e.message ? e.message : e), true);
     if (w) {
       if (w.saveBtn) w.saveBtn.disabled = false;
-      if (w.skipBtn) w.skipBtn.disabled = false;
+      if (w.skipIndexingBtn) w.skipIndexingBtn.disabled = false;
     }
   }
 }
@@ -11879,6 +12034,12 @@ function getInfoModal() {
   if (window.top && window.top.Zotero && window.top.Zotero.Zocrates && window.top.Zotero.Zocrates.InfoModal) {
     return window.top.Zotero.Zocrates.InfoModal;
   }
+  if (typeof require === "function") {
+    try {
+      const mod = require("./lib/infoModal.js");
+      if (mod) return mod;
+    } catch (_) {}
+  }
   return null;
 }
 
@@ -15804,6 +15965,8 @@ if (typeof module !== "undefined" && module.exports) {
     applyOnboardingPreset,
     syncOnboardingAiEngineUi,
     collectOnboardingSelections,
+    hasOpenRouterDependency,
+    finishOnboardingConfigure,
     testOnboardingConnection,
     readOnboardingSyncStream,
     finalizeFollowerAbortFallback: _finalizeFollowerAbortFallback,

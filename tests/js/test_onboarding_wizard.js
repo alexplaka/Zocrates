@@ -100,6 +100,7 @@ async function runTests() {
     assert.strictEqual(payload.config_done_at, null);
     assert.strictEqual(payload.process_done_at, null);
     assert.strictEqual(payload.process_aborted, false);
+    assert.strictEqual(payload.process_skipped, false);
   });
 
   await testAsync("bootstrap: seedOnboardingStateFile writes atomically and broadcasts configure", async () => {
@@ -143,7 +144,7 @@ async function runTests() {
     assert.strictEqual(rec.model, "openrouter/~z-ai/glm-flash-latest");
     assert.strictEqual(rec.synthesisModel, "openrouter/google/gemini-3.8-flash");
     assert.strictEqual(rec.embedMode, "cloud");
-    assert.strictEqual(rec.cloudEmbeddingModel, "openrouter/voyageai/voyage-4");
+    assert.strictEqual(rec.cloudEmbeddingModel, "openrouter/mongodb/voyage-4");
     assert.strictEqual(rec.vlmModel, "openrouter/deepseek/deepseek-v4.1-flash");
     assert.strictEqual(rec.vlmBackupModel, "openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free");
     assert.strictEqual(rec.vlmMaxImagesPerDoc, 100);
@@ -221,7 +222,7 @@ async function runTests() {
       model: "openrouter/~z-ai/glm-flash-latest",
       openrouterKey: "sk-test",
       embedMode: "cloud",
-      cloudEmbeddingModel: "openrouter/voyageai/voyage-4",
+      cloudEmbeddingModel: "openrouter/mongodb/voyage-4",
       converterId: "markitdown",
       vlmChoice: "openrouter",
       vlmModel: "openrouter/deepseek/deepseek-v4.1-flash",
@@ -235,7 +236,7 @@ async function runTests() {
     assert.strictEqual(p.llmConfig.openrouter_api_key, "sk-test");
     assert.strictEqual(p.llmConfig.user_research_profile, "compbio researcher");
     assert.strictEqual(p.ragModel.mode, "cloud");
-    assert.strictEqual(p.ragModel.model_name, "openrouter/voyageai/voyage-4");
+    assert.strictEqual(p.ragModel.model_name, "openrouter/mongodb/voyage-4");
     assert.strictEqual(p.ragConverter.enable_vlm_captioning, true);
     assert.strictEqual(
       p.ragConverter.vlm_captioning_backup_model,
@@ -342,7 +343,38 @@ async function runTests() {
     read = await sidebar.readOnboardingStateFile();
     assert.strictEqual(read.stage, "ready");
     assert.strictEqual(read.meta.process_aborted, true);
+    assert.strictEqual(read.meta.process_skipped, false);
     assert.ok(read.meta.process_done_at);
+
+    // Skipped indexing: stage ready, process_skipped true, process_aborted false, NO process_done_at
+    assert.strictEqual(await sidebar.writeOnboardingState("ready", { process_skipped: true, preset_applied: "recommended" }), true);
+    read = await sidebar.readOnboardingStateFile();
+    assert.strictEqual(read.stage, "ready");
+    assert.strictEqual(read.meta.process_skipped, true);
+    assert.strictEqual(read.meta.process_aborted, false);
+    assert.strictEqual(read.meta.process_done_at, null, "process_done_at must NOT be stamped when process_skipped is true");
+    assert.strictEqual(read.meta.preset_applied, "recommended");
+    // config_saved flag (skip path in finishOnboardingConfigure) stamps config_done_at
+    assert.strictEqual(await sidebar.writeOnboardingState("ready", { process_skipped: true, config_saved: true }), true);
+    read = await sidebar.readOnboardingStateFile();
+    assert.ok(read.meta.config_done_at, "config_done_at must be stamped on the skipped-indexing exit (config was saved)");
+    // Without the config_saved flag (fresh-profile auto-graduation ready), config_done_at must NOT be stamped.
+    // Reset in-memory bookkeeping first (config_done_at is monotonic and the process write above already stamped it).
+    const savedIoForGrad = global.IOUtils;
+    global.IOUtils = undefined;
+    await sidebar.initOnboardingStateFlow();
+    global.IOUtils = savedIoForGrad;
+    assert.strictEqual(await sidebar.writeOnboardingState("ready", { process_skipped: true }), true);
+    read = await sidebar.readOnboardingStateFile();
+    assert.strictEqual(read.meta.config_done_at, null, "config_done_at must NOT be stamped without the config_saved signal");
+
+    // Normal ready completion: stamps process_done_at, process_skipped false, process_aborted false
+    assert.strictEqual(await sidebar.writeOnboardingState("ready"), true);
+    read = await sidebar.readOnboardingStateFile();
+    assert.strictEqual(read.stage, "ready");
+    assert.strictEqual(read.meta.process_skipped, false);
+    assert.strictEqual(read.meta.process_aborted, false);
+    assert.ok(read.meta.process_done_at, "normal ready completion must stamp process_done_at");
 
     // No IOUtils → graceful no-write / legacy read
     global.IOUtils = undefined;
@@ -1754,6 +1786,620 @@ async function runTests() {
     assert.strictEqual(retryBtn.textContent, "Retry", "Non-error event resets retry button to Retry");
 
     if (card) card.remove();
+  });
+
+  // =========================================================================
+  // 11. CONFIGURE-stage footer redesign, API-key warning modal & skip-indexing
+  // =========================================================================
+  test("footer redesign (a): renders primary + secondary buttons with strong Start/Skip emphasis and helper hint line", () => {
+    const onboardingHost = env.document.getElementById("onboarding-container");
+    const prevIsDetached = sidebar.getIsDetached();
+    const prevSid = sidebar.getCurrentSessionId();
+
+    try {
+      while (onboardingHost.firstChild) {
+        onboardingHost.removeChild(onboardingHost.firstChild);
+      }
+      sidebar.setIsDetached(false);
+      sidebar.setCurrentSessionId("");
+      sidebar.setOnboardingStage("configure");
+      sidebar.enterOnboardingConfigure();
+
+      const card = env.document.getElementById("onboarding-wizard-card");
+      const w = sidebar.getOnboardingWizardRefs();
+      assert.ok(card && w, "wizard card and refs must be present");
+
+      assert.strictEqual(w["skip" + "Btn"], undefined, "legacy skip button ref must be removed");
+      assert.ok(w.footerHint, "footerHint ref must exist");
+      assert.strictEqual(w.footerHint.className, "onboarding-footer-hint");
+      assert.strictEqual(
+        w.footerHint.textContent,
+        "Your tier selection and settings are saved either way \u2014 the only difference is whether library indexing starts now."
+      );
+
+      // Hint is rendered above the footer buttons inside the card
+      const cardChildren = card.children;
+      const hintIdx = cardChildren.indexOf(w.footerHint);
+      const footerEl = card.querySelector(".onboarding-wizard-footer");
+      const footerIdx = cardChildren.indexOf(footerEl);
+      assert.ok(hintIdx !== -1 && footerIdx !== -1 && hintIdx < footerIdx, "footer hint must appear above the footer buttons");
+
+      // Secondary button: Save & <strong>Skip Indexing</strong>
+      assert.ok(w.skipIndexingBtn, "secondary skipIndexingBtn must exist");
+      assert.strictEqual(w.skipIndexingBtn.className, "onboarding-secondary-btn");
+      assert.strictEqual(w.skipIndexingBtn.textContent, "Save & Skip Indexing");
+      const skipStrong = w.skipIndexingBtn.querySelector("strong");
+      assert.ok(skipStrong, "secondary button must contain a <strong> element");
+      assert.strictEqual(skipStrong.textContent, "Skip Indexing");
+
+      // Primary button: Save & <strong>Start Indexing</strong>
+      assert.ok(w.saveBtn, "primary saveBtn must exist");
+      assert.strictEqual(w.saveBtn.className, "onboarding-primary-btn");
+      assert.strictEqual(w.saveBtn.textContent, "Save & Start Indexing");
+      const startStrong = w.saveBtn.querySelector("strong");
+      assert.ok(startStrong, "primary button must contain a <strong> element");
+      assert.strictEqual(startStrong.textContent, "Start Indexing");
+
+      // No legacy skip label text anywhere
+      const legacyText = "use " + "defaults";
+      assert.ok(!card.textContent.includes(legacyText), "no legacy skip label text anywhere in card");
+    } finally {
+      while (onboardingHost.firstChild) {
+        onboardingHost.removeChild(onboardingHost.firstChild);
+      }
+      sidebar.setIsDetached(prevIsDetached);
+      sidebar.setCurrentSessionId(prevSid);
+      sidebar.setOnboardingStage("ready");
+      sidebar.cleanupOnboardingResources();
+    }
+  });
+
+  await testAsync("footer redesign (c & g): both Start Indexing and Skip Indexing save config via /config, /rag/model, /rag/converter; Skip Indexing transitions directly to ready with info modal and no /sync/stream", async () => {
+    const onboardingHost = env.document.getElementById("onboarding-container");
+    const prevIO = global.IOUtils;
+    const prevFetch = global.fetch;
+    const prevLoadKey = env.zotero.Zocrates && env.zotero.Zocrates.loadStoredApiKey;
+    const prevSaveKey = env.zotero.Zocrates && env.zotero.Zocrates.saveStoredApiKey;
+    const prevReady = sidebar.getBackendReadyForChat();
+
+    try {
+      arrangeDataDir();
+      bootstrap.initOnboardingStageBus(env.zotero);
+
+      // --- Part 1: Start Indexing exit (skipIndexing = false) ---
+      const io1 = makeMockIOUtils();
+      global.IOUtils = io1;
+      const postUrls1 = [];
+      let savedKey1 = null;
+      env.zotero.Zocrates.saveStoredApiKey = (k, v) => { savedKey1 = { k, v }; };
+      env.zotero.Zocrates.loadStoredApiKey = () => "";
+
+      global.fetch = async (url, opts) => {
+        const u = String(url);
+        if (opts && opts.method === "POST") {
+          postUrls1.push(u.replace(/^https?:\/\/[^/]+/, ""));
+        }
+        if (u.endsWith("/sync/stream")) {
+          // Return an immediately-closing done SSE stream
+          const chunk = new TextEncoder().encode("event: done\ndata: {\"processed\": 1}\n\n");
+          let readOnce = false;
+          return {
+            ok: true,
+            status: 200,
+            body: {
+              getReader: () => ({
+                read: async () => {
+                  if (!readOnce) {
+                    readOnce = true;
+                    return { value: chunk, done: false };
+                  }
+                  return { value: undefined, done: true };
+                },
+              }),
+            },
+          };
+        }
+        return { ok: true, status: 200, json: async () => ({ status: "ok" }) };
+      };
+
+      while (onboardingHost.firstChild) onboardingHost.removeChild(onboardingHost.firstChild);
+      sidebar.setOnboardingStage("configure");
+      sidebar.enterOnboardingConfigure();
+      const w1 = sidebar.getOnboardingWizardRefs();
+      w1.openrouterKey.value = "sk-or-user-typed-1";
+
+      w1.saveBtn.dispatchEvent("click");
+      await flush();
+      await flush();
+
+      assert.deepStrictEqual(savedKey1, { k: "openrouter_api_key", v: "sk-or-user-typed-1" });
+      assert.deepStrictEqual(
+        postUrls1.slice(0, 3),
+        ["/config", "/rag/model", "/rag/converter"],
+        "Start Indexing must POST /config, /rag/model, /rag/converter in sequence"
+      );
+      assert.ok(postUrls1.includes("/sync/stream"), "Start Indexing must open /sync/stream");
+
+      // Clean up after Part 1
+      sidebar.setOnboardingStage("ready");
+      sidebar.cleanupOnboardingResources();
+      while (onboardingHost.firstChild) onboardingHost.removeChild(onboardingHost.firstChild);
+      const leftoverModal1 = env.document.getElementById("zocrates-info-modal-overlay");
+      if (leftoverModal1) leftoverModal1.remove();
+
+      // --- Part 2: Skip Indexing exit (skipIndexing = true) ---
+      const io2 = makeMockIOUtils();
+      global.IOUtils = io2;
+      const postUrls2 = [];
+      let savedKey2 = null;
+      env.zotero.Zocrates.saveStoredApiKey = (k, v) => { savedKey2 = { k, v }; };
+      env.zotero.Zocrates.loadStoredApiKey = () => "";
+
+      global.fetch = async (url, opts) => {
+        const u = String(url);
+        if (opts && opts.method === "POST") {
+          postUrls2.push(u.replace(/^https?:\/\/[^/]+/, ""));
+        }
+        return { ok: true, status: 200, json: async () => ({ status: "ok" }) };
+      };
+
+      sidebar.setBackendReadyForChat(false);
+      sidebar.setOnboardingStage("configure");
+      sidebar.enterOnboardingConfigure();
+      const w2 = sidebar.getOnboardingWizardRefs();
+      w2.openrouterKey.value = "sk-or-user-typed-2";
+
+      w2.skipIndexingBtn.dispatchEvent("click");
+      await flush();
+      await flush();
+
+      assert.deepStrictEqual(savedKey2, { k: "openrouter_api_key", v: "sk-or-user-typed-2" });
+      assert.deepStrictEqual(
+        postUrls2,
+        ["/config", "/rag/model", "/rag/converter"],
+        "Skip Indexing must ALSO POST /config, /rag/model, /rag/converter and NEVER call /sync/stream"
+      );
+      assert.strictEqual(sidebar.getEffectiveOnboardingStage(), "ready", "stage must become ready after Skip Indexing");
+      assert.strictEqual(sidebar.getBackendReadyForChat(), true, "chat gate must be lifted on Skip Indexing");
+      assert.strictEqual(env.document.getElementById("onboarding-wizard-card"), null, "wizard card must be torn down");
+      assert.strictEqual(env.document.getElementById("onboarding-process-card"), null, "process card must never open");
+
+      const stateOnDisk = await sidebar.readOnboardingStateFile();
+      assert.strictEqual(stateOnDisk.stage, "ready");
+      assert.strictEqual(stateOnDisk.meta.process_skipped, true);
+      assert.strictEqual(stateOnDisk.meta.process_aborted, false);
+      assert.strictEqual(stateOnDisk.meta.process_done_at, null);
+      assert.strictEqual(stateOnDisk.meta.preset_applied, "recommended");
+
+      // Verify skip-indexing info modal is shown with exact title, body, 3 bullets, and closing line
+      const modalOverlay = env.document.getElementById("zocrates-info-modal-overlay");
+      assert.ok(modalOverlay, "Skip-indexing info modal must be shown");
+      const modalText = modalOverlay.textContent;
+      assert.ok(modalText.includes("Setup saved \u2014 library indexing skipped"), "modal title must match");
+      assert.ok(
+        modalText.includes("Your configuration has been saved. Your library has not been converted or indexed yet, so library search will not find papers until indexing runs."),
+        "modal body intro must match"
+      );
+      // Stacked layout: bullet header and value live on separate lines (separate divs).
+      // (mock querySelectorAll lacks *= attribute support — filter by style text instead)
+      const stackedRows = Array.from(modalOverlay.querySelectorAll("div")).filter(
+        (d) => d.style && typeof d.style.cssText === "string" && d.style.cssText.includes("margin-left: 14px")
+      );
+      assert.strictEqual(stackedRows.length, 3, "three stacked value lines must exist");
+      assert.ok(
+        modalText.includes("Convert selected items:") && modalText.includes("right-click item(s) \u2192 Zocrates \u2192 Convert with\u2026"),
+        "bullet 1 (header + stacked value) must match"
+      );
+      assert.ok(
+        modalText.includes("Index your whole library later:") && modalText.includes("\u22ee menu \u2192 Update Library Index"),
+        "bullet 2 (header + stacked value) must match"
+      );
+      assert.ok(
+        modalText.includes("Change models or add API keys:") && modalText.includes("\u22ee menu \u2192 Zocrates Settings"),
+        "bullet 3 (header + stacked value) must match"
+      );
+      // Each stacked value line must sit in a different parent row (separate-line layout).
+      assert.notStrictEqual(stackedRows[0].parentElement, stackedRows[1].parentElement, "bullets must render as separate rows");
+      assert.notStrictEqual(stackedRows[1].parentElement, stackedRows[2].parentElement, "bullets must render as separate rows");
+      assert.ok(
+        modalText.includes("You can explore the plugin now and index whenever you are ready."),
+        "closing line must match"
+      );
+      modalOverlay.remove();
+    } finally {
+      const leftoverModal = env.document.getElementById("zocrates-info-modal-overlay");
+      if (leftoverModal) leftoverModal.remove();
+      while (onboardingHost.firstChild) onboardingHost.removeChild(onboardingHost.firstChild);
+      global.IOUtils = prevIO;
+      global.fetch = prevFetch;
+      if (env.zotero.Zocrates) {
+        env.zotero.Zocrates.loadStoredApiKey = prevLoadKey;
+        env.zotero.Zocrates.saveStoredApiKey = prevSaveKey;
+      }
+      sidebar.setBackendReadyForChat(prevReady);
+      sidebar.setOnboardingStage("ready");
+      sidebar.cleanupOnboardingResources();
+    }
+  });
+
+  await testAsync("API-key warning modal (d): appears BEFORE any fetch when OpenRouter dependency exists and no key; 'Go Back' aborts with zero fetches; 'Continue Anyway' proceeds", async () => {
+    const onboardingHost = env.document.getElementById("onboarding-container");
+    const prevIO = global.IOUtils;
+    const prevFetch = global.fetch;
+    const prevLoadKey = env.zotero.Zocrates && env.zotero.Zocrates.loadStoredApiKey;
+    const prevSaveKey = env.zotero.Zocrates && env.zotero.Zocrates.saveStoredApiKey;
+
+    try {
+      arrangeDataDir();
+      const io = makeMockIOUtils();
+      global.IOUtils = io;
+      env.zotero.Zocrates.loadStoredApiKey = () => "";
+      env.zotero.Zocrates.saveStoredApiKey = () => {
+        throw new Error("saveStoredApiKey must not be called when key is empty");
+      };
+      env.zotero.Prefs.clear("extensions.zocrates.openrouter_api_key", true);
+      env.zotero.Prefs.clear("extensions.zocrates.openRouterApiKey", true);
+
+      const postUrls = [];
+      global.fetch = async (url, opts) => {
+        const u = String(url);
+        if (opts && opts.method === "POST") {
+          postUrls.push(u.replace(/^https?:\/\/[^/]+/, ""));
+        }
+        return { ok: true, status: 200, json: async () => ({ status: "ok" }) };
+      };
+
+      while (onboardingHost.firstChild) onboardingHost.removeChild(onboardingHost.firstChild);
+      sidebar.setOnboardingStage("configure");
+      sidebar.enterOnboardingConfigure();
+      const w = sidebar.getOnboardingWizardRefs();
+      w.openrouterKey.value = "   "; // empty/whitespace key
+
+      // 1. Click primary "Save & Start Indexing" (skipIndexing=false) -> modal appears BEFORE any fetch
+      const finishPromise1 = sidebar.finishOnboardingConfigure(false);
+      const modal1 = env.document.getElementById("zocrates-info-modal-overlay");
+      assert.ok(modal1, "warning modal must appear synchronously before any POST fetch");
+      assert.strictEqual(postUrls.length, 0, "zero POST fetches while modal is awaiting user choice");
+      assert.strictEqual(w.saveBtn.disabled, true, "primary button disabled while modal is open");
+      assert.strictEqual(w.skipIndexingBtn.disabled, true, "secondary button disabled while modal is open");
+      assert.ok(modal1.textContent.includes("OpenRouter API Key Missing"), "modal title must match");
+      assert.ok(
+        modal1.textContent.includes("This configuration uses OpenRouter services. Those features will not work until you add an API key in Zocrates Settings (\u22ee menu). Free models also require a key. Indexing may fail until a key is configured."),
+        "skipIndexing=false modal body must include 'Indexing may fail until a key is configured.'"
+      );
+
+      // Click "Go Back" -> zero fetches, buttons re-enabled, wizard stays open on configure
+      const goBackBtn = modal1.querySelector(".onboarding-modal-go-back-btn");
+      assert.ok(goBackBtn, "Go Back button must exist");
+      goBackBtn.dispatchEvent("click");
+      await finishPromise1;
+
+      assert.strictEqual(postUrls.length, 0, "Go Back must result in zero POST fetches");
+      assert.strictEqual(io._files.has(stateFile), false, "Go Back must not write onboarding_state.json");
+      assert.strictEqual(sidebar.getEffectiveOnboardingStage(), "configure", "stage must remain configure");
+      assert.ok(env.document.getElementById("onboarding-wizard-card"), "wizard card must remain open");
+      assert.strictEqual(w.saveBtn.disabled, false, "primary button must be re-enabled after Go Back");
+      assert.strictEqual(w.skipIndexingBtn.disabled, false, "secondary button must be re-enabled after Go Back");
+
+      // 2. Click secondary "Save & Skip Indexing" (skipIndexing=true) -> modal omits indexing failure suffix; "Continue Anyway" proceeds
+      const finishPromise2 = sidebar.finishOnboardingConfigure(true);
+      const modal2 = env.document.getElementById("zocrates-info-modal-overlay");
+      assert.ok(modal2, "warning modal must appear for Skip Indexing when key is missing");
+      assert.ok(!modal2.textContent.includes("Indexing may fail until a key is configured."), "skipIndexing=true modal body must omit indexing suffix");
+      assert.strictEqual(postUrls.length, 0, "still zero POST fetches before Continue Anyway");
+
+      const continueBtn = modal2.querySelector(".onboarding-modal-continue-btn");
+      assert.ok(continueBtn, "Continue Anyway button must exist");
+      continueBtn.dispatchEvent("click");
+      await finishPromise2;
+
+      assert.deepStrictEqual(
+        postUrls,
+        ["/config", "/rag/model", "/rag/converter"],
+        "Continue Anyway must proceed with the full POST chain"
+      );
+      assert.strictEqual(sidebar.getEffectiveOnboardingStage(), "ready");
+    } finally {
+      const leftoverModal = env.document.getElementById("zocrates-info-modal-overlay");
+      if (leftoverModal) leftoverModal.remove();
+      while (onboardingHost.firstChild) onboardingHost.removeChild(onboardingHost.firstChild);
+      global.IOUtils = prevIO;
+      global.fetch = prevFetch;
+      if (env.zotero.Zocrates) {
+        env.zotero.Zocrates.loadStoredApiKey = prevLoadKey;
+        env.zotero.Zocrates.saveStoredApiKey = prevSaveKey;
+      }
+      sidebar.setOnboardingStage("ready");
+      sidebar.cleanupOnboardingResources();
+    }
+  });
+
+  await testAsync("API-key warning modal (e): stored key via loadStoredApiKey suppresses the warning and POSTs proceed", async () => {
+    const onboardingHost = env.document.getElementById("onboarding-container");
+    const prevIO = global.IOUtils;
+    const prevFetch = global.fetch;
+    const prevLoadKey = env.zotero.Zocrates && env.zotero.Zocrates.loadStoredApiKey;
+
+    try {
+      arrangeDataDir();
+      global.IOUtils = makeMockIOUtils();
+      env.zotero.Zocrates.loadStoredApiKey = (keyName) => (keyName === "openrouter_api_key" ? "sk-or-stored-key" : "");
+
+      const postUrls = [];
+      let warningModalSeenDuringFetch = false;
+      global.fetch = async (url, opts) => {
+        const u = String(url);
+        if (opts && opts.method === "POST") {
+          const m = env.document.getElementById("zocrates-info-modal-overlay");
+          if (m && m.textContent.includes("OpenRouter API Key Missing")) {
+            warningModalSeenDuringFetch = true;
+          }
+          postUrls.push(u.replace(/^https?:\/\/[^/]+/, ""));
+        }
+        return { ok: true, status: 200, json: async () => ({ status: "ok" }) };
+      };
+
+      while (onboardingHost.firstChild) onboardingHost.removeChild(onboardingHost.firstChild);
+      sidebar.setOnboardingStage("configure");
+      sidebar.enterOnboardingConfigure();
+      const w = sidebar.getOnboardingWizardRefs();
+      w.openrouterKey.value = ""; // input is blank, but stored key exists
+
+      await sidebar.finishOnboardingConfigure(true);
+
+      assert.strictEqual(warningModalSeenDuringFetch, false, "stored key must suppress the missing-key warning modal");
+      assert.deepStrictEqual(
+        postUrls,
+        ["/config", "/rag/model", "/rag/converter"],
+        "POST chain must proceed without warning when stored key exists"
+      );
+      assert.strictEqual(sidebar.getEffectiveOnboardingStage(), "ready");
+    } finally {
+      const leftoverModal = env.document.getElementById("zocrates-info-modal-overlay");
+      if (leftoverModal) leftoverModal.remove();
+      while (onboardingHost.firstChild) onboardingHost.removeChild(onboardingHost.firstChild);
+      global.IOUtils = prevIO;
+      global.fetch = prevFetch;
+      if (env.zotero.Zocrates) {
+        env.zotero.Zocrates.loadStoredApiKey = prevLoadKey;
+      }
+      sidebar.setOnboardingStage("ready");
+      sidebar.cleanupOnboardingResources();
+    }
+  });
+
+  await testAsync("API-key warning modal (f): local-only selection (offline preset, local provider, local embeddings, VLM disabled) with no key triggers no warning", async () => {
+    const onboardingHost = env.document.getElementById("onboarding-container");
+    const prevIO = global.IOUtils;
+    const prevFetch = global.fetch;
+    const prevLoadKey = env.zotero.Zocrates && env.zotero.Zocrates.loadStoredApiKey;
+
+    try {
+      arrangeDataDir();
+      global.IOUtils = makeMockIOUtils();
+      env.zotero.Zocrates.loadStoredApiKey = () => "";
+      env.zotero.Prefs.clear("extensions.zocrates.openrouter_api_key", true);
+      env.zotero.Prefs.clear("extensions.zocrates.openRouterApiKey", true);
+
+      // Verify hasOpenRouterDependency helper directly across combinations
+      assert.strictEqual(
+        sidebar.hasOpenRouterDependency({
+          preset: "offline",
+          provider: "ollama",
+          embedMode: "local",
+          vlmChoice: "disable",
+        }),
+        false,
+        "offline local-only configuration must have no OpenRouter dependency"
+      );
+      assert.strictEqual(
+        sidebar.hasOpenRouterDependency({
+          preset: "recommended",
+          provider: "ollama",
+          embedMode: "local",
+          vlmChoice: "disable",
+        }),
+        true,
+        "recommended preset with provider/embeddings/VLM switched to local/disabled still has OpenRouter dependency via preset llmConfig"
+      );
+      assert.strictEqual(
+        sidebar.hasOpenRouterDependency({
+          preset: "offline",
+          provider: "openrouter_llm",
+          embedMode: "local",
+          vlmChoice: "disable",
+        }),
+        true,
+        "provider === 'openrouter_llm' creates OpenRouter dependency"
+      );
+      assert.strictEqual(
+        sidebar.hasOpenRouterDependency({
+          preset: "offline",
+          provider: "ollama",
+          embedMode: "cloud",
+          cloudEmbeddingModel: "openrouter/mongodb/voyage-4",
+          vlmChoice: "disable",
+        }),
+        true,
+        "cloud embedding with openrouter slug creates OpenRouter dependency"
+      );
+      assert.strictEqual(
+        sidebar.hasOpenRouterDependency({
+          preset: "offline",
+          provider: "ollama",
+          embedMode: "local",
+          vlmChoice: "openrouter",
+        }),
+        true,
+        "vlmChoice === 'openrouter' creates OpenRouter dependency"
+      );
+
+      const postUrls = [];
+      global.fetch = async (url, opts) => {
+        const u = String(url);
+        if (opts && opts.method === "POST") {
+          postUrls.push(u.replace(/^https?:\/\/[^/]+/, ""));
+        }
+        if (u.endsWith("/llm/decision_tool/status")) {
+          return { ok: true, status: 200, json: async () => ({ tool_installed: true, server_running: true }) };
+        }
+        return { ok: true, status: 200, json: async () => ({ status: "ok" }) };
+      };
+
+      while (onboardingHost.firstChild) onboardingHost.removeChild(onboardingHost.firstChild);
+      sidebar.setOnboardingStage("configure");
+      sidebar.enterOnboardingConfigure();
+      sidebar.applyOnboardingPreset("offline");
+      const w = sidebar.getOnboardingWizardRefs();
+      w.modelInput.value = "llama3.3:70b";
+      w.openrouterKey.value = "";
+
+      await sidebar.finishOnboardingConfigure(true);
+
+      assert.deepStrictEqual(
+        postUrls,
+        ["/config", "/rag/model", "/rag/converter"],
+        "Offline local-only selection must proceed directly with POSTs without any missing-key modal"
+      );
+      assert.strictEqual(sidebar.getEffectiveOnboardingStage(), "ready");
+    } finally {
+      const leftoverModal = env.document.getElementById("zocrates-info-modal-overlay");
+      if (leftoverModal) leftoverModal.remove();
+      while (onboardingHost.firstChild) onboardingHost.removeChild(onboardingHost.firstChild);
+      global.IOUtils = prevIO;
+      global.fetch = prevFetch;
+      if (env.zotero.Zocrates) {
+        env.zotero.Zocrates.loadStoredApiKey = prevLoadKey;
+      }
+      sidebar.setOnboardingStage("ready");
+      sidebar.cleanupOnboardingResources();
+    }
+  });
+
+  await testAsync("API-key warning modal (regression): recommended preset + provider ollama + local embeddings + VLM disabled triggers warning because preset llmConfig carries OpenRouter slugs", async () => {
+    const onboardingHost = env.document.getElementById("onboarding-container");
+    const prevIO = global.IOUtils;
+    const prevFetch = global.fetch;
+    const prevLoadKey = env.zotero.Zocrates && env.zotero.Zocrates.loadStoredApiKey;
+
+    try {
+      arrangeDataDir();
+      const io = makeMockIOUtils();
+      global.IOUtils = io;
+      env.zotero.Zocrates.loadStoredApiKey = () => "";
+      env.zotero.Prefs.clear("extensions.zocrates.openrouter_api_key", true);
+      env.zotero.Prefs.clear("extensions.zocrates.openRouterApiKey", true);
+
+      const postUrls = [];
+      global.fetch = async (url, opts) => {
+        const u = String(url);
+        if (opts && opts.method === "POST") {
+          postUrls.push(u.replace(/^https?:\/\/[^/]+/, ""));
+        }
+        return { ok: true, status: 200, json: async () => ({ status: "ok" }) };
+      };
+
+      while (onboardingHost.firstChild) onboardingHost.removeChild(onboardingHost.firstChild);
+      sidebar.setOnboardingStage("configure");
+      sidebar.enterOnboardingConfigure();
+      sidebar.applyOnboardingPreset("recommended");
+      const w = sidebar.getOnboardingWizardRefs();
+      w.providerSelect.value = "ollama";
+      w.modelInput.value = "llama3.3:70b";
+      w.synthesisModelInput.value = "";
+      w.embedLocal.checked = true;
+      w.embedCloud.checked = false;
+      w.vlmDisable.checked = true;
+      w.vlmOpenrouter.checked = false;
+      w.vlmOllama.checked = false;
+      w.openrouterKey.value = "";
+
+      const selection = sidebar.collectOnboardingSelections();
+      assert.strictEqual(selection.preset, "recommended");
+      assert.strictEqual(selection.provider, "ollama");
+      assert.strictEqual(selection.embedMode, "local");
+      assert.strictEqual(selection.vlmChoice, "disable");
+      assert.strictEqual(
+        sidebar.hasOpenRouterDependency(selection),
+        true,
+        "recommended preset must be OpenRouter-dependent via preset llmConfig even when main provider, embeddings, and VLM are switched to local/disabled"
+      );
+
+      const finishPromise = sidebar.finishOnboardingConfigure(true);
+      const modal = env.document.getElementById("zocrates-info-modal-overlay");
+      assert.ok(modal, "missing-key warning modal must be shown");
+      assert.ok(modal.textContent.includes("OpenRouter API Key Missing"), "modal title must match");
+      assert.strictEqual(postUrls.length, 0, "zero POST fetches before user decision");
+
+      const goBackBtn = modal.querySelector(".onboarding-modal-go-back-btn");
+      assert.ok(goBackBtn, "Go Back button must exist");
+      goBackBtn.dispatchEvent("click");
+      await finishPromise;
+
+      assert.strictEqual(postUrls.length, 0, "Go Back must abort save with zero POSTs");
+      assert.strictEqual(sidebar.getEffectiveOnboardingStage(), "configure");
+    } finally {
+      const leftoverModal = env.document.getElementById("zocrates-info-modal-overlay");
+      if (leftoverModal) leftoverModal.remove();
+      while (onboardingHost.firstChild) onboardingHost.removeChild(onboardingHost.firstChild);
+      global.IOUtils = prevIO;
+      global.fetch = prevFetch;
+      if (env.zotero.Zocrates) {
+        env.zotero.Zocrates.loadStoredApiKey = prevLoadKey;
+      }
+      sidebar.setOnboardingStage("ready");
+      sidebar.cleanupOnboardingResources();
+    }
+  });
+
+  await testAsync("finishOnboardingConfigure error handling: HTTP failure sets 'Save failed: …', re-enables both buttons, and stays on CONFIGURE without broadcasting", async () => {
+    const onboardingHost = env.document.getElementById("onboarding-container");
+    const prevIO = global.IOUtils;
+    const prevFetch = global.fetch;
+    const prevLoadKey = env.zotero.Zocrates && env.zotero.Zocrates.loadStoredApiKey;
+
+    try {
+      arrangeDataDir();
+      const io = makeMockIOUtils();
+      global.IOUtils = io;
+      env.zotero.Zocrates.loadStoredApiKey = () => "sk-or-stored";
+
+      global.fetch = async (url, opts) => {
+        const u = String(url);
+        if (opts && opts.method === "POST" && u.endsWith("/rag/model")) {
+          return { ok: false, status: 500, json: async () => ({ detail: "boom" }) };
+        }
+        return { ok: true, status: 200, json: async () => ({ status: "ok" }) };
+      };
+
+      while (onboardingHost.firstChild) onboardingHost.removeChild(onboardingHost.firstChild);
+      sidebar.setOnboardingStage("configure");
+      sidebar.enterOnboardingConfigure();
+      const w = sidebar.getOnboardingWizardRefs();
+
+      const stagesBroadcast = [];
+      const unsub = env.zotero.Zocrates.addOnboardingStageListener((s) => stagesBroadcast.push(s));
+
+      await sidebar.finishOnboardingConfigure(true);
+      unsub();
+
+      assert.ok(w.status.textContent.startsWith("Save failed: "), "status must show Save failed message");
+      assert.strictEqual(w.status.classList.contains("fail"), true);
+      assert.strictEqual(w.saveBtn.disabled, false, "primary button must be re-enabled on failure");
+      assert.strictEqual(w.skipIndexingBtn.disabled, false, "secondary button must be re-enabled on failure");
+      assert.strictEqual(sidebar.getEffectiveOnboardingStage(), "configure", "stage must remain configure");
+      assert.strictEqual(io._files.has(stateFile), false, "no state file write on save failure");
+      assert.deepStrictEqual(stagesBroadcast, [], "no ready/process stage broadcast on save failure");
+    } finally {
+      while (onboardingHost.firstChild) onboardingHost.removeChild(onboardingHost.firstChild);
+      global.IOUtils = prevIO;
+      global.fetch = prevFetch;
+      if (env.zotero.Zocrates) {
+        env.zotero.Zocrates.loadStoredApiKey = prevLoadKey;
+      }
+      sidebar.setOnboardingStage("ready");
+      sidebar.cleanupOnboardingResources();
+    }
   });
 }
 
