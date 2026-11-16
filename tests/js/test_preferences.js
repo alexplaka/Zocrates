@@ -1538,6 +1538,249 @@ async function runTests() {
     api.updateLlmModelMetadata("nonexistent-model");
     assert.strictEqual(metadataBox.style.display, "none");
   });
+
+  // Test 30: no_key catalog response materializes the configured model option
+  await testAsync("fetchOpenRouterModels: no_key response appends and selects the configured model option", async () => {
+    resetSpies();
+
+    const modelSelect = env.document.getElementById("llm-model-select");
+    // Simulate the pristine static XHTML placeholder state (no catalog rendering yet).
+    modelSelect.innerHTML = "";
+
+    fetchHandler = async (url) => {
+      if (String(url).includes("/llm/openrouter_models")) {
+        return { ok: true, status: 200, json: async () => ({ status: "no_key", models: [] }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ status: "ok" }) };
+    };
+
+    let thrown = null;
+    try {
+      await api.fetchOpenRouterModels("llm", false, "openrouter/nvidia/nemotron-3.5-lightning:free");
+    } catch (err) {
+      thrown = err;
+    }
+
+    assert.strictEqual(thrown, null, "no_key catalog response must not throw");
+    assert.strictEqual(modelSelect.options.length, 1, "Exactly one fallback option must be appended");
+    assert.strictEqual(
+      modelSelect.options[0].value,
+      "openrouter/nvidia/nemotron-3.5-lightning:free",
+      "Fallback option value must equal the configured model"
+    );
+    assert.strictEqual(
+      modelSelect.options[0].textContent,
+      "nvidia/nemotron-3.5-lightning:free",
+      "Fallback option label must be the slug without the openrouter/ prefix"
+    );
+    assert.strictEqual(
+      modelSelect.value,
+      "openrouter/nvidia/nemotron-3.5-lightning:free",
+      "Fallback option must be selected"
+    );
+  });
+
+  // Test 31: no_key for all three catalogs leaves every card's dirty state clean
+  await testAsync("fetchLlmConfig: no_key catalogs keep LLM, embedding and verification dirty state clean", async () => {
+    resetSpies();
+
+    const llmModelSelect = env.document.getElementById("llm-model-select");
+    const embeddingModelSelect = env.document.getElementById("embedding-model-select");
+    const verificationModelSelect = env.document.getElementById("verification-model-select");
+    llmModelSelect.innerHTML = "";
+    embeddingModelSelect.innerHTML = "";
+    verificationModelSelect.innerHTML = "";
+
+    const llmApplyBtn = env.document.getElementById("llm-apply-btn");
+    const embeddingApplyBtn = env.document.getElementById("embedding-apply-btn");
+    const verificationApplyBtn = env.document.getElementById("verification-apply-btn");
+    const llmWarning = env.document.getElementById("llm-unsaved-warning");
+    const embeddingWarning = env.document.getElementById("embedding-unsaved-warning");
+    const verificationWarning = env.document.getElementById("verification-unsaved-warning");
+
+    // Start dirty so the assertions prove the checks actually re-evaluate.
+    llmApplyBtn.disabled = false;
+    embeddingApplyBtn.disabled = false;
+    verificationApplyBtn.disabled = false;
+    llmWarning.style.display = "block";
+    embeddingWarning.style.display = "block";
+    verificationWarning.style.display = "block";
+
+    fetchHandler = async (url) => {
+      const urlStr = String(url);
+      if (urlStr.includes("/llm/openrouter_models")) {
+        return { ok: true, status: 200, json: async () => ({ status: "no_key", models: [] }) };
+      }
+      if (urlStr.includes("/config")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            status: "success",
+            llm_provider: "openrouter_llm",
+            llm_model: "openrouter/nvidia/nemotron-3.5-lightning:free",
+            embedding_provider: "cloud",
+            embedding_model: "openrouter/nvidia/nemotron-3-embed-1b:free",
+            citation_verification_enabled: true,
+            citation_verification_provider: "openrouter",
+            citation_verification_model: "typesafe/jev-1.14",
+            citation_verification_threshold: 0.75,
+            citation_verification_auto_start_local: true,
+            has_openrouter_key: false,
+          }),
+        };
+      }
+      return { ok: true, status: 200, json: async () => ({ status: "ok" }) };
+    };
+
+    await api.fetchLlmConfig();
+
+    assert.strictEqual(
+      llmModelSelect.value,
+      "openrouter/nvidia/nemotron-3.5-lightning:free",
+      "LLM select must reflect the configured model without a catalog"
+    );
+    assert.strictEqual(llmApplyBtn.disabled, true, "LLM Apply must be disabled when nothing changed");
+    assert.strictEqual(llmWarning.style.display, "none", "LLM unsaved warning must be hidden");
+
+    assert.strictEqual(
+      embeddingModelSelect.value,
+      "openrouter/nvidia/nemotron-3-embed-1b:free",
+      "Embedding select must reflect the configured model without a catalog"
+    );
+    assert.strictEqual(embeddingApplyBtn.disabled, true, "Embedding Apply must be disabled when nothing changed");
+    assert.strictEqual(embeddingWarning.style.display, "none", "Embedding unsaved warning must be hidden");
+
+    assert.strictEqual(
+      verificationModelSelect.value,
+      "typesafe/jev-1.14",
+      "Verification select must reflect the configured model without a catalog"
+    );
+    assert.strictEqual(verificationApplyBtn.disabled, true, "Verification Apply must be disabled when nothing changed");
+    assert.strictEqual(verificationWarning.style.display, "none", "Verification unsaved warning must be hidden");
+  });
+
+  // Test 32: verification comparator is prefix-tolerant like the LLM card
+  await testAsync("updateVerificationDirtyState: openrouter/ prefix difference alone does not mark verification dirty", async () => {
+    resetSpies();
+
+    const verificationModelSelect = env.document.getElementById("verification-model-select");
+    const verificationApplyBtn = env.document.getElementById("verification-apply-btn");
+    const verificationWarning = env.document.getElementById("verification-unsaved-warning");
+
+    fetchHandler = async (url) => {
+      const urlStr = String(url);
+      if (urlStr.includes("/status")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            status: "ok",
+            citation_verification_enabled: true,
+            citation_verification_provider: "openrouter",
+            citation_verification_model: "openrouter/typesafe/jev-1.14",
+            citation_verification_threshold: 0.60,
+            citation_verification_auto_start_local: true,
+          }),
+        };
+      }
+      return { ok: true, status: 200, json: async () => ({ status: "ok" }) };
+    };
+
+    await api.fetchStatus();
+    assert.strictEqual(
+      verificationModelSelect.value,
+      "openrouter/typesafe/jev-1.14",
+      "fetchStatus must apply the persisted verification model"
+    );
+
+    // A catalog option without the openrouter/ prefix must still count as unchanged.
+    verificationModelSelect.value = "typesafe/jev-1.14";
+    api.updateVerificationDirtyState();
+
+    assert.strictEqual(verificationApplyBtn.disabled, true, "Prefix-only difference must not enable Apply");
+    assert.strictEqual(verificationWarning.style.display, "none", "Prefix-only difference must not show unsaved warning");
+
+    // A genuinely different model still marks the card dirty.
+    verificationModelSelect.value = "upstage/solar-decide";
+    api.updateVerificationDirtyState();
+
+    assert.strictEqual(verificationApplyBtn.disabled, false, "A different verification model must enable Apply");
+    assert.strictEqual(verificationWarning.style.display, "block", "A different verification model must show the warning");
+  });
+
+  // Test 33: ok-path catalog fetch replaces the no-key fallback option
+  await testAsync("fetchOpenRouterModels: ok-path catalog rebuild replaces the no-key fallback option", async () => {
+    resetSpies();
+
+    const llmModelSelect = env.document.getElementById("llm-model-select");
+    const embeddingModelSelect = env.document.getElementById("embedding-model-select");
+    const modeSelect = env.document.getElementById("embedding-mode-select");
+    llmModelSelect.innerHTML = "";
+    embeddingModelSelect.innerHTML = "";
+
+    const fallbackLlm = "openrouter/nvidia/nemotron-3.5-lightning:free";
+    const fallbackEmbedding = "openrouter/nvidia/nemotron-3-embed-1b:free";
+
+    let catalogAvailable = false;
+    fetchHandler = async (url) => {
+      if (!String(url).includes("/llm/openrouter_models")) {
+        return { ok: true, status: 200, json: async () => ({ status: "ok" }) };
+      }
+      if (!catalogAvailable) {
+        return { ok: true, status: 200, json: async () => ({ status: "no_key", models: [] }) };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          status: "success",
+          models: [
+            { id: "anthropic/claude-3.5-sonnet", name: "Anthropic: Claude 3.5 Sonnet", context_length: 200000 },
+            { id: "google/gemini-3.8-flash", name: "Google: Gemini 3.8 Flash", context_length: 1000000 },
+          ],
+        }),
+      };
+    };
+
+    // 1. No-key: fallback options materialized.
+    await api.fetchOpenRouterModels("llm", false, fallbackLlm);
+    assert.strictEqual(llmModelSelect.options.length, 1);
+    assert.strictEqual(llmModelSelect.options[0].value, fallbackLlm);
+
+    modeSelect.value = "cloud";
+    await api.fetchOpenRouterModels("embedding", false, fallbackEmbedding);
+    assert.strictEqual(embeddingModelSelect.options.length, 1);
+    assert.strictEqual(embeddingModelSelect.options[0].value, fallbackEmbedding);
+
+    // 2. Catalog becomes available: options are rebuilt from the catalog.
+    catalogAvailable = true;
+    await api.fetchOpenRouterModels("llm", true, "anthropic/claude-3.5-sonnet");
+    await api.fetchOpenRouterModels("embedding", true, "anthropic/claude-3.5-sonnet");
+
+    const llmOptionValues = llmModelSelect.querySelectorAll("option").map((o) => o.value);
+    assert.deepStrictEqual(
+      llmOptionValues.slice().sort(),
+      ["anthropic/claude-3.5-sonnet", "google/gemini-3.8-flash"],
+      "LLM select must be rebuilt from the catalog only (fallback option replaced, not duplicated)"
+    );
+    assert.ok(
+      !llmOptionValues.includes(fallbackLlm),
+      "No-key fallback option must not survive a successful catalog fetch"
+    );
+
+    const embeddingOptionValues = embeddingModelSelect.options.map((o) => o.value);
+    assert.deepStrictEqual(
+      embeddingOptionValues.slice().sort(),
+      ["anthropic/claude-3.5-sonnet", "google/gemini-3.8-flash"],
+      "Embedding select must be rebuilt from the catalog only"
+    );
+    assert.strictEqual(
+      embeddingModelSelect.options[embeddingModelSelect.selectedIndex].value,
+      "anthropic/claude-3.5-sonnet",
+      "Configured embedding model present in the catalog must be selected"
+    );
+  });
   } finally {
     global.fetch = origFetch;
     global.IOUtils = origIOUtils;

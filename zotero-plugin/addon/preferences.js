@@ -295,7 +295,7 @@ function initZocratesPreferences() {
 
     const enabledMatches = (currentEnabled === savedVerificationEnabled);
     const providerMatches = (currentProvider === savedVerificationProvider);
-    const modelMatches = (currentModel === savedVerificationModel);
+    const modelMatches = modelsMatch(currentModel, savedVerificationModel);
     const thresholdMatches = Math.abs(currentThreshold - savedVerificationThreshold) < 0.001;
     const autoStartMatches = (currentAutoStart === savedVerificationAutoStart);
 
@@ -1859,6 +1859,40 @@ function initZocratesPreferences() {
     renderVlmDropdown(vlmBackupModelSelect, vlmBackupMetadataBox, bak, "openrouter/qwen/qwen3.7-flash");
   }
 
+  // Resolve the model <select> a given catalog target type renders into.
+  function getModelSelectForType(targetType) {
+    if (targetType === "embedding") return embeddingModelSelect;
+    if (targetType === "decision") return verificationModelSelect;
+    return llmModelSelect;
+  }
+
+  // no-key fallback: reflect the persisted config model so dirty checks pass — mirrors renderVlmDropdown pattern
+  function materializeConfiguredModelOption(targetType, desiredModel) {
+    if (!desiredModel) return;
+    const selectElem = getModelSelectForType(targetType);
+    if (!selectElem) return;
+    const desired = String(desiredModel).trim();
+    if (!desired) return;
+
+    const opts = (selectElem.options && selectElem.options.length > 0) ? selectElem.options : selectElem.children;
+    if (opts) {
+      for (let i = 0; i < opts.length; i++) {
+        const val = opts[i].value;
+        if (val === desired || val === `openrouter/${desired}` || `openrouter/${val}` === desired) {
+          selectElem.selectedIndex = i;
+          selectElem.value = val;
+          return;
+        }
+      }
+    }
+
+    const opt = document.createElementNS("http://www.w3.org/1999/xhtml", "option");
+    opt.value = desired;
+    opt.textContent = desired.replace(/^openrouter\//i, "");
+    selectElem.appendChild(opt);
+    selectElem.value = desired;
+  }
+
   // Fetch OpenRouter model catalog for dropdown population
   async function fetchOpenRouterModels(targetType = "llm", forceRefresh = false, activeModelToSelect = null) {
     const backendUrl = getBackendUrl();
@@ -1870,7 +1904,13 @@ function initZocratesPreferences() {
       });
       if (!res.ok) return;
       const data = await res.json();
-      if ((data.status !== "ok" && data.status !== "success") || !Array.isArray(data.models)) return;
+      if ((data.status !== "ok" && data.status !== "success") || !Array.isArray(data.models)) {
+        // No catalog (e.g. no OpenRouter key): materialize the configured model so the
+        // select matches the saved config value and dirty checks stay clean. The ok-path
+        // render functions rebuild the option list, replacing this fallback option.
+        materializeConfiguredModelOption(targetType, activeModelToSelect);
+        return;
+      }
 
       if (targetType === "embedding") {
         rawEmbeddingModels = data.models;
@@ -3304,6 +3344,7 @@ function initZocratesPreferences() {
     copyTextToClipboard,
     updateLlmUiVisibility,
     updateVerificationModelMetadata,
+    updateVerificationDirtyState,
     updateLlmModelMetadata,
     updateEmbeddingModelMetadata,
     updateVlmModelMetadata,
