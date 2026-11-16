@@ -116,6 +116,7 @@ var BatchConverter = {
       case "datalab":
         return "Datalab (Cloud)";
       case "docling_local":
+      case "docling": // legacy alias
         return "Docling (Local)";
       case "markitdown":
         return "MarkItDown (Local)";
@@ -811,10 +812,16 @@ var BatchConverter = {
 
       if (eligibleCount === 0 && !force) {
         if (typeof Services !== "undefined" && Services.prompt) {
+          let alertText = `All ${targetDocs} selected document(s) are already converted.\n\nNo conversion is needed.`;
+          let nonPdfConverted = estimate ? (estimate.non_pdf_already_converted_count || 0) : 0;
+          if (converterId === "datalab" && nonPdfConverted > 0) {
+            let fallbackLabel = this.getConverterLabel(estimate.datalab_fallback_id || "markitdown");
+            alertText += `\n\nNote: Datalab (Cloud) conversion applies to PDF files only. HTML snapshots and other non-PDF attachments are converted with the local fallback (${fallbackLabel}), which already converted ${nonPdfConverted} of the selected document(s).`;
+          }
           Services.prompt.alert(
             options.window || null,
             "Zocrates Document Conversion",
-            `All ${targetDocs} selected document(s) are already converted.\n\nNo conversion is needed.`
+            alertText
           );
         }
         return;

@@ -1892,13 +1892,18 @@ async def cost_estimate(
 
     already_converted = []
     eligible_attachments = []
+    non_pdf_already_converted = 0
+    datalab_fallback_id: str | None = None
+    if converter_id == "datalab":
+        datalab_fallback_id = syncer.processor.datalab_non_pdf_fallback or "markitdown"
 
     for att in attachments:
         is_pdf = att.content_type == "application/pdf" or (
                 att.path and att.path.suffix.lower() == ".pdf"
         )
-        if converter_id == "datalab" and not is_pdf:
-            effective_id = syncer.processor.datalab_non_pdf_fallback or "markitdown"
+        is_datalab_fallback = converter_id == "datalab" and not is_pdf
+        if is_datalab_fallback:
+            effective_id = datalab_fallback_id or "markitdown"
         else:
             effective_id = converter_id
 
@@ -1909,6 +1914,8 @@ async def cost_estimate(
                     current_hash = _file_sha256(att.path)
                     if meta.get("source_hash") == current_hash:
                         already_converted.append(att)
+                        if is_datalab_fallback:
+                            non_pdf_already_converted += 1
                         continue
                 except Exception:
                     pass
@@ -1972,6 +1979,8 @@ async def cost_estimate(
         "datalab_merge_cross_page": merge_cross_page,
         "target_documents": len(attachments),
         "already_converted_count": len(already_converted),
+        "non_pdf_already_converted_count": non_pdf_already_converted,
+        "datalab_fallback_id": datalab_fallback_id,
         "eligible_documents": len(eligible_attachments),
         "total_pages": total_pages,
         "cost_per_page_usd": cost_per_page,

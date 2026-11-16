@@ -562,6 +562,9 @@ class TestCostEstimateEndpoint:
                 # Phase 7 default alignment (§5.2): the default VLM model is
                 # now the paid deepseek-v4.1-flash, so it is not free-tier.
                 assert data["vlm_captioning"]["is_free_tier"] is False
+                # Non-Datalab requests never use the PDF-only fallback
+                assert data["datalab_fallback_id"] is None
+                assert data["non_pdf_already_converted_count"] == 0
 
     def test_cost_estimate_parent_item_resolution(self, client, tmp_path) -> None:
         mock_syncer = MagicMock()
@@ -616,6 +619,9 @@ class TestCostEstimateEndpoint:
             assert data["eligible_documents"] == 1
             assert data["total_pages"] == 0
             assert data["estimated_cost_usd"] == 0.0
+            # Unconverted non-PDF docs are eligible (routed to fallback at conversion time)
+            assert data["non_pdf_already_converted_count"] == 0
+            assert data["datalab_fallback_id"] == "markitdown"
 
     def test_cost_estimate_incremental_skips_already_converted(self, client, tmp_path) -> None:
         mock_syncer = MagicMock()
@@ -636,6 +642,7 @@ class TestCostEstimateEndpoint:
             "converter_id": "datalab",
             "source_hash": file_hash,
         }
+        mock_syncer.processor.datalab_non_pdf_fallback = "markitdown"
 
         with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
             res = client.get("/cost-estimate?converter_id=datalab&item_keys=CONV_KEY")
@@ -653,6 +660,53 @@ class TestCostEstimateEndpoint:
             assert res_forced.status_code == 200
             data_forced = res_forced.json()
             assert data_forced["already_converted_count"] == 0
+            assert data_forced["eligible_documents"] == 1
+            # PDFs converted with the requested converter are not counted as non-PDF fallback hits
+            assert data["non_pdf_already_converted_count"] == 0
+            assert data_forced["non_pdf_already_converted_count"] == 0
+            assert data["datalab_fallback_id"] == "markitdown"
+
+    def test_cost_estimate_datalab_non_pdf_fallback_already_converted(self, client, tmp_path) -> None:
+        """An HTML snapshot already converted with the markitdown fallback is reported
+        as a non-PDF already-converted hit so the frontend can explain why Datalab
+        was not applied."""
+        mock_syncer = MagicMock()
+        dummy_html = tmp_path / "snapshot.html"
+        dummy_html.write_text("<html>body</html>", encoding="utf-8")
+
+        mock_att = MagicMock()
+        mock_att.item_key = "HTML_CONV_KEY"
+        mock_att.content_type = "text/html"
+        mock_att.path = dummy_html
+
+        from zocrates.rag.document_processor import _file_sha256
+
+        file_hash = _file_sha256(dummy_html)
+
+        mock_syncer.db.get_attachment_by_key.return_value = mock_att
+        mock_syncer.processor.get_metadata.return_value = {
+            "converter_id": "markitdown",
+            "source_hash": file_hash,
+        }
+        mock_syncer.processor.datalab_non_pdf_fallback = "markitdown"
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            res = client.get("/cost-estimate?converter_id=datalab&item_keys=HTML_CONV_KEY")
+            assert res.status_code == 200
+            data = res.json()
+            assert data["status"] == "success"
+            assert data["target_documents"] == 1
+            assert data["already_converted_count"] == 1
+            assert data["non_pdf_already_converted_count"] == 1
+            assert data["datalab_fallback_id"] == "markitdown"
+            assert data["eligible_documents"] == 0
+
+            # force=true treats the snapshot as eligible again and clears the fallback hit count
+            res_forced = client.get("/cost-estimate?converter_id=datalab&item_keys=HTML_CONV_KEY&force=true")
+            assert res_forced.status_code == 200
+            data_forced = res_forced.json()
+            assert data_forced["already_converted_count"] == 0
+            assert data_forced["non_pdf_already_converted_count"] == 0
             assert data_forced["eligible_documents"] == 1
 
     def test_cost_estimate_datalab_merge_cross_page_flag(self, client, tmp_path) -> None:
