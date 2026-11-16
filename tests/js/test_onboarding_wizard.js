@@ -144,7 +144,7 @@ async function runTests() {
     assert.strictEqual(rec.model, "openrouter/~z-ai/glm-flash-latest");
     assert.strictEqual(rec.synthesisModel, "openrouter/google/gemini-3.8-flash");
     assert.strictEqual(rec.embedMode, "cloud");
-    assert.strictEqual(rec.cloudEmbeddingModel, "openrouter/voyageai/voyage-4");
+    assert.strictEqual(rec.cloudEmbeddingModel, "openrouter/mongodb/voyage-4");
     assert.strictEqual(rec.vlmModel, "openrouter/deepseek/deepseek-v4.1-flash");
     assert.strictEqual(rec.vlmBackupModel, "openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free");
     assert.strictEqual(rec.vlmMaxImagesPerDoc, 100);
@@ -222,7 +222,7 @@ async function runTests() {
       model: "openrouter/~z-ai/glm-flash-latest",
       openrouterKey: "sk-test",
       embedMode: "cloud",
-      cloudEmbeddingModel: "openrouter/voyageai/voyage-4",
+      cloudEmbeddingModel: "openrouter/mongodb/voyage-4",
       converterId: "markitdown",
       vlmChoice: "openrouter",
       vlmModel: "openrouter/deepseek/deepseek-v4.1-flash",
@@ -236,7 +236,7 @@ async function runTests() {
     assert.strictEqual(p.llmConfig.openrouter_api_key, "sk-test");
     assert.strictEqual(p.llmConfig.user_research_profile, "compbio researcher");
     assert.strictEqual(p.ragModel.mode, "cloud");
-    assert.strictEqual(p.ragModel.model_name, "openrouter/voyageai/voyage-4");
+    assert.strictEqual(p.ragModel.model_name, "openrouter/mongodb/voyage-4");
     assert.strictEqual(p.ragConverter.enable_vlm_captioning, true);
     assert.strictEqual(
       p.ragConverter.vlm_captioning_backup_model,
@@ -2217,7 +2217,7 @@ async function runTests() {
           preset: "offline",
           provider: "ollama",
           embedMode: "cloud",
-          cloudEmbeddingModel: "openrouter/voyageai/voyage-4",
+          cloudEmbeddingModel: "openrouter/mongodb/voyage-4",
           vlmChoice: "disable",
         }),
         true,

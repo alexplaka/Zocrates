@@ -47,7 +47,7 @@ RECOMMENDED_TIER_REFERENCE: dict[str, Any] = {
             "thinking_level": "high",
         },
     },
-    "embedding_model": "openrouter/voyageai/voyage-4",
+    "embedding_model": "openrouter/mongodb/voyage-4",
     "embedding_provider": "cloud",
     "reranker_model": "qwen/qwen3-reranker-8b",
     "citation_verification_provider": "openrouter",
@@ -367,14 +367,14 @@ def test_cloud_embedding_slug_normalization(tmp_path):
     from zocrates.rag.embeddings import OpenRouterEmbedder
 
     with patch("zocrates.config.load_zocrates_config", return_value={}):
-        embedder = OpenRouterEmbedder(model_name="voyageai/voyage-4", dimension=1024)
-    assert embedder._model_name == "openrouter/voyageai/voyage-4"
+        embedder = OpenRouterEmbedder(model_name="mongodb/voyage-4", dimension=1024)
+    assert embedder._model_name == "openrouter/mongodb/voyage-4"
     # Already-prefixed ids pass through unmodified
     with patch("zocrates.config.load_zocrates_config", return_value={}):
         embedder_prefixed = OpenRouterEmbedder(
-            model_name="openrouter/voyageai/voyage-4", dimension=1024
+            model_name="openrouter/mongodb/voyage-4", dimension=1024
         )
-    assert embedder_prefixed._model_name == "openrouter/voyageai/voyage-4"
+    assert embedder_prefixed._model_name == "openrouter/mongodb/voyage-4"
 
 
 def test_openrouter_provider_default_consistent_with_main_default():

@@ -670,6 +670,9 @@
             <html:div id="verification-key-missing-notice" style="display: none; font-size: 12px; margin-top: 4px;" class="zc-text-warning">
               &#x26A0;&#xFE0F; OPENROUTER_API_KEY missing. Remote decision models disabled until a key is provided or the Laya local server is selected.
             </html:div>
+            <html:div id="verification-catalog-missing-notice" style="display: none; font-size: 12px; margin-top: 4px;" class="zc-text-warning">
+              &#x26A0;&#xFE0F; The configured citation verification model was not found in the OpenRouter catalog.
+            </html:div>
           </html:div>
 
           <!-- OpenRouter Model Group -->
@@ -773,6 +776,9 @@
         </html:select>
         <html:div id="llm-key-missing-notice" style="display: none; font-size: 12px; margin-top: 4px;" class="zc-text-warning">
           &#x26A0;&#xFE0F; OPENROUTER_API_KEY missing. Remote models disabled until key is provided or a local provider is selected.
+        </html:div>
+        <html:div id="llm-catalog-missing-notice" style="display: none; font-size: 12px; margin-top: 4px;" class="zc-text-warning">
+          &#x26A0;&#xFE0F; The configured model was not found in the OpenRouter catalog.
         </html:div>
       </html:div>
 
@@ -938,6 +944,9 @@
           <html:div id="vlm-key-missing-notice" style="display: none; font-size: 12px; margin-top: 4px;" class="zc-text-warning">
             &#x26A0;&#xFE0F; OPENROUTER_API_KEY missing. VLM figure captioning disabled until a key is provided or the Ollama option is selected.
           </html:div>
+          <html:div id="vlm-catalog-missing-notice" style="display: none; font-size: 12px; margin-top: 4px;" class="zc-text-warning">
+            &#x26A0;&#xFE0F; The selected VLM model was not found in the OpenRouter catalog.
+          </html:div>
 
           <!-- Cloud VLM Model Dropdowns -->
           <html:div class="zc-form-group" id="vlm-cloud-model-group" style="margin: 0; display: flex; flex-direction: column; gap: 10px;">
@@ -1021,6 +1030,11 @@
       <!-- Key Missing Warning Callout for Cloud Embeddings -->
       <html:div id="embedding-key-missing-notice" style="display: none; font-size: 12px; margin-bottom: 16px;" class="zc-text-warning">
         ⚠️ OPENROUTER_API_KEY missing. Cloud embeddings disabled until key is provided or Local mode selected.
+      </html:div>
+
+      <!-- Configured-Model-Missing Warning Callout for Cloud Embeddings -->
+      <html:div id="embedding-catalog-missing-notice" style="display: none; font-size: 12px; margin-bottom: 16px;" class="zc-text-warning">
+        &#x26A0;&#xFE0F; The configured embeddings model was not found in the OpenRouter catalog.
       </html:div>
 
       <!-- Permanent Embeddings Model Selector -->

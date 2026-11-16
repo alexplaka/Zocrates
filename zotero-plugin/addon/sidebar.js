@@ -2925,7 +2925,7 @@ const ONBOARDING_PRESETS = {
       model: "openrouter/~z-ai/glm-flash-latest",
       synthesisModel: "openrouter/google/gemini-3.8-flash",
       embedMode: "cloud",
-      cloudEmbeddingModel: "openrouter/voyageai/voyage-4",
+      cloudEmbeddingModel: "openrouter/mongodb/voyage-4",
       vlmChoice: "openrouter",
       vlmModel: "openrouter/deepseek/deepseek-v4.1-flash",
       vlmBackupModel: "openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
@@ -3341,7 +3341,7 @@ function renderOnboardingWizardCard() {
     "OpenRouter embedding slug (the OpenRouter key above is reused). The vector dimension is auto-resolved per model.");
   const cloudModelInput = el(cloudRow, "input", "onboarding-input");
   cloudModelInput.type = "text";
-  cloudModelInput.placeholder = "openrouter/voyageai/voyage-4";
+  cloudModelInput.placeholder = "openrouter/mongodb/voyage-4";
   w.cloudEmbeddingRow = cloudRow;
   w.cloudEmbeddingModel = cloudModelInput;
   w.dimensionLine = el(embSection, "div", "onboarding-hardware-line");
