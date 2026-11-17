@@ -1500,6 +1500,12 @@ var BatchConverter = {
   _handleBatchSSEEvent(event, data, converterLabel, converterId, abortController) {
     if (!data) return;
 
+    // Datalab mode annotations are optional: non-Datalab batches omit them, so
+    // the keys are only forwarded when the backend supplied them.
+    let modeFields = {};
+    if (data.requested_mode) modeFields.requestedMode = data.requested_mode;
+    if (data.actual_mode) modeFields.actualMode = data.actual_mode;
+
     if (event === "progress") {
       let currentIdx = data.current_index || (data.processed + 1);
       let total = data.total || 1;
@@ -1518,6 +1524,7 @@ var BatchConverter = {
           skipped: data.skipped,
           failed: data.failed,
           isStopping: abortController && abortController.signal.aborted,
+          ...modeFields,
           abort: () => {
             if (abortController) abortController.abort();
           },
@@ -1564,6 +1571,7 @@ var BatchConverter = {
           failed: data.failed,
           total: data.total,
           failedItems: data.failed_items || [],
+          ...modeFields,
           abort: null,
         });
       }

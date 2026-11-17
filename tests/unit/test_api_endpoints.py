@@ -1057,6 +1057,12 @@ class TestBatchConvertEndpoint:
             assert events[6]["data"]["processed"] == 2
             assert events[6]["data"]["failed"] == 0
 
+            # Non-Datalab batches gain no mode keys: the payload contract is
+            # unchanged for every other consumer of these events.
+            for evt in events:
+                assert "requested_mode" not in evt["data"]
+                assert "actual_mode" not in evt["data"]
+
             # Ingestion called for each document
             assert mock_syncer.store.ingest_document.call_count == 2
             assert mock_syncer.processor.update_indexed_at.call_count == 2
@@ -1218,6 +1224,12 @@ class TestBatchConvertEndpoint:
             # Verify convert_with was called with markitdown fallback
             call_kwargs = mock_syncer.processor.convert_with.call_args[1]
             assert call_kwargs["converter_id"] == "markitdown"
+            # The requested Datalab mode is still reported (informational), but the
+            # fallback engine records no mode, so no actual_mode is emitted.
+            assert events[0]["data"]["requested_mode"] == "balanced"
+            assert "actual_mode" not in events[0]["data"]
+            assert events[2]["data"]["requested_mode"] == "balanced"
+            assert "actual_mode" not in events[2]["data"]
 
     @pytest.mark.parametrize(
         ("stored_mode", "requested_mode", "expect_skipped"),
@@ -1364,6 +1376,161 @@ class TestBatchConvertEndpoint:
         assert call_kwargs["skip_converted"] is False
         # Non-Datalab converters receive no mode options.
         assert call_kwargs["options"] is None
+
+    def test_batch_convert_datalab_sse_reports_requested_and_actual_mode(self, client, tmp_path) -> None:
+        """Datalab SSE events carry the requested mode and the surviving recorded mode."""
+        mock_syncer = MagicMock()
+        mock_conv = MagicMock()
+        mock_conv.converter_id = "datalab"
+        mock_syncer.processor._get_converter_by_id.return_value = mock_conv
+        mock_syncer.processor.convert_with.return_value = "# Doc"
+        # The quality guardrail retried the requested 'fast' conversion at
+        # 'balanced'; conversion_meta records the mode of the surviving result.
+        mock_syncer.processor.get_metadata.return_value = {
+            "converter_id": "datalab",
+            "converter_mode": "balanced",
+        }
+
+        pdf1 = tmp_path / "mode_sse.pdf"
+        pdf1.write_text("pdf content", encoding="utf-8")
+
+        att = MagicMock()
+        att.item_key = "ATT_MODE_SSE"
+        att.content_type = "application/pdf"
+        att.path = pdf1
+        att.parent_item_id = None
+        att.item_id = 1
+        att.parent_item_key = None
+
+        mock_syncer.db.get_attachment_by_key.return_value = att
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            res = client.post(
+                "/batch-convert",
+                json={
+                    "item_keys": ["ATT_MODE_SSE"],
+                    "converter_id": "datalab",
+                    "datalab_mode": "fast",
+                    "force": True,
+                },
+            )
+
+        assert res.status_code == 200
+        events = parse_sse_events(res.text)
+        assert [e["event"] for e in events] == ["progress", "progress", "progress", "complete"]
+
+        converting, indexing, completed, complete = (e["data"] for e in events)
+
+        assert converting["status"] == "converting"
+        assert converting["requested_mode"] == "fast"
+        assert "actual_mode" not in converting
+
+        assert indexing["status"] == "indexing"
+        assert indexing["requested_mode"] == "fast"
+        assert "actual_mode" not in indexing
+
+        assert completed["status"] == "completed"
+        assert completed["requested_mode"] == "fast"
+        assert completed["actual_mode"] == "balanced"
+
+        assert complete["requested_mode"] == "fast"
+        assert complete["actual_mode"] == "balanced"
+
+    def test_batch_convert_datalab_skipped_event_carries_requested_mode_only(self, client, tmp_path) -> None:
+        """Skipped items report the requested mode but never an actual mode."""
+        from zocrates.rag.document_processor import _file_sha256
+
+        mock_syncer = MagicMock()
+        mock_conv = MagicMock()
+        mock_conv.converter_id = "datalab"
+        mock_syncer.processor._get_converter_by_id.return_value = mock_conv
+
+        pdf1 = tmp_path / "skipped_mode.pdf"
+        pdf1.write_text("pdf content", encoding="utf-8")
+
+        att = MagicMock()
+        att.item_key = "ATT_SKIP_MODE"
+        att.content_type = "application/pdf"
+        att.path = pdf1
+        att.parent_item_id = None
+        att.item_id = 1
+        att.parent_item_key = None
+
+        mock_syncer.db.get_attachment_by_key.return_value = att
+        mock_syncer.processor.get_metadata.return_value = {
+            "converter_id": "datalab",
+            "converter_mode": "fast",
+            "source_hash": _file_sha256(pdf1),
+        }
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            res = client.post(
+                "/batch-convert",
+                json={
+                    "item_keys": ["ATT_SKIP_MODE"],
+                    "converter_id": "datalab",
+                    "datalab_mode": "fast",
+                    "force": False,
+                },
+            )
+
+        assert res.status_code == 200
+        events = parse_sse_events(res.text)
+        assert len(events) == 2
+        skipped_event, complete_event = (e["data"] for e in events)
+
+        assert skipped_event["status"] == "skipped"
+        assert skipped_event["requested_mode"] == "fast"
+        assert "actual_mode" not in skipped_event
+
+        assert complete_event["skipped"] == 1
+        assert complete_event["requested_mode"] == "fast"
+        assert "actual_mode" not in complete_event
+
+    def test_batch_convert_datalab_mixed_actual_modes_omit_final_actual_mode(self, client, tmp_path) -> None:
+        """A batch whose items recorded different modes has no single actual mode."""
+        mock_syncer = MagicMock()
+        mock_conv = MagicMock()
+        mock_conv.converter_id = "datalab"
+        mock_syncer.processor._get_converter_by_id.return_value = mock_conv
+        mock_syncer.processor.convert_with.return_value = "# Doc"
+
+        pdf1 = tmp_path / "mixed1.pdf"
+        pdf1.write_text("pdf one", encoding="utf-8")
+        pdf2 = tmp_path / "mixed2.pdf"
+        pdf2.write_text("pdf two", encoding="utf-8")
+
+        att1 = MagicMock(item_key="ATT_MIX_1", content_type="application/pdf", path=pdf1, parent_item_id=None, item_id=1, parent_item_key=None)
+        att2 = MagicMock(item_key="ATT_MIX_2", content_type="application/pdf", path=pdf2, parent_item_id=None, item_id=2, parent_item_key=None)
+
+        atts = {"ATT_MIX_1": att1, "ATT_MIX_2": att2}
+        mock_syncer.db.get_attachment_by_key.side_effect = atts.get
+        # Only the second item hit the guardrail, so the surviving modes differ.
+        recorded_modes = {"ATT_MIX_1": "fast", "ATT_MIX_2": "balanced"}
+        mock_syncer.processor.get_metadata.side_effect = lambda item_key: {
+            "converter_id": "datalab",
+            "converter_mode": recorded_modes.get(item_key),
+        }
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            res = client.post(
+                "/batch-convert",
+                json={
+                    "item_keys": ["ATT_MIX_1", "ATT_MIX_2"],
+                    "converter_id": "datalab",
+                    "datalab_mode": "fast",
+                    "force": True,
+                },
+            )
+
+        assert res.status_code == 200
+        events = parse_sse_events(res.text)
+        completed_events = [e["data"] for e in events if e["data"].get("status") == "completed"]
+        assert [e["actual_mode"] for e in completed_events] == ["fast", "balanced"]
+
+        complete_event = events[-1]["data"]
+        assert complete_event["requested_mode"] == "fast"
+        assert "actual_mode" not in complete_event
 
     def test_batch_convert_partial_failure_isolation(self, client, tmp_path) -> None:
         mock_syncer = MagicMock()

@@ -14583,6 +14583,20 @@ document.addEventListener("click", (e) => {
 let notifications = [];
 let currentBatchJob = null;
 
+// Datalab processing-mode suffix for the job card title. The backend reports the
+// requested mode plus the mode the surviving conversion recorded, so a quality
+// guardrail retry (e.g. fast -> balanced) stays visible instead of silent.
+function describeBatchMode(job) {
+  if (!job || job.converterId !== "datalab") return "";
+  const requestedMode = job.requestedMode;
+  if (!requestedMode) return "";
+  const actualMode = job.actualMode;
+  if (actualMode && actualMode !== requestedMode) {
+    return `${requestedMode} → ${actualMode} (quality retry)`;
+  }
+  return String(requestedMode);
+}
+
 function renderBatchProgress(job) {
   currentBatchJob = job;
   const container = document.getElementById("batch-progress-container");
@@ -14607,9 +14621,11 @@ function renderBatchProgress(job) {
 
   const titleSpan = document.createElementNS("http://www.w3.org/1999/xhtml", "span");
   titleSpan.className = "batch-job-title";
-  titleSpan.textContent = isSingle
+  const modeSuffix = describeBatchMode(job);
+  const baseTitle = isSingle
     ? `⚡ Converting: ${job.converterLabel || "Document"}`
     : `⚡ Batch: ${job.converterLabel || "Conversion"}`;
+  titleSpan.textContent = modeSuffix ? `${baseTitle} · ${modeSuffix}` : baseTitle;
   header.appendChild(titleSpan);
 
   const statusBadge = document.createElementNS("http://www.w3.org/1999/xhtml", "span");

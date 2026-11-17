@@ -2181,6 +2181,32 @@ async def batch_convert(
         skipped = 0
         failed = 0
         failed_items: list[dict[str, Any]] = []
+        # Modes recorded by the conversions that survived this batch. Only a
+        # uniform set can be summarized as one actual mode on the final event.
+        recorded_modes: set[str] = set()
+
+        def mode_fields(actual_mode: str | None = None) -> dict[str, Any]:
+            """Return Datalab processing-mode annotations for an SSE payload.
+
+            Non-Datalab batches gain no keys at all, keeping their payloads
+            identical to the pre-mode contract. ``requested_mode`` is the mode
+            resolved once at request start; ``actual_mode`` is the mode recorded
+            by the surviving conversion, emitted only on completion events and
+            only when the Datalab engine performed the conversion (the non-PDF
+            fallback engine has no mode).
+
+            Args:
+                actual_mode: Recorded mode of the surviving conversion, if any.
+
+            Returns:
+                Mapping to splat into the SSE payload.
+            """
+            if active_id != "datalab" or not effective_mode:
+                return {}
+            fields: dict[str, Any] = {"requested_mode": effective_mode}
+            if actual_mode:
+                fields["actual_mode"] = actual_mode
+            return fields
 
         logger.info(
             "Starting batch conversion loop for %d target documents with engine '%s'",
@@ -2228,6 +2254,7 @@ async def batch_convert(
                         "current_title": title,
                         "status": "failed",
                         "error": err_msg,
+                        **mode_fields(),
                     }),
                 }
                 continue
@@ -2274,6 +2301,7 @@ async def batch_convert(
                                 "status": "skipped",
                                 "message": f"Already converted with {effective_id}",
                                 "error": None,
+                                **mode_fields(),
                             }),
                         }
                         continue
@@ -2303,6 +2331,7 @@ async def batch_convert(
                     "current_title": title,
                     "status": "converting",
                     "error": None,
+                    **mode_fields(),
                 }),
             }
 
@@ -2337,6 +2366,29 @@ async def batch_convert(
                     timeout=get_conversion_timeout_seconds(syncer._zotero_data_dir),
                 )
 
+                # Read the mode the surviving conversion recorded (persisted by
+                # convert_with before it returned). Guardrail retries record the
+                # mode of the result that survived, so actual_mode differing from
+                # requested_mode is the exact signal of a quality-retry upgrade.
+                actual_mode: str | None = None
+                if effective_id == "datalab":
+                    try:
+                        recorded = syncer.processor.get_metadata(att.item_key)
+                        recorded_mode = (
+                            recorded.get("converter_mode")
+                            if isinstance(recorded, dict)
+                            else None
+                        )
+                        if isinstance(recorded_mode, str) and recorded_mode:
+                            actual_mode = recorded_mode
+                            recorded_modes.add(actual_mode)
+                    except Exception as exc:
+                        logger.warning(
+                            "Could not read recorded conversion mode for %s: %s",
+                            att.item_key,
+                            exc,
+                        )
+
                 yield {
                     "event": "progress",
                     "data": json.dumps({
@@ -2349,6 +2401,7 @@ async def batch_convert(
                         "current_title": title,
                         "status": "indexing",
                         "error": None,
+                        **mode_fields(),
                     }),
                 }
 
@@ -2451,6 +2504,7 @@ async def batch_convert(
                         "current_title": title,
                         "status": "completed",
                         "error": None,
+                        **mode_fields(actual_mode),
                     }),
                 }
 
@@ -2482,6 +2536,7 @@ async def batch_convert(
                         "current_title": title,
                         "status": "failed",
                         "error": timeout_msg,
+                        **mode_fields(),
                     }),
                 }
             except Exception as exc:
@@ -2509,6 +2564,7 @@ async def batch_convert(
                         "current_title": title,
                         "status": "failed",
                         "error": err_msg,
+                        **mode_fields(),
                     }),
                 }
 
@@ -2520,6 +2576,9 @@ async def batch_convert(
             total,
         )
 
+        # A batch whose conversions all recorded the same mode reports it as the
+        # single actual mode; a mixed-mode batch has no single answer and omits it.
+        batch_actual_mode = next(iter(recorded_modes)) if len(recorded_modes) == 1 else None
         yield {
             "event": "complete",
             "data": json.dumps({
@@ -2528,6 +2587,7 @@ async def batch_convert(
                 "skipped": skipped,
                 "failed": failed,
                 "failed_items": failed_items,
+                **mode_fields(batch_actual_mode),
             }),
         }
 

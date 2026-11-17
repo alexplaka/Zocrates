@@ -1036,6 +1036,89 @@ async function runTests() {
       if (origPrefs) global.Zotero.Prefs = origPrefs;
     }
   });
+
+  // --- SSE mode pass-through into BatchProgress ------------------------------
+  const withBatchProgressSpy = async (fn) => {
+    const updates = [];
+    const origBatchProgress = global.Zotero.Zocrates.BatchProgress;
+    const origNotifier = global.Zotero.Zocrates.Notifier;
+    global.Zotero.Zocrates.BatchProgress = { update: (job) => updates.push(job) };
+    global.Zotero.Zocrates.Notifier = { add: () => {} };
+    try {
+      await fn(updates);
+    } finally {
+      global.Zotero.Zocrates.BatchProgress = origBatchProgress;
+      global.Zotero.Zocrates.Notifier = origNotifier;
+    }
+  };
+
+  await testAsync("_handleBatchSSEEvent: forwards requested_mode and actual_mode into BatchProgress.update", async () => {
+    await withBatchProgressSpy(async (updates) => {
+      BatchConverter._handleBatchSSEEvent(
+        "progress",
+        {
+          status: "converting",
+          current_key: "ATT1",
+          current_index: 1,
+          total: 1,
+          requested_mode: "fast",
+        },
+        "Datalab (Cloud)",
+        "datalab",
+        null
+      );
+      BatchConverter._handleBatchSSEEvent(
+        "progress",
+        {
+          status: "completed",
+          current_key: "ATT1",
+          current_index: 1,
+          total: 1,
+          requested_mode: "fast",
+          actual_mode: "balanced",
+        },
+        "Datalab (Cloud)",
+        "datalab",
+        null
+      );
+
+      assert.strictEqual(updates[0].requestedMode, "fast");
+      assert.strictEqual(updates[0].actualMode, undefined);
+      assert.strictEqual(updates[1].requestedMode, "fast");
+      assert.strictEqual(updates[1].actualMode, "balanced");
+    });
+  });
+
+  await testAsync("_handleBatchSSEEvent: forwards the complete event mode annotations", async () => {
+    await withBatchProgressSpy(async (updates) => {
+      BatchConverter._handleBatchSSEEvent(
+        "complete",
+        { processed: 1, skipped: 0, failed: 0, total: 1, requested_mode: "fast", actual_mode: "fast" },
+        "Datalab (Cloud)",
+        "datalab",
+        null
+      );
+
+      assert.strictEqual(updates[0].status, "completed");
+      assert.strictEqual(updates[0].requestedMode, "fast");
+      assert.strictEqual(updates[0].actualMode, "fast");
+    });
+  });
+
+  await testAsync("_handleBatchSSEEvent: leaves mode fields absent for non-Datalab payloads", async () => {
+    await withBatchProgressSpy(async (updates) => {
+      BatchConverter._handleBatchSSEEvent(
+        "progress",
+        { status: "converting", current_key: "ATT1", current_index: 1, total: 1 },
+        "MarkItDown",
+        "markitdown",
+        null
+      );
+
+      assert.ok(!("requestedMode" in updates[0]), "requestedMode must not be added");
+      assert.ok(!("actualMode" in updates[0]), "actualMode must not be added");
+    });
+  });
 }
 
 if (require.main === module) {

@@ -312,8 +312,13 @@ var ZocratesItemPane = {
         let hashTrunc = meta.source_hash ? meta.source_hash.substring(0, 12) + '...' : 'N/A';
         let charCount = meta.char_count ? meta.char_count.toLocaleString() : '0';
 
+        // The recorded Datalab processing mode is merged into the Engine row
+        // (absent for non-Datalab engines, which keep the plain label).
+        let engineText = `${meta.converter_id || 'unknown'} (v${meta.converter_version || '1.0'})`;
+        if (meta.converter_mode) engineText += ` · ${meta.converter_mode}`;
+
         let rowsData = [
-          ["Engine:", `${meta.converter_id || 'unknown'} (v${meta.converter_version || '1.0'})`],
+          ["Engine:", engineText],
           ["Converted:", convertedDate],
           ["Indexed:", indexedDate],
           ["Char Count:", charCount],
