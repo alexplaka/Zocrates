@@ -844,6 +844,92 @@ async function runTests() {
     await new Promise((resolve) => setTimeout(resolve, 50));
   });
 
+  // Test 10c: Datalab processing mode container follows the converter selection
+  await testAsync("datalabProcessingMode: container visibility follows the converter selection", async () => {
+    resetSpies();
+
+    const converterSelect = env.document.getElementById("document-converter-select");
+    const modeContainer = env.document.getElementById("datalab-processing-mode-container");
+    assert.ok(modeContainer, "datalab-processing-mode-container must exist in document");
+
+    converterSelect.value = "datalab";
+    converterSelect.dispatchEvent("change");
+    assert.strictEqual(modeContainer.style.display, "block");
+
+    converterSelect.value = "docling_local";
+    converterSelect.dispatchEvent("change");
+    assert.strictEqual(modeContainer.style.display, "none");
+  });
+
+  // Test 10d: Datalab processing mode is populated from the /status echo
+  await testAsync("datalabProcessingMode: populated from the /status echo", async () => {
+    resetSpies();
+
+    const modeSelect = env.document.getElementById("datalab-processing-mode-select");
+    assert.ok(modeSelect, "datalab-processing-mode-select must exist in document");
+
+    fetchHandler = async (url, options = {}) => {
+      fetchCalls.push({ url: String(url), options });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ status: "ready", datalab_processing_mode: "accurate" }),
+        text: async () => JSON.stringify({ status: "ready" }),
+      };
+    };
+
+    await api.fetchStatus();
+
+    assert.strictEqual(modeSelect.value, "accurate");
+
+    // Reset to the default for subsequent tests
+    fetchHandler = async (url, options = {}) => {
+      fetchCalls.push({ url: String(url), options });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ status: "ready", datalab_processing_mode: "balanced" }),
+        text: async () => JSON.stringify({ status: "ready" }),
+      };
+    };
+    await api.fetchStatus();
+    assert.strictEqual(modeSelect.value, "balanced");
+  });
+
+  // Test 10e: Applying converter config includes datalab_processing_mode in the payload
+  await testAsync("applyConverterConfig: serializes datalab_processing_mode in payload", async () => {
+    resetSpies();
+
+    const converterSelect = env.document.getElementById("document-converter-select");
+    const applyBtn = env.document.getElementById("document-converter-apply-btn");
+    const modeSelect = env.document.getElementById("datalab-processing-mode-select");
+
+    converterSelect.value = "datalab";
+    converterSelect.dispatchEvent("change");
+
+    modeSelect.value = "fast";
+    modeSelect.dispatchEvent("change");
+
+    applyBtn.dispatchEvent("click");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const postCall = fetchCalls.find(
+      (c) => c.url.includes("/rag/converter") && c.options.method === "POST"
+    );
+    assert.ok(postCall, "Applying converter config must POST to /rag/converter");
+    const body = JSON.parse(postCall.options.body);
+    assert.strictEqual(body.document_converter_id, "datalab");
+    assert.strictEqual(body.datalab_processing_mode, "fast");
+
+    // Reset back to the balanced default for subsequent tests
+    modeSelect.value = "balanced";
+    modeSelect.dispatchEvent("change");
+    converterSelect.value = "docling";
+    converterSelect.dispatchEvent("change");
+    applyBtn.dispatchEvent("click");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+
   // Test 11: Offline or rejected fetch requests fail gracefully without uncaught rejections
   await testAsync("offline error resilience: network throw fails gracefully without uncaught rejection", async () => {
     resetSpies();

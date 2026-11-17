@@ -12,6 +12,7 @@ class ConverterChangeRequest(BaseModel):
     docling_mode: Literal["auto", "fast", "full"] | None = None
     datalab_non_pdf_fallback: Literal["markitdown", "docling_local"] | None = None
     datalab_merge_cross_page: bool | None = None
+    datalab_processing_mode: Literal["fast", "balanced", "accurate"] | None = None
     datalab_api_key: SecretStr | str | None = None
     conversion_timeout_seconds: int | None = None
     enable_vlm_captioning: bool | None = None
@@ -35,6 +36,9 @@ class ConvertRequest(BaseModel):
 
     converter_id: str | None = None
     force: bool = False
+    # Reserved on-demand override; None -> the central resolver applies the
+    # configured global default (``datalab_processing_mode``).
+    datalab_mode: Literal["fast", "balanced", "accurate"] | None = None
 
 
 class BatchConvertRequest(BaseModel):

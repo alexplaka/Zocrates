@@ -187,7 +187,9 @@ async function runTests() {
       await BatchConverter.startBatchConvert(["K1"], "datalab", { skipConfirm: true });
 
       assert.strictEqual(modalOverlay(), null, "skipConfirm must not render the mode dialog");
-      assert.strictEqual(calls[0].mode, "balanced", "The estimate is still fetched for the default mode");
+      // Phase 2: the opening estimate omits &mode so the backend resolver applies
+      // the user's configured global default and echoes it in datalab_mode.
+      assert.strictEqual(calls[0].mode, null, "The opening estimate must omit &mode (resolver default)" );
       assert.strictEqual(
         "datalab_mode" in postBodyOf(calls),
         false,
@@ -230,10 +232,12 @@ async function runTests() {
           false,
           "Datalab modal must exclude Figure Enrichment even when vlm_captioning is enabled"
         );
+        // Phase 2: the opening estimate omits &mode; the echoed datalab_mode
+        // (resolver default) is what pre-selects the dropdown.
         assert.strictEqual(
           calls[0].mode,
-          "balanced",
-          "Initial estimate must be fetched for the Phase 1 default mode (balanced)"
+          null,
+          "Opening estimate must omit &mode so the echo follows the configured default"
         );
 
         clickNode(modalNode("zocrates-datalab-cancel-btn"));
@@ -569,7 +573,9 @@ async function runTests() {
     const alerts = [];
     await withStubs(
       (url) => {
-        const mode = estimateModeOf(url);
+        // The opening estimate omits &mode (resolver default = balanced in this
+        // scenario); per-mode refetches carry it explicitly.
+        const mode = estimateModeOf(url) ?? "balanced";
         // /cost-estimate sums total_pages over eligible attachments only, so an
         // all-already-converted selection returns total_pages: 0 (same for cost).
         return estimateOk(datalabEstimate({

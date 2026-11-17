@@ -889,6 +889,22 @@
         </html:div>
       </html:div>
 
+      <!-- Datalab Processing Mode Setting (Visible only when Datalab is selected) -->
+      <html:div class="zc-form-group" id="datalab-processing-mode-container" style="display: none; margin-top: 12px; padding: 12px; border-radius: 8px; background-color: var(--zc-hw-bg); border: 1px solid var(--zc-border);">
+        <html:label for="datalab-processing-mode-select" style="font-weight: 600; font-size: 13px; color: var(--zc-text-main); margin-bottom: 4px; display: block;">Processing mode</html:label>
+        <html:div style="font-size: 12px; color: var(--zc-text-muted); margin-bottom: 8px;">
+          Default mode for Datalab conversions without an explicit on-demand selection.
+        </html:div>
+        <html:select id="datalab-processing-mode-select">
+          <html:option value="fast">Fast ($0.00133/page)</html:option>
+          <html:option value="balanced">Balanced ($0.004/page)</html:option>
+          <html:option value="accurate">Accurate ($0.010/page)</html:option>
+        </html:select>
+        <html:div style="font-size: 11px; color: var(--zc-text-muted); margin-top: 6px; line-height: 1.4;">
+          Lower tiers are cheaper but may trigger one automatic retry at the next tier when parse quality is low.
+        </html:div>
+      </html:div>
+
       <!-- Datalab Merge Cross Page Setting (Visible only when Datalab is selected) -->
       <html:div class="zc-form-group" id="datalab-merge-cross-page-container" style="display: none; margin-top: 12px; padding: 12px; border-radius: 8px; background-color: var(--zc-hw-bg); border: 1px solid var(--zc-border);">
         <html:label style="display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; color: var(--zc-text-main); cursor: pointer; margin-bottom: 4px;">

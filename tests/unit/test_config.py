@@ -298,6 +298,42 @@ def test_sqlalchemy_declares_asyncio_extra_and_tested_cap() -> None:
     assert "<2.1" in entry, f"sqlalchemy must stay capped to the test-verified minor: {entry}"
 
 
+def test_datalab_processing_mode_default_and_backfill(tmp_path: Path) -> None:
+    """Verify DEFAULT_CONFIG seeds datalab_processing_mode as 'balanced' and that
+    load_zocrates_config backfills the missing key to disk under FileLock while
+    preserving an explicit user value."""
+    from zocrates.config import (
+        DEFAULT_DATALAB_PROCESSING_MODE,
+        get_datalab_processing_mode,
+    )
+
+    clear_config_cache()
+    assert DEFAULT_DATALAB_PROCESSING_MODE == "balanced"
+    assert DEFAULT_CONFIG["datalab_processing_mode"] == "balanced"
+
+    # No config file yet: the seeded default is returned and no file is written
+    fresh = load_zocrates_config(tmp_path)
+    assert fresh["datalab_processing_mode"] == "balanced"
+    assert not get_config_path(tmp_path).exists()
+
+    # Pre-existing config file without the key is backfilled on load
+    clear_config_cache()
+    save_zocrates_config({"llm_provider": "openrouter_llm"}, zotero_data_dir=tmp_path)
+    cfg_path = get_config_path(tmp_path)
+    with open(cfg_path) as f:
+        assert "datalab_processing_mode" not in json.load(f)
+
+    loaded = load_zocrates_config(tmp_path)
+    assert loaded["datalab_processing_mode"] == "balanced"
+    with open(cfg_path) as f:
+        assert json.load(f)["datalab_processing_mode"] == "balanced"
+
+    # A user-selected value is persisted and honored (not clobbered)
+    save_zocrates_config({"datalab_processing_mode": "accurate"}, zotero_data_dir=tmp_path)
+    assert load_zocrates_config(tmp_path)["datalab_processing_mode"] == "accurate"
+    assert get_datalab_processing_mode(tmp_path) == "accurate"
+
+
 class TestConfigCacheAndGetters:
     """Tests for in-memory config caching, mtime invalidation, and getter parameterization."""
 

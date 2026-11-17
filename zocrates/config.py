@@ -390,6 +390,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "docling_mode": "auto",
     "datalab_non_pdf_fallback": "markitdown",
     "datalab_merge_cross_page": DEFAULT_DATALAB_MERGE_CROSS_PAGE,
+    "datalab_processing_mode": DEFAULT_DATALAB_PROCESSING_MODE,
     "conversion_timeout_seconds": DEFAULT_CONVERSION_TIMEOUT_SECONDS,
     "enable_vlm_captioning": DEFAULT_ENABLE_VLM_CAPTIONING,
     "vlm_captioning_provider": DEFAULT_VLM_CAPTIONING_PROVIDER,
@@ -897,6 +898,9 @@ def load_zocrates_config(zotero_data_dir: Path | str | None = None) -> dict:
                     needs_save = True
                 if "datalab_merge_cross_page" not in loaded:
                     loaded["datalab_merge_cross_page"] = DEFAULT_DATALAB_MERGE_CROSS_PAGE
+                    needs_save = True
+                if DATALAB_PROCESSING_MODE_KEY not in loaded:
+                    loaded[DATALAB_PROCESSING_MODE_KEY] = DEFAULT_DATALAB_PROCESSING_MODE
                     needs_save = True
                 if "user_research_profile" not in loaded:
                     loaded["user_research_profile"] = DEFAULT_USER_RESEARCH_PROFILE
@@ -1478,11 +1482,9 @@ def get_datalab_processing_mode(
     """Return the configured default Datalab processing mode.
 
     Reads ``datalab_processing_mode`` from the in-memory cfg if provided,
-    otherwise from ``zocrates_config.json``. The key is not materialized in
-    ``DEFAULT_CONFIG`` yet (it becomes user-visible in Phase 2), so this
-    defensively reads the absent key and yields ``"balanced"`` for every
-    reachable Phase 1 state. An invalid stored value is re-validated here and
-    also falls back to ``"balanced"`` with a warning.
+    otherwise from ``zocrates_config.json`` (seeded and backfilled there under
+    ``FileLock``). An absent, blank, or invalid stored value is re-validated
+    here and falls back to ``"balanced"`` with a warning for invalid values.
 
     Args:
         zotero_data_dir: Path to the Zotero data directory.

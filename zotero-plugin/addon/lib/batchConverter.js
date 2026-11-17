@@ -1260,15 +1260,15 @@ var BatchConverter = {
       // 1. Pre-flight estimate check
       let estimate = null;
       try {
-        // The Datalab dialog hosts a mode dropdown and prices/skips depend on the mode, so
-        // the opening estimate is fetched for the default mode (plan §3.2/§3.5).
+        // The Datalab dialog hosts a mode dropdown and prices/skips depend on the mode.
+        // The opening estimate omits &mode so /cost-estimate resolves it to the user's
+        // configured global default and echoes it back in datalab_mode — that echo is
+        // what pre-selects the dropdown (plan §3.5: "the config default in Phase 2, via
+        // the mode echoed", so the dialog never contradicts the global default).
         let estimateUrl =
           `${serverUrl}/cost-estimate?converter_id=${encodeURIComponent(converterId)}` +
           `&item_keys=${encodeURIComponent(keys.join(","))}` +
           `&force=${force ? "true" : "false"}`;
-        if (converterId === "datalab") {
-          estimateUrl += `&mode=${encodeURIComponent(this.DATALAB_DEFAULT_MODE)}`;
-        }
         let estRes = await fetchFn(estimateUrl, { headers: this.getAuthHeaders() });
         if (estRes.ok) {
           estimate = await estRes.json();

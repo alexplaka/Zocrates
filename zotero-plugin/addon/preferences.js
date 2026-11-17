@@ -19,6 +19,8 @@ function initZocratesPreferences() {
   const datalabFallbackDocling = document.getElementById("datalab-fallback-docling");
   const datalabMergeCrossPageContainer = document.getElementById("datalab-merge-cross-page-container");
   const datalabMergeCrossPageCheckbox = document.getElementById("datalab-merge-cross-page-checkbox");
+  const datalabProcessingModeContainer = document.getElementById("datalab-processing-mode-container");
+  const datalabProcessingModeSelect = document.getElementById("datalab-processing-mode-select");
   const enableVlmCheckbox = document.getElementById("enable-vlm-captioning-checkbox");
   const vlmSettingsContainer = document.getElementById("vlm-captioning-settings-container");
   const vlmProviderOpenRouter = document.getElementById("vlm-provider-openrouter");
@@ -160,6 +162,7 @@ function initZocratesPreferences() {
   let savedDatalabApiKey = "";
   let savedDatalabFallback = "markitdown";
   let savedDatalabMergeCrossPage = false;
+  let savedDatalabProcessingMode = "balanced";
   let savedVlmEnable = true;
   let savedVlmProvider = "openrouter";
   let savedVlmCloudModel = "openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free";
@@ -176,6 +179,17 @@ function initZocratesPreferences() {
 
   function getEffectiveDatalabFallback() {
     return (datalabFallbackDocling && datalabFallbackDocling.checked) ? "docling_local" : "markitdown";
+  }
+
+  function getEffectiveDatalabProcessingMode() {
+    return (datalabProcessingModeSelect && datalabProcessingModeSelect.value) || "balanced";
+  }
+
+  function setDatalabProcessingMode(val) {
+    savedDatalabProcessingMode = val || "balanced";
+    if (datalabProcessingModeSelect) {
+      datalabProcessingModeSelect.value = savedDatalabProcessingMode;
+    }
   }
 
   function setDatalabFallback(val) {
@@ -443,6 +457,10 @@ function initZocratesPreferences() {
       datalabMergeCrossPageContainer.style.display = (currentId === "datalab") ? "block" : "none";
     }
 
+    if (datalabProcessingModeContainer) {
+      datalabProcessingModeContainer.style.display = (currentId === "datalab") ? "block" : "none";
+    }
+
     converterInfoMessage.style.display = "block";
 
     const callout = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
@@ -485,6 +503,7 @@ function initZocratesPreferences() {
     const currentKey = datalabApiKeyInput ? datalabApiKeyInput.value.trim() : "";
     const currentFallback = getEffectiveDatalabFallback();
     const currentMergeCrossPage = datalabMergeCrossPageCheckbox ? datalabMergeCrossPageCheckbox.checked : false;
+    const currentProcessingMode = getEffectiveDatalabProcessingMode();
 
     const currentVlmEnable = enableVlmCheckbox ? enableVlmCheckbox.checked : true;
     const currentVlmProvider = getEffectiveVlmProvider();
@@ -498,6 +517,7 @@ function initZocratesPreferences() {
       (datalabApiKeyInput && currentKey !== savedDatalabApiKey) ||
       (currentId === "datalab" && currentFallback !== savedDatalabFallback) ||
       (currentId === "datalab" && currentMergeCrossPage !== savedDatalabMergeCrossPage) ||
+      (currentId === "datalab" && currentProcessingMode !== savedDatalabProcessingMode) ||
       (enableVlmCheckbox && currentVlmEnable !== savedVlmEnable) ||
       (currentVlmProvider !== savedVlmProvider) ||
       (currentVlmPrimaryModel !== savedVlmCloudModel) ||
@@ -794,6 +814,9 @@ function initZocratesPreferences() {
         if (datalabMergeCrossPageCheckbox) {
           datalabMergeCrossPageCheckbox.checked = savedDatalabMergeCrossPage;
         }
+
+        const processingModePref = Zotero.Prefs.get("extensions.zocrates.datalabProcessingMode", true);
+        setDatalabProcessingMode(processingModePref || "balanced");
 
         savedVlmEnable = Zotero.Prefs.get("extensions.zocrates.enableVlmCaptioning", true);
         if (savedVlmEnable === undefined || savedVlmEnable === null) savedVlmEnable = true;
@@ -1103,6 +1126,9 @@ function initZocratesPreferences() {
           datalabMergeCrossPageCheckbox.checked = savedDatalabMergeCrossPage;
         }
       }
+      if (data.datalab_processing_mode) {
+        setDatalabProcessingMode(data.datalab_processing_mode);
+      }
       updateVlmUiVisibility();
       updateConverterDirtyState();
     } catch (err) {
@@ -1233,6 +1259,10 @@ function initZocratesPreferences() {
         }
         updateConverterDirtyState();
       }
+      if (data.datalab_processing_mode) {
+        setDatalabProcessingMode(data.datalab_processing_mode);
+        updateConverterDirtyState();
+      }
 
       updateLlmDirtyState();
       updateEmbeddingDirtyState();
@@ -1276,6 +1306,10 @@ function initZocratesPreferences() {
         if (datalabMergeCrossPageCheckbox) {
           datalabMergeCrossPageCheckbox.checked = savedDatalabMergeCrossPage;
         }
+      }
+
+      if (data.datalab_processing_mode) {
+        setDatalabProcessingMode(data.datalab_processing_mode);
       }
 
       updateConverterInfoMessage();
@@ -2492,6 +2526,7 @@ function initZocratesPreferences() {
       const newDatalabKey = datalabApiKeyInput ? datalabApiKeyInput.value.trim() : "";
       const newFallback = getEffectiveDatalabFallback();
       const newMergeCrossPage = datalabMergeCrossPageCheckbox ? datalabMergeCrossPageCheckbox.checked : false;
+      const newProcessingMode = getEffectiveDatalabProcessingMode();
       const currentVlmEnable = enableVlmCheckbox ? enableVlmCheckbox.checked : true;
       const currentVlmProvider = getEffectiveVlmProvider();
       const currentVlmPrimaryModel = (vlmPrimaryModelSelect ? vlmPrimaryModelSelect.value : "") || "openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free";
@@ -2503,6 +2538,7 @@ function initZocratesPreferences() {
       savePreference("documentConverter", newId);
       savePreference("datalabNonPdfFallback", newFallback);
       savePreference("datalabMergeCrossPage", newMergeCrossPage);
+      savePreference("datalabProcessingMode", newProcessingMode);
       savePreference("enableVlmCaptioning", currentVlmEnable);
       savePreference("vlmCaptioningProvider", currentVlmProvider);
       savePreference("vlmCaptioningModel", currentVlmPrimaryModel);
@@ -2521,6 +2557,7 @@ function initZocratesPreferences() {
         datalab_api_key: newDatalabKey || undefined,
         datalab_non_pdf_fallback: newFallback,
         datalab_merge_cross_page: newMergeCrossPage,
+        datalab_processing_mode: newProcessingMode,
         enable_vlm_captioning: currentVlmEnable,
         vlm_captioning_provider: currentVlmProvider,
         vlm_captioning_model: currentVlmPrimaryModel,
@@ -2542,6 +2579,7 @@ function initZocratesPreferences() {
       savedDatalabApiKey = newDatalabKey;
       savedDatalabFallback = newFallback;
       savedDatalabMergeCrossPage = newMergeCrossPage;
+      savedDatalabProcessingMode = newProcessingMode;
       savedVlmEnable = currentVlmEnable;
       savedVlmProvider = currentVlmProvider;
       savedVlmCloudModel = currentVlmPrimaryModel;
@@ -2589,6 +2627,10 @@ function initZocratesPreferences() {
 
   if (datalabMergeCrossPageCheckbox) {
     datalabMergeCrossPageCheckbox.addEventListener("change", updateConverterDirtyState);
+  }
+
+  if (datalabProcessingModeSelect) {
+    datalabProcessingModeSelect.addEventListener("change", updateConverterDirtyState);
   }
 
   if (enableVlmCheckbox) {

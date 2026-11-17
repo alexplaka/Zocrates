@@ -516,6 +516,114 @@ class TestConvertItemEndpoint:
         call_kwargs = mock_syncer.processor.convert_with.call_args[1]
         assert call_kwargs["skip_converted"] is not force
 
+    @pytest.mark.parametrize("bad_mode", ["lite", "garbage", 3])
+    def test_convert_item_rejects_unsupported_datalab_mode(self, client, bad_mode) -> None:
+        """ConvertRequest.datalab_mode is Literal-validated (plan §3.2/§3.7)."""
+        res = client.post(
+            "/convert/ATTACH_KEY1", json={"converter_id": "datalab", "datalab_mode": bad_mode}
+        )
+        assert res.status_code == 422
+
+    def test_convert_item_explicit_datalab_mode_overrides_global_default(self, client, tmp_path) -> None:
+        """An explicit datalab_mode wins over the configured default in gate and options."""
+        from zocrates.rag.document_processor import _file_sha256
+
+        mock_syncer = MagicMock()
+        dummy_pdf = tmp_path / "paper.pdf"
+        dummy_pdf.write_text("pdf bytes", encoding="utf-8")
+
+        mock_att = MagicMock()
+        mock_att.item_key = "ATTACH_KEY1"
+        mock_att.parent_item_key = None
+        mock_att.item_id = 42
+        mock_att.parent_item_id = None
+        mock_att.content_type = "application/pdf"
+        mock_att.path = dummy_pdf
+
+        mock_syncer.db.get_attachment_by_key.return_value = mock_att
+        mock_syncer.db.get_item.return_value = None
+        mock_syncer.processor.is_cached.return_value = True
+        # Recorded at the global default: only the explicit override makes it eligible.
+        mock_syncer.processor.get_metadata.return_value = {
+            "converter_id": "datalab",
+            "converter_mode": "accurate",
+            "source_hash": _file_sha256(dummy_pdf),
+        }
+        mock_syncer.processor.convert_with.return_value = "# body"
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer), \
+             patch("zocrates.config.get_datalab_processing_mode", return_value="accurate"):
+            res = client.post(
+                "/convert/ATTACH_KEY1",
+                json={"converter_id": "datalab", "datalab_mode": "fast"},
+            )
+
+        assert res.status_code == 200
+        assert res.json()["status"] == "success"
+        mock_syncer.processor.convert_with.assert_called_once()
+        call_kwargs = mock_syncer.processor.convert_with.call_args[1]
+        assert call_kwargs["options"] == {"mode": "fast"}
+
+    def test_convert_item_absent_datalab_mode_gate_uses_global_default(self, client, tmp_path) -> None:
+        """None -> the central resolver's global default drives the gate."""
+        from zocrates.rag.document_processor import _file_sha256
+
+        mock_syncer = MagicMock()
+        dummy_pdf = tmp_path / "paper.pdf"
+        dummy_pdf.write_text("pdf bytes", encoding="utf-8")
+
+        mock_att = MagicMock()
+        mock_att.item_key = "ATTACH_KEY1"
+        mock_att.parent_item_key = None
+        mock_att.item_id = 42
+        mock_att.parent_item_id = None
+        mock_att.content_type = "application/pdf"
+        mock_att.path = dummy_pdf
+
+        mock_syncer.db.get_attachment_by_key.return_value = mock_att
+        mock_syncer.db.get_item.return_value = None
+        mock_syncer.processor.is_cached.return_value = True
+        mock_syncer.processor.get_metadata.return_value = {
+            "converter_id": "datalab",
+            "converter_mode": "accurate",
+            "source_hash": _file_sha256(dummy_pdf),
+        }
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer), \
+             patch("zocrates.config.get_datalab_processing_mode", return_value="accurate"):
+            res = client.post("/convert/ATTACH_KEY1", json={"converter_id": "datalab"})
+
+        assert res.status_code == 200
+        assert res.json()["status"] == "skipped"
+        mock_syncer.processor.convert_with.assert_not_called()
+
+    def test_convert_item_absent_datalab_mode_leaves_options_unset(self, client, tmp_path) -> None:
+        """Without an override, options stay None so the processor resolves the default."""
+        mock_syncer = MagicMock()
+        dummy_pdf = tmp_path / "paper.pdf"
+        dummy_pdf.write_text("pdf bytes", encoding="utf-8")
+
+        mock_att = MagicMock()
+        mock_att.item_key = "ATTACH_KEY1"
+        mock_att.parent_item_key = None
+        mock_att.item_id = 42
+        mock_att.parent_item_id = None
+        mock_att.content_type = "application/pdf"
+        mock_att.path = dummy_pdf
+
+        mock_syncer.db.get_attachment_by_key.return_value = mock_att
+        mock_syncer.db.get_item.return_value = None
+        mock_syncer.processor.is_cached.return_value = False
+        mock_syncer.processor.convert_with.return_value = "# body"
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer), \
+             patch("zocrates.config.get_datalab_processing_mode", return_value="balanced"):
+            res = client.post("/convert/ATTACH_KEY1", json={"converter_id": "datalab"})
+
+        assert res.status_code == 200
+        call_kwargs = mock_syncer.processor.convert_with.call_args[1]
+        assert call_kwargs["options"] is None
+
     def test_convert_item_datalab_non_pdf_resolves_to_fallback(self, client, tmp_path) -> None:
         mock_syncer = MagicMock()
         dummy_html = tmp_path / "web.html"
@@ -2387,6 +2495,87 @@ class TestDoclingModeAndTimeoutEndpoints:
                 data = res.json()
                 assert "timed out" in data["detail"]["message"]
                 mock_syncer.processor.record_failure.assert_called_once()
+
+
+class TestDatalabProcessingModeConfig:
+    """Verify datalab_processing_mode SSOT exposure and persistence (plan §3.7)."""
+
+    def test_status_exposes_datalab_processing_mode(self, client) -> None:
+        res = client.get("/status")
+        assert res.status_code == 200
+        assert res.json()["datalab_processing_mode"] in ("fast", "balanced", "accurate")
+
+        with patch("zocrates.fast_api_app.get_syncer", side_effect=RuntimeError("Not registered")):
+            res_unreg = client.get("/status")
+            assert res_unreg.status_code == 200
+            assert res_unreg.json()["datalab_processing_mode"] in (
+                "fast",
+                "balanced",
+                "accurate",
+            )
+
+    def test_rag_converter_persists_and_echoes_datalab_processing_mode(
+        self, client, tmp_path
+    ) -> None:
+        mock_syncer = MagicMock()
+        mock_syncer.processor._document_converter_id = "datalab"
+        mock_syncer._zotero_data_dir = tmp_path
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer), \
+             patch("zocrates.config.resolve_zotero_data_dir", return_value=tmp_path):
+            res = client.post(
+                "/rag/converter",
+                json={"document_converter_id": "datalab", "datalab_processing_mode": "fast"},
+            )
+            assert res.status_code == 200
+            data = res.json()
+            assert data["status"] == "success"
+            assert data["datalab_processing_mode"] == "fast"
+
+            from zocrates.config import clear_config_cache, load_zocrates_config
+
+            clear_config_cache()
+            assert load_zocrates_config(tmp_path)["datalab_processing_mode"] == "fast"
+
+    def test_rag_converter_rejects_unsupported_datalab_processing_mode(self, client, tmp_path) -> None:
+        mock_syncer = MagicMock()
+        mock_syncer.processor._document_converter_id = "datalab"
+        mock_syncer._zotero_data_dir = tmp_path
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer), \
+             patch("zocrates.config.resolve_zotero_data_dir", return_value=tmp_path), \
+             patch("zocrates.config.save_zocrates_config") as mock_save:
+            for bad_mode in ("lite", "garbage"):
+                res = client.post(
+                    "/rag/converter", json={"datalab_processing_mode": bad_mode}
+                )
+                assert res.status_code == 422
+            mock_save.assert_not_called()
+
+    def test_config_endpoint_round_trips_datalab_processing_mode(self, client, tmp_path) -> None:
+        with patch("zocrates.config.resolve_zotero_data_dir", return_value=tmp_path), \
+             patch("zocrates.agents.app.set_agent_models"):
+            cfg_res = client.get("/config")
+            assert cfg_res.status_code == 200
+            assert cfg_res.json()["datalab_processing_mode"] == "balanced"
+
+            post_cfg = client.post("/config", json={"datalab_processing_mode": "accurate"})
+            assert post_cfg.status_code == 200
+            assert post_cfg.json()["config"]["datalab_processing_mode"] == "accurate"
+
+            cfg_after = client.get("/config")
+            assert cfg_after.status_code == 200
+            assert cfg_after.json()["datalab_processing_mode"] == "accurate"
+
+    def test_config_endpoint_rejects_unsupported_datalab_processing_mode(
+        self, client, tmp_path
+    ) -> None:
+        with patch("zocrates.config.resolve_zotero_data_dir", return_value=tmp_path), \
+             patch("zocrates.agents.app.set_agent_models"), \
+             patch("zocrates.config.save_zocrates_config") as mock_save:
+            res = client.post("/config", json={"datalab_processing_mode": "lite"})
+            assert res.status_code == 422
+            mock_save.assert_not_called()
 
 
 class TestLibraryConversionStatusEndpoint:

@@ -43,7 +43,6 @@ class RecordingDatalabConverter(DatalabConverter):
         self.received_options.append(options)
         return f"# Datalab-mode recording conversion of {source_path.name}"
 
-
 class RecordingCustomConverter(BaseDocumentConverter):
     """Non-Datalab converter that records the options it receives."""
 
@@ -253,6 +252,33 @@ class TestDatalabModeResolution:
 
         assert markdown is not None
         assert conv.received_options == [{"mode": "fast"}]
+
+    def test_get_or_convert_cache_hit_ignores_changed_global_default(self, tmp_path, pdf_path):
+        """Changing the global default must never re-convert unchanged items (plan §3.7)."""
+        conv = RecordingDatalabConverter()
+        processor = DocumentProcessor(
+            tmp_path / "cache", converters=[conv], document_converter_id="datalab"
+        )
+
+        with patch(
+            "zocrates.rag.document_processor.get_datalab_processing_mode", return_value="fast"
+        ):
+            first = processor.get_or_convert("KEY", pdf_path, "application/pdf")
+        assert first is not None
+        assert conv.received_options == [{"mode": "fast"}]
+
+        # The default changes to an expensive tier: the hash-only cache path still
+        # returns the existing bundle without converting again.
+        with patch(
+            "zocrates.rag.document_processor.get_datalab_processing_mode",
+            return_value="accurate",
+        ):
+            second = processor.get_or_convert("KEY", pdf_path, "application/pdf")
+
+        assert second == first
+        assert conv.received_options == [{"mode": "fast"}], (
+            "an unchanged cached item must stay a cache hit after a default change"
+        )
 
 
 # ---------------------------------------------------------------------------

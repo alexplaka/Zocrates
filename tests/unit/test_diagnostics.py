@@ -179,6 +179,29 @@ class TestConfigAllowlistAndReadOnlyInvariants:
         assert sanitized_cfg["adaptive_compaction_enabled"] is False
         assert sanitized_cfg["session_max_count"] == 75
 
+    def test_config_allowlist_includes_datalab_processing_mode(self, tmp_path: Path) -> None:
+        """The Datalab processing mode is part of the sanitized technical config."""
+        assert "datalab_processing_mode" in ALLOWED_CONFIG_KEYS
+
+        zocrates_dir = tmp_path / "zocrates-data"
+        zocrates_dir.mkdir(parents=True)
+        (zocrates_dir / "zocrates_config.json").write_text(
+            json.dumps(
+                {
+                    "llm_provider": "openrouter_llm",
+                    "datalab_processing_mode": "accurate",
+                    "datalab_api_key": "datalab-secret-key-value",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        sanitized_cfg = extract_sanitized_config(tmp_path)
+
+        assert sanitized_cfg["datalab_processing_mode"] == "accurate"
+        assert "datalab_api_key" not in sanitized_cfg
+        assert "datalab-secret-key-value" not in json.dumps(sanitized_cfg)
+
     def test_sanitize_url_strips_userinfo_query_and_fragment(self) -> None:
         url = "https://admin:hunter2@llm.internal.org:8443/v1/chat?token=12345#section"
         assert sanitize_url(url) == "https://llm.internal.org:8443/v1/chat"

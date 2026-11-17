@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -53,4 +53,5 @@ class ConfigRequest(BaseModel):
     backend_port: int | None = Field(default=None, ge=1, le=65535)
     auto_spawn_backend: bool | None = None
     datalab_merge_cross_page: bool | None = None
+    datalab_processing_mode: Literal["fast", "balanced", "accurate"] | None = None
     datalab_api_key: str | None = None

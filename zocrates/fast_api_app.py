@@ -783,6 +783,7 @@ async def status(request: Request) -> dict:
         get_datalab_api_key,
         get_datalab_merge_cross_page,
         get_datalab_non_pdf_fallback,
+        get_datalab_processing_mode,
         get_docling_mode,
         get_enable_vlm_captioning,
         get_force_cpu_pref,
@@ -859,6 +860,7 @@ async def status(request: Request) -> dict:
             "conversion_timeout_seconds": get_conversion_timeout_seconds(syncer._zotero_data_dir, cfg=cfg),
             "datalab_non_pdf_fallback": get_datalab_non_pdf_fallback(syncer._zotero_data_dir, cfg=cfg),
             "datalab_merge_cross_page": get_datalab_merge_cross_page(syncer._zotero_data_dir, cfg=cfg),
+            "datalab_processing_mode": get_datalab_processing_mode(syncer._zotero_data_dir, cfg=cfg),
             "has_datalab_key": bool(get_datalab_api_key(syncer._zotero_data_dir)),
             "has_openalex_api_key": bool(get_openalex_api_key(syncer._zotero_data_dir)),
             "docling_mode": get_docling_mode(syncer._zotero_data_dir, cfg=cfg),
@@ -928,6 +930,7 @@ async def status(request: Request) -> dict:
             "document_converter_mode": cfg.get("document_converter_mode", "local"),
             "datalab_non_pdf_fallback": get_datalab_non_pdf_fallback(cfg=cfg),
             "datalab_merge_cross_page": get_datalab_merge_cross_page(cfg=cfg),
+            "datalab_processing_mode": get_datalab_processing_mode(cfg=cfg),
             "has_datalab_key": bool(get_datalab_api_key()),
             "has_openalex_api_key": bool(get_openalex_api_key()),
             "docling_mode": get_docling_mode(cfg=cfg),
@@ -1597,7 +1600,11 @@ async def convert_item(item_key: str, request: ConvertRequest | None = None) -> 
     if effective_id == "datalab":
         from zocrates.config import get_datalab_processing_mode
 
-        effective_mode = get_datalab_processing_mode(syncer._zotero_data_dir)
+        # An explicit on-demand override wins over the configured global default.
+        requested_mode = request.datalab_mode if request else None
+        effective_mode = requested_mode or get_datalab_processing_mode(
+            syncer._zotero_data_dir
+        )
     if not force and syncer.processor.is_cached(attachment.item_key):
         from zocrates.rag.document_processor import _file_sha256, matches_conversion_identity
 
@@ -1660,6 +1667,15 @@ async def convert_item(item_key: str, request: ConvertRequest | None = None) -> 
                 # thread is dispatched, so a concurrent request may have converted
                 # the item in the meantime.
                 skip_converted=not force,
+                # Absent override -> options stay unset so the processor resolves
+                # the configured global default mode.
+                options=(
+                    {"mode": request.datalab_mode}
+                    if effective_id == "datalab"
+                    and request is not None
+                    and request.datalab_mode
+                    else None
+                ),
             ),
             timeout=timeout_sec,
         )
@@ -1811,7 +1827,8 @@ async def cost_estimate(
     """Estimate page count and USD cost for a paid converter across targeted items.
 
     ``mode`` selects the Datalab processing mode priced here; when omitted the
-    central resolver supplies the configured default (``'balanced'`` in Phase 1).
+    central resolver supplies the configured default
+    (``datalab_processing_mode``, ``'balanced'`` out of the box).
     An unsupported explicit value is rejected with HTTP 422.
     """
     from zocrates.config import get_datalab_processing_mode, validate_datalab_mode
@@ -4035,6 +4052,7 @@ async def get_config() -> dict:
         get_compaction_config,
         get_datalab_api_key,
         get_datalab_merge_cross_page,
+        get_datalab_processing_mode,
         get_openalex_api_key,
         get_secure_api_key,
         get_session_maintenance_config,
@@ -4091,6 +4109,7 @@ async def get_config() -> dict:
         "has_datalab_key": has_datalab,
         "has_openalex_api_key": has_openalex,
         "datalab_merge_cross_page": get_datalab_merge_cross_page(zot_dir, cfg=cfg),
+        "datalab_processing_mode": get_datalab_processing_mode(zot_dir, cfg=cfg),
         "citations_enabled": cfg.get("citations_enabled", DEFAULT_CITATIONS_ENABLED),
         "references_section_enabled": cfg.get("references_section_enabled", DEFAULT_REFERENCES_SECTION_ENABLED),
         "auto_render_mermaid_diagrams": cfg.get("auto_render_mermaid_diagrams", DEFAULT_AUTO_RENDER_MERMAID_DIAGRAMS),
@@ -4173,6 +4192,8 @@ async def update_config(request: ConfigRequest) -> dict:
         save_datalab_api_key(request.datalab_api_key.strip() if request.datalab_api_key else None)
     if request.datalab_merge_cross_page is not None:
         updates["datalab_merge_cross_page"] = request.datalab_merge_cross_page
+    if request.datalab_processing_mode is not None:
+        updates["datalab_processing_mode"] = request.datalab_processing_mode
     if request.citations_enabled is not None:
         updates["citations_enabled"] = request.citations_enabled
     if request.references_section_enabled is not None:
@@ -4324,6 +4345,7 @@ async def update_config(request: ConfigRequest) -> dict:
             "predictive_prompt_model": cfg.get("predictive_prompt_model"),
             "sentence_attribution_model": cfg.get("sentence_attribution_model", DEFAULT_SENTENCE_ATTRIBUTION_MODEL),
             "datalab_merge_cross_page": cfg.get("datalab_merge_cross_page"),
+            "datalab_processing_mode": cfg.get("datalab_processing_mode"),
             "user_research_profile": cfg.get("user_research_profile", ""),
             "citation_verification_enabled": cfg.get("citation_verification_enabled"),
             "citation_verification_provider": cfg.get("citation_verification_provider"),
@@ -4713,6 +4735,7 @@ async def update_active_converter(request: ConverterChangeRequest) -> dict:
         from zocrates.config import (
             get_datalab_merge_cross_page,
             get_datalab_non_pdf_fallback,
+            get_datalab_processing_mode,
             get_docling_mode,
             get_document_converter_id,
             get_document_converter_mode,
@@ -4730,6 +4753,7 @@ async def update_active_converter(request: ConverterChangeRequest) -> dict:
         target_docling_mode = request.docling_mode
         target_datalab_fallback = request.datalab_non_pdf_fallback
         target_datalab_merge_cross_page = request.datalab_merge_cross_page
+        target_datalab_processing_mode = request.datalab_processing_mode
         target_datalab_key = request.datalab_api_key
         target_conversion_timeout = request.conversion_timeout_seconds
 
@@ -4751,6 +4775,8 @@ async def update_active_converter(request: ConverterChangeRequest) -> dict:
             config_updates["datalab_non_pdf_fallback"] = target_datalab_fallback
         if target_datalab_merge_cross_page is not None:
             config_updates["datalab_merge_cross_page"] = target_datalab_merge_cross_page
+        if target_datalab_processing_mode is not None:
+            config_updates["datalab_processing_mode"] = target_datalab_processing_mode
         if target_datalab_key is not None:
             from pydantic import SecretStr
 
@@ -4828,6 +4854,7 @@ async def update_active_converter(request: ConverterChangeRequest) -> dict:
             "docling_mode": current_docling,
             "datalab_non_pdf_fallback": current_datalab_fallback,
             "datalab_merge_cross_page": get_datalab_merge_cross_page(data_dir),
+            "datalab_processing_mode": get_datalab_processing_mode(data_dir),
             "enable_vlm_captioning": get_enable_vlm_captioning(data_dir),
             "vlm_captioning_provider": get_vlm_captioning_provider(data_dir),
             "vlm_captioning_model": get_vlm_captioning_model(data_dir),
