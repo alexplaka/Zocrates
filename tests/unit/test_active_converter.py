@@ -39,6 +39,7 @@ class PdfOnlyConverter(BaseDocumentConverter):
 
     def convert(
         self, item_key: str, source_path: Path, content_type: str, cache_dir: Path,
+        options: dict | None = None,
     ) -> str | None:
         return f"# PDF-only conversion of {source_path.name}"
 
@@ -55,6 +56,7 @@ class UniversalConverter(BaseDocumentConverter):
 
     def convert(
         self, item_key: str, source_path: Path, content_type: str, cache_dir: Path,
+        options: dict | None = None,
     ) -> str | None:
         return f"# Universal conversion of {source_path.name}"
 
@@ -71,6 +73,7 @@ class EmptyConverter(BaseDocumentConverter):
 
     def convert(
         self, item_key: str, source_path: Path, content_type: str, cache_dir: Path,
+        options: dict | None = None,
     ) -> str | None:
         return None
 

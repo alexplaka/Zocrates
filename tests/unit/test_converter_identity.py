@@ -33,6 +33,7 @@ class TestConverterIdentityContract:
                 source_path: Path,
                 content_type: str,
                 cache_dir: Path,
+                options: dict | None = None,
             ) -> str | None:
                 return "text"
 
@@ -56,6 +57,7 @@ class TestConverterIdentityContract:
                 source_path: Path,
                 content_type: str,
                 cache_dir: Path,
+                options: dict | None = None,
             ) -> str | None:
                 return "text"
 
@@ -83,6 +85,7 @@ class TestConverterIdentityContract:
                 source_path: Path,
                 content_type: str,
                 cache_dir: Path,
+                options: dict | None = None,
             ) -> str | None:
                 return "text"
 

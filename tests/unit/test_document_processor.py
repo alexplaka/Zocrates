@@ -106,6 +106,7 @@ def test_custom_converter_registration(temp_cache_dir, tmp_path):
             source_path: Path,
             content_type: str,
             cache_dir: Path,
+            options: dict | None = None,
         ) -> str | None:
             return f"# Custom Converted: {source_path.name}"
 
@@ -176,7 +177,7 @@ def test_convert_with_failure_records_and_clears(temp_cache_dir, tmp_path):
         def supports(self, content_type: str, source_path: Path) -> bool:
             return True
 
-        def convert(self, item_key: str, source_path: Path, content_type: str, cache_dir: Path) -> str | None:
+        def convert(self, item_key: str, source_path: Path, content_type: str, cache_dir: Path, options: dict | None = None) -> str | None:
             if self.should_fail:
                 raise RuntimeError("Simulated OOM crash")
             return "# Success Content"

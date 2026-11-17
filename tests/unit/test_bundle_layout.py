@@ -201,6 +201,7 @@ class TestConverterReceivesItemDir:
                 source_path: Path,
                 content_type: str,
                 cache_dir: Path,
+                options: dict | None = None,
             ) -> str | None:
                 received_dirs.append(cache_dir)
                 return "spied"
