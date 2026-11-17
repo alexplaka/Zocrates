@@ -26,7 +26,7 @@ dependencies = [
     "filelock>=3.0.0",
     "pypdf",
     "docling",
-    "datalab-python-sdk>=0.7.1",
+    "datalab-python-sdk>=0.10.0",
     "Pillow",
     "resvg-py>=0.4.0",
     # [asyncio] extra is REQUIRED: it pulls greenlet, which sqlalchemy.ext.asyncio

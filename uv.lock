@@ -908,7 +908,7 @@ nvtx = [
 
 [[package]]
 name = "datalab-python-sdk"
-version = "0.7.1"
+version = "0.10.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -919,9 +919,9 @@ dependencies = [
     { name = "tenacity" },
     { name = "tqdm" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/cc/30/ffdc484993c9adaafafc2e1be620d597af86c61a888d4228a54ef1631c04/datalab_python_sdk-0.7.1.tar.gz", hash = "sha256:de51bc442688de223e8955a9b0f2f2a9e61f6da4d6a4f97fc6a7b3a5db13e68f", size = 1975480, upload-time = "2026-10-28T13:48:04.063Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f0/72/59506d67d286d8401d9efb3100b7c557f3b7e87c2299d28a2c16f6981fae/datalab_python_sdk-0.10.0.tar.gz", hash = "sha256:4447d51536ded6b35414a24bb234527b8aabcb84d3b28f9ade43d9afbb2d532a", size = 1995120, upload-time = "2026-11-13T06:46:52.592Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d3/c5/8719c43f5c0b682e43e80f267c55c37e5ac1d4f2f3d5a004a3fb88c89f70/datalab_python_sdk-0.7.1-py3-none-any.whl", hash = "sha256:75cfb96873b1ac2d07c703691af29e39c762ee7bcebfa161895c7dcaf5d8347d", size = 47461, upload-time = "2026-10-28T13:48:02.95Z" },
+    { url = "https://files.pythonhosted.org/packages/33/a3/9a6ba997cec0ddb50feb1e9b391f3bf79b169cbfa7edd3a478546425692f/datalab_python_sdk-0.10.0-py3-none-any.whl", hash = "sha256:bb832e50e2ba29421edf528edf4861cece8883e9157fc7f5f4404a0e42bc6442", size = 57800, upload-time = "2026-11-13T06:46:51.232Z" },
 ]
 
 [[package]]
@@ -5531,7 +5531,7 @@ requires-dist = [
     { name = "azure-ai-contentunderstanding", specifier = ">=1.2.0b1" },
     { name = "chromadb", specifier = ">=1.5" },
     { name = "codespell", marker = "extra == 'lint'", specifier = ">=2.2.0,<3.0.0" },
-    { name = "datalab-python-sdk", specifier = ">=0.7.1" },
+    { name = "datalab-python-sdk", specifier = ">=0.10.0" },
     { name = "docling" },
     { name = "fastapi", specifier = ">=0.115.0,<1.0.0" },
     { name = "filelock", specifier = ">=3.0.0" },
