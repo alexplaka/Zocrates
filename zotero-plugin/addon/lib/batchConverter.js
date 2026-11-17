@@ -761,6 +761,474 @@ var BatchConverter = {
     container.appendChild(overlay);
   },
 
+  // Datalab processing modes offered in the on-demand confirmation dialog. `lite` is
+  // structurally incompatible with the option set Zocrates always sends.
+  DATALAB_MODES: ["fast", "balanced", "accurate"],
+
+  // Phase 1 hardcodes the dialog's pre-selected mode. Phase 2 will drive it from the
+  // mode echoed by /cost-estimate (which will then follow the configured global default).
+  DATALAB_DEFAULT_MODE: "balanced",
+
+  _isDatalabMergeCrossPageActive(estimate) {
+    if (estimate && estimate.datalab_merge_cross_page !== undefined) {
+      return Boolean(estimate.datalab_merge_cross_page);
+    }
+    if (typeof Zotero !== "undefined" && Zotero.Prefs) {
+      try {
+        return Boolean(Zotero.Prefs.get("extensions.zocrates.datalabMergeCrossPage", true));
+      } catch (e) {}
+    }
+    return false;
+  },
+
+  // Per-page Datalab rate for a mode, tolerating version skew between independently
+  // rotating XPI and backend builds (older backends ship no per-mode map).
+  _datalabCostPerPageForMode(estimate, mode, totalPages) {
+    let map = estimate ? estimate.datalab_cost_per_page_usd : null;
+    if (map && typeof map[mode] === "number") {
+      return map[mode];
+    }
+    let costUsd = estimate ? (estimate.estimated_cost_usd || 0) : 0;
+    return totalPages > 0 ? costUsd / totalPages : 0;
+  },
+
+  /**
+   * Pre-flight confirmation dialog for Datalab conversions, hosting the processing-mode
+   * dropdown (Services.prompt.confirm cannot render widgets).
+   *
+   * Resolves with `{ mode, estimate }` when Proceed is accepted — `mode` is the frozen
+   * mode of the accepted estimate — or `null` when the dialog is dismissed (Cancel, ✕,
+   * Escape, overlay click). Estimate ordering: every request carries a generation token
+   * bumped on each mode change, and a response is only applied when its token is current
+   * AND its mode still matches the selected mode, so stale out-of-order responses are
+   * discarded. Proceed stays disabled until a matching estimate with eligible documents
+   * has been applied; estimate failures render an error state, never a $0.00 fallback.
+   */
+  renderDatalabModeModal(options = {}) {
+    let {
+      window: win = null,
+      keys = [],
+      converterId = "datalab",
+      force = false,
+      estimate = null,
+      fetchFn = null,
+      AbortControllerClass = null,
+      serverUrl = "",
+    } = options;
+
+    const XHTMLNS = "http://www.w3.org/1999/xhtml";
+    const MODES = this.DATALAB_MODES;
+    const DEFAULT_MODE = this.DATALAB_DEFAULT_MODE;
+    const NEXT_TIER_MODE = { fast: "balanced", balanced: "accurate", accurate: null };
+    const converterLabel = this.getConverterLabel(converterId);
+    // Phase 1 hook: the initial /cost-estimate call is issued with &mode=DEFAULT_MODE,
+    // so this resolves to "balanced" until Phase 2 makes the echo follow the global default.
+    const initialMode = estimate && MODES.indexOf(estimate.datalab_mode) !== -1
+      ? estimate.datalab_mode
+      : DEFAULT_MODE;
+
+    let targetDoc = (win && win.document) ||
+      (typeof Zotero !== "undefined" && Zotero.getMainWindow ? Zotero.getMainWindow().document : null);
+
+    // No DOM available (headless context): degrade to the legacy plain-text confirmation
+    // with the default mode rather than dead-ending the flow.
+    if (!targetDoc) {
+      let lines = [
+        `Convert ${keys.length} document${keys.length === 1 ? "" : "s"} with ${converterLabel}?`,
+        "",
+        `• Selected items: ${keys.length}`,
+      ];
+      if (estimate) {
+        let alreadyConverted = estimate.already_converted_count || 0;
+        let eligible = estimate.eligible_documents ?? Math.max((estimate.target_documents || keys.length) - alreadyConverted, 0);
+        // Unattended path must obey the same gates as the modal: no Proceed without
+        // an estimate, and nothing to do when everything is already converted.
+        if (!estimate || (eligible <= 0 && !force)) {
+          return Promise.resolve(null);
+        }
+        if (alreadyConverted > 0) lines.push(`• Already converted (will skip): ${alreadyConverted}`);
+        lines.push(`• To Convert: ${eligible} document(s)`);
+        let headlessPages = estimate.total_pages || 0;
+        if (headlessPages > 0) {
+          let perPage = this._datalabCostPerPageForMode(estimate, initialMode, headlessPages);
+          lines.push(`• Estimated Base Conversion Cost: ~$${(perPage * headlessPages).toFixed(4)} USD (${headlessPages} pages × $${(perPage * 1000).toFixed(2)}/1k)`);
+        }
+      } else {
+        return Promise.resolve(null);
+      }
+      lines.push(`• Processing mode: ${initialMode}`, "", "Proceed with conversion?");
+      let confirmed = true;
+      if (typeof Services !== "undefined" && Services.prompt) {
+        confirmed = Services.prompt.confirm(win || null, `Zocrates: ${converterLabel}`, lines.join("\n"));
+      }
+      return Promise.resolve(confirmed ? { mode: initialMode, estimate } : null);
+    }
+
+    return new Promise((resolve) => {
+      let existing = typeof targetDoc.getElementById === "function"
+        ? targetDoc.getElementById("zocrates-datalab-mode-overlay")
+        : null;
+      if (existing) {
+        // Clean up a still-open prior instance (listeners, in-flight estimate,
+        // unsettled Promise) instead of detaching its DOM node directly.
+        if (typeof existing._closeModal === "function") existing._closeModal();
+        else existing.remove();
+      }
+
+      let overlay = targetDoc.createElementNS(XHTMLNS, "div");
+      overlay.id = "zocrates-datalab-mode-overlay";
+      overlay.style.cssText = "position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.6); z-index: 999999; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(3px); box-sizing: border-box;";
+
+      const { theme, colors } = getActiveThemePalette(targetDoc);
+      if (typeof overlay.setAttribute === "function") {
+        overlay.setAttribute("data-theme", theme);
+      }
+      if (overlay.style) {
+        if (typeof overlay.style.setProperty === "function") {
+          overlay.style.setProperty("--bg-card", colors.bgCard);
+          overlay.style.setProperty("--bg-dark", colors.bgDark);
+          overlay.style.setProperty("--border", colors.border);
+          overlay.style.setProperty("--text-main", colors.textMain);
+          overlay.style.setProperty("--text-muted", colors.textMuted);
+          overlay.style.setProperty("--primary", colors.primary);
+          overlay.style.setProperty("--chip-bg", colors.chipBg);
+        } else {
+          overlay.style["--bg-card"] = colors.bgCard;
+          overlay.style["--bg-dark"] = colors.bgDark;
+          overlay.style["--border"] = colors.border;
+          overlay.style["--text-main"] = colors.textMain;
+          overlay.style["--text-muted"] = colors.textMuted;
+          overlay.style["--primary"] = colors.primary;
+          overlay.style["--chip-bg"] = colors.chipBg;
+        }
+      }
+
+      let card = targetDoc.createElementNS(XHTMLNS, "div");
+      card.style.cssText = "background: var(--bg-card, #1e293b); color: var(--text-main, #f1f5f9); border: 1px solid var(--border, rgba(255, 255, 255, 0.15)); border-radius: 10px; width: 480px; max-width: 90vw; max-height: 85vh; display: flex; flex-direction: column; box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px; box-sizing: border-box; overflow: hidden;";
+
+      // Header
+      let header = targetDoc.createElementNS(XHTMLNS, "div");
+      header.style.cssText = "display: flex; justify-content: space-between; align-items: flex-start; padding: 12px 16px; border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.1)); background: var(--chip-bg, rgba(255, 255, 255, 0.03));";
+
+      let headerTextContainer = targetDoc.createElementNS(XHTMLNS, "div");
+      headerTextContainer.style.cssText = "display: flex; flex-direction: column; gap: 2px;";
+
+      let titleEl = targetDoc.createElementNS(XHTMLNS, "div");
+      titleEl.style.cssText = "font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 8px;";
+      titleEl.textContent = `Convert ${keys.length} document${keys.length === 1 ? "" : "s"} with ${converterLabel}?`;
+      headerTextContainer.appendChild(titleEl);
+
+      let subEl = targetDoc.createElementNS(XHTMLNS, "div");
+      subEl.style.cssText = "font-size: 11.5px; color: var(--text-muted, #94a3b8);";
+      subEl.textContent = "Zocrates converts documents to Markdown for LLM-ingestion.";
+      headerTextContainer.appendChild(subEl);
+      header.appendChild(headerTextContainer);
+
+      let closeBtn = targetDoc.createElementNS(XHTMLNS, "button");
+      closeBtn.textContent = "✕";
+      closeBtn.style.cssText = "background: transparent; border: none; cursor: pointer; color: var(--text-muted, #94a3b8); font-size: 16px; padding: 2px 6px; border-radius: 4px; line-height: 1;";
+      closeBtn.title = "Close (Esc)";
+      closeBtn.addEventListener("click", () => finishModal(null));
+      header.appendChild(closeBtn);
+      card.appendChild(header);
+
+      // Body
+      let modalBody = targetDoc.createElementNS(XHTMLNS, "div");
+      modalBody.style.cssText = "padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; box-sizing: border-box;";
+
+      let infoBox = targetDoc.createElementNS(XHTMLNS, "div");
+      infoBox.id = "zocrates-datalab-mode-info";
+      infoBox.style.cssText = "background: var(--chip-bg, rgba(255, 255, 255, 0.03)); border: 1px solid var(--border, rgba(255, 255, 255, 0.08)); border-radius: 6px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; line-height: 1.4;";
+      modalBody.appendChild(infoBox);
+
+      let selectBox = targetDoc.createElementNS(XHTMLNS, "div");
+      selectBox.style.cssText = "display: flex; flex-direction: column; gap: 6px;";
+
+      let selectLabel = targetDoc.createElementNS(XHTMLNS, "label");
+      selectLabel.style.cssText = "font-weight: 600; font-size: 12px;";
+      selectLabel.textContent = "Processing mode:";
+      selectBox.appendChild(selectLabel);
+
+      let modeSelect = targetDoc.createElementNS(XHTMLNS, "select");
+      modeSelect.id = "zocrates-datalab-mode-select";
+      modeSelect.style.cssText = "width: 100%; padding: 6px 8px; font-size: 12px; border-radius: 5px; border: 1px solid var(--border, rgba(255, 255, 255, 0.2)); background: var(--bg-card, #0f172a); color: var(--text-main, inherit);";
+      MODES.forEach((mode) => {
+        let optEl = targetDoc.createElementNS(XHTMLNS, "option");
+        optEl.value = mode;
+        optEl.textContent = mode;
+        if (mode === initialMode) optEl.selected = true;
+        modeSelect.appendChild(optEl);
+      });
+      modeSelect.value = initialMode;
+      selectBox.appendChild(modeSelect);
+      modalBody.appendChild(selectBox);
+
+      let costBox = targetDoc.createElementNS(XHTMLNS, "div");
+      costBox.id = "zocrates-datalab-mode-cost";
+      costBox.style.cssText = "display: flex; flex-direction: column; gap: 4px; line-height: 1.4;";
+      modalBody.appendChild(costBox);
+
+      card.appendChild(modalBody);
+
+      // Footer
+      let footer = targetDoc.createElementNS(XHTMLNS, "div");
+      footer.style.cssText = "display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border, rgba(255, 255, 255, 0.1)); background: var(--chip-bg, rgba(255, 255, 255, 0.02));";
+
+      let cancelBtn = targetDoc.createElementNS(XHTMLNS, "button");
+      cancelBtn.id = "zocrates-datalab-cancel-btn";
+      cancelBtn.textContent = "Cancel";
+      cancelBtn.style.cssText = "padding: 6px 12px; font-size: 12px; font-weight: 500; cursor: pointer; border-radius: 5px; border: 1px solid var(--border, rgba(255, 255, 255, 0.2)); background: transparent; color: inherit;";
+      cancelBtn.addEventListener("click", () => finishModal(null));
+      footer.appendChild(cancelBtn);
+
+      let proceedBtn = targetDoc.createElementNS(XHTMLNS, "button");
+      proceedBtn.id = "zocrates-datalab-proceed-btn";
+      proceedBtn.textContent = "Proceed";
+      proceedBtn.style.cssText = "padding: 6px 14px; font-size: 12px; font-weight: 600; border-radius: 5px; border: none; background: var(--primary, #6366f1); color: #ffffff;";
+      proceedBtn.addEventListener("click", () => {
+        // The mock DOM's dispatchEvent does not honor .disabled, so gate in-handler too.
+        if (proceedBtn.disabled || !acceptedEstimate || acceptedEstimate.mode !== currentMode) return;
+        finishModal({ mode: acceptedEstimate.mode, estimate: acceptedEstimate.data });
+      });
+      footer.appendChild(proceedBtn);
+      card.appendChild(footer);
+
+      overlay.appendChild(card);
+
+      let container = targetDoc.body || targetDoc.documentElement;
+      container.appendChild(overlay);
+
+      // --- Dialog state -------------------------------------------------------
+      let currentMode = initialMode;
+      // Generation token: bumped on every mode change (and on retry) so that estimate
+      // responses issued for an older selection can never be applied. The item set is
+      // fixed for the lifetime of one dialog, so a new selection means a new dialog.
+      let generation = 0;
+      let acceptedEstimate = estimate ? { mode: initialMode, data: estimate } : null;
+      let inFlightController = null;
+      let settled = false;
+
+      let keyHandler = (e) => {
+        if (e.key === "Escape") finishModal(null);
+      };
+      targetDoc.addEventListener("keydown", keyHandler);
+      overlay.addEventListener("click", (e) => {
+        if (e.target === overlay) finishModal(null);
+      });
+
+      let finishModal = (decision) => {
+        if (settled) return;
+        settled = true;
+        if (inFlightController && typeof inFlightController.abort === "function") {
+          try {
+            inFlightController.abort();
+          } catch (e) {}
+        }
+        inFlightController = null;
+        overlay.remove();
+        overlay._closeModal = null;
+        targetDoc.removeEventListener("keydown", keyHandler);
+        resolve(decision);
+      };
+      // Exposed so a re-invocation of this modal can cleanly close a still-open
+      // prior instance (removing its listeners and in-flight estimate request).
+      overlay._closeModal = () => finishModal(null);
+
+      let setProceedEnabled = (enabled) => {
+        proceedBtn.disabled = !enabled;
+        proceedBtn.style.opacity = enabled ? "1" : "0.5";
+        proceedBtn.style.cursor = enabled ? "pointer" : "default";
+      };
+
+      let clearNode = (node) => {
+        while (node.firstChild) node.removeChild(node.firstChild);
+      };
+
+      let appendLine = (parent, text, cssText) => {
+        let row = targetDoc.createElementNS(XHTMLNS, "div");
+        if (cssText) row.style.cssText = cssText;
+        row.textContent = text;
+        parent.appendChild(row);
+        return row;
+      };
+
+      let appendSelectedItemsLine = () => {
+        appendLine(infoBox, `• Selected items: ${keys.length}`, "font-weight: 600;");
+      };
+
+      let renderAcceptedEstimate = () => {
+        clearNode(infoBox);
+        clearNode(costBox);
+
+        let data = acceptedEstimate.data || {};
+        let mode = acceptedEstimate.mode;
+        let targetDocs = data.target_documents != null ? data.target_documents : keys.length;
+        let alreadyConverted = data.already_converted_count || 0;
+        let eligibleCount = data.eligible_documents != null
+          ? data.eligible_documents
+          : Math.max(targetDocs - alreadyConverted, 0);
+        let totalPages = data.total_pages || 0;
+
+        appendSelectedItemsLine();
+        if (alreadyConverted > 0) {
+          appendLine(infoBox, `• Already converted (will skip): ${alreadyConverted}`);
+        }
+        if (eligibleCount === 0) {
+          // All selected PDFs are already converted at this mode: /cost-estimate sums
+          // total_pages over eligible attachments only, so totalPages is 0 here — the
+          // non-PDF fallback wording would mislabel PDFs and surface a $0.00 cost.
+          appendLine(infoBox, "• To Convert: 0 document(s)");
+        } else if (totalPages > 0) {
+          appendLine(infoBox, `• To Convert: ${eligibleCount} document(s) (${totalPages} PDF page(s) via Datalab)`);
+        } else {
+          appendLine(infoBox, `• To Convert: ${eligibleCount} non-PDF document(s) (via local fallback, $0.00 USD)`);
+        }
+
+        let nonPdfConverted = data.non_pdf_already_converted_count || 0;
+        if (nonPdfConverted > 0) {
+          let fallbackLabel = this.getConverterLabel(data.datalab_fallback_id || "markitdown");
+          appendLine(
+            infoBox,
+            `• Note: Datalab (Cloud) conversion applies to PDF files only. HTML snapshots and other non-PDF attachments are converted with the local fallback (${fallbackLabel}), which already converted ${nonPdfConverted} of the selected document(s).`,
+            "font-size: 11.5px; color: var(--text-muted, #94a3b8);"
+          );
+        }
+
+        if (eligibleCount === 0) {
+          // Non-terminal early exit (plan §3.5): the mode dropdown is exactly what can
+          // rescue an all-already-converted selection, so the dialog stays open.
+          let alreadyAtMode = alreadyConverted > 0 ? alreadyConverted : targetDocs;
+          appendLine(
+            infoBox,
+            `${alreadyAtMode} item(s) already converted at ${mode} — pick a different mode to re-convert them, or Cancel`,
+            "color: #f59e0b; font-weight: 500;"
+          );
+        }
+
+        if (eligibleCount > 0 && totalPages > 0) {
+          let perPage = this._datalabCostPerPageForMode(data, mode, totalPages);
+          // Displayed cost is derived from the displayed rate so the two can never disagree.
+          let displayCost = perPage * totalPages;
+          appendLine(
+            costBox,
+            `• Estimated Base Conversion Cost: ~$${displayCost.toFixed(4)} USD (${totalPages} pages × $${(perPage * 1000).toFixed(2)}/1k)`,
+            "font-weight: 500;"
+          );
+          if (this._isDatalabMergeCrossPageActive(data)) {
+            appendLine(
+              costBox,
+              "• Cross-Page Merging: Active (incurs variable compute surcharge; final cost may be higher)",
+              "font-size: 11.5px; color: var(--text-muted, #94a3b8);"
+            );
+          }
+          let retryMode = NEXT_TIER_MODE[mode];
+          if (retryMode) {
+            appendLine(
+              costBox,
+              `• Note: low parse quality may trigger one automatic retry at ${retryMode} and may incur additional billing.`,
+              "font-size: 11.5px; color: var(--text-muted, #94a3b8);"
+            );
+          }
+        }
+
+        setProceedEnabled(eligibleCount > 0);
+      };
+
+      let renderPendingEstimate = (mode) => {
+        clearNode(infoBox);
+        clearNode(costBox);
+        appendSelectedItemsLine();
+        appendLine(costBox, `• Estimating cost for "${mode}"…`, "color: var(--text-muted, #94a3b8);");
+        setProceedEnabled(false);
+      };
+
+      let renderEstimateError = (mode, detail) => {
+        clearNode(infoBox);
+        clearNode(costBox);
+        appendSelectedItemsLine();
+        appendLine(costBox, "Cost estimation failed — try again or Cancel", "color: #ef4444; font-weight: 500;");
+        if (detail) {
+          appendLine(costBox, detail, "font-size: 11.5px; color: var(--text-muted, #94a3b8);");
+        }
+        let retryBtn = targetDoc.createElementNS(XHTMLNS, "button");
+        retryBtn.id = "zocrates-datalab-retry-btn";
+        retryBtn.textContent = "Retry";
+        retryBtn.style.cssText = "align-self: flex-start; padding: 4px 10px; font-size: 11.5px; font-weight: 500; cursor: pointer; border-radius: 4px; border: 1px solid var(--border, rgba(255, 255, 255, 0.2)); background: transparent; color: inherit;";
+        retryBtn.addEventListener("click", () => loadMode(mode));
+        costBox.appendChild(retryBtn);
+        setProceedEnabled(false);
+      };
+
+      let requestEstimate = (mode) => {
+        if (inFlightController && typeof inFlightController.abort === "function") {
+          try {
+            inFlightController.abort();
+          } catch (e) {}
+        }
+        inFlightController = null;
+
+        if (!fetchFn) {
+          acceptedEstimate = null;
+          renderEstimateError(mode, "The fetch API is unavailable in this context.");
+          return;
+        }
+
+        let token = generation;
+        let controller = AbortControllerClass ? new AbortControllerClass() : null;
+        inFlightController = controller;
+        let requestOptions = { headers: this.getAuthHeaders() };
+        if (controller) requestOptions.signal = controller.signal;
+
+        let url =
+          `${serverUrl}/cost-estimate?converter_id=${encodeURIComponent(converterId)}` +
+          `&item_keys=${encodeURIComponent(keys.join(","))}` +
+          `&force=${force ? "true" : "false"}` +
+          `&mode=${encodeURIComponent(mode)}`;
+
+        renderPendingEstimate(mode);
+
+        fetchFn(url, requestOptions)
+          .then((res) => {
+            if (!res || !res.ok) {
+              throw new Error(res ? `Server returned HTTP ${res.status}` : "No estimate response");
+            }
+            return res.json();
+          })
+          .then((data) => {
+            if (settled || token !== generation || currentMode !== mode) return;
+            let echoedMode = data && data.datalab_mode;
+            if (echoedMode && echoedMode !== currentMode) return;
+            acceptedEstimate = { mode: currentMode, data };
+            renderAcceptedEstimate();
+          })
+          .catch((err) => {
+            if (settled || token !== generation || currentMode !== mode) return;
+            acceptedEstimate = null;
+            renderEstimateError(mode, err && err.message ? err.message : String(err));
+          });
+      };
+
+      let loadMode = (mode) => {
+        currentMode = MODES.indexOf(mode) === -1 ? DEFAULT_MODE : mode;
+        if (modeSelect.value !== currentMode) modeSelect.value = currentMode;
+        generation += 1;
+        acceptedEstimate = null;
+        requestEstimate(currentMode);
+      };
+
+      modeSelect.addEventListener("change", () => {
+        if (modeSelect.value === currentMode) return;
+        loadMode(modeSelect.value);
+      });
+
+      if (acceptedEstimate) {
+        renderAcceptedEstimate();
+      } else {
+        requestEstimate(currentMode);
+      }
+    });
+  },
+
   async startBatchConvert(items, converterId, options = {}) {
     try {
       let keys = this.getAttachmentKeysFromSelected(items);
@@ -792,10 +1260,16 @@ var BatchConverter = {
       // 1. Pre-flight estimate check
       let estimate = null;
       try {
-        let estRes = await fetchFn(
-          `${serverUrl}/cost-estimate?converter_id=${encodeURIComponent(converterId)}&item_keys=${encodeURIComponent(keys.join(","))}&force=${force ? "true" : "false"}`,
-          { headers: this.getAuthHeaders() }
-        );
+        // The Datalab dialog hosts a mode dropdown and prices/skips depend on the mode, so
+        // the opening estimate is fetched for the default mode (plan §3.2/§3.5).
+        let estimateUrl =
+          `${serverUrl}/cost-estimate?converter_id=${encodeURIComponent(converterId)}` +
+          `&item_keys=${encodeURIComponent(keys.join(","))}` +
+          `&force=${force ? "true" : "false"}`;
+        if (converterId === "datalab") {
+          estimateUrl += `&mode=${encodeURIComponent(this.DATALAB_DEFAULT_MODE)}`;
+        }
+        let estRes = await fetchFn(estimateUrl, { headers: this.getAuthHeaders() });
         if (estRes.ok) {
           estimate = await estRes.json();
           Zotero.debug("Zocrates: Cost estimate response: " + JSON.stringify(estimate));
@@ -807,17 +1281,13 @@ var BatchConverter = {
       let targetDocs = estimate ? estimate.target_documents : keys.length;
       let alreadyConverted = estimate ? (estimate.already_converted_count || 0) : 0;
       let eligibleCount = estimate ? (estimate.eligible_documents ?? (targetDocs - alreadyConverted)) : keys.length;
-      let totalPages = estimate ? (estimate.total_pages || 0) : 0;
-      let costUsd = estimate ? (estimate.estimated_cost_usd || 0.0) : 0.0;
 
-      if (eligibleCount === 0 && !force) {
+      // Datalab no longer dead-ends here: its mode dialog is exactly what can re-convert
+      // items that a different recorded mode left "not converted" (plan §3.5). The PDF-only
+      // fallback note moved into that dialog; non-Datalab converters keep the alert.
+      if (eligibleCount === 0 && !force && (converterId !== "datalab" || options.skipConfirm)) {
         if (typeof Services !== "undefined" && Services.prompt) {
           let alertText = `All ${targetDocs} selected document(s) are already converted.\n\nNo conversion is needed.`;
-          let nonPdfConverted = estimate ? (estimate.non_pdf_already_converted_count || 0) : 0;
-          if (converterId === "datalab" && nonPdfConverted > 0) {
-            let fallbackLabel = this.getConverterLabel(estimate.datalab_fallback_id || "markitdown");
-            alertText += `\n\nNote: Datalab (Cloud) conversion applies to PDF files only. HTML snapshots and other non-PDF attachments are converted with the local fallback (${fallbackLabel}), which already converted ${nonPdfConverted} of the selected document(s).`;
-          }
           Services.prompt.alert(
             options.window || null,
             "Zocrates Document Conversion",
@@ -828,60 +1298,64 @@ var BatchConverter = {
       }
 
       // 2. Pre-flight confirmation dialog for all conversions unless suppressed
+      let datalabMode = null;
       if (!options.skipConfirm) {
-        let promptLines = [
-          `Convert ${keys.length} document${keys.length === 1 ? "" : "s"} with ${converterLabel}?`,
-          "",
-          `• Selected items: ${keys.length}`,
-        ];
-
-        if (alreadyConverted > 0) {
-          promptLines.push(`• Already converted (will skip): ${alreadyConverted}`);
-        }
-
-        let mergeCrossPage = false;
-        if (estimate && estimate.datalab_merge_cross_page !== undefined) {
-          mergeCrossPage = Boolean(estimate.datalab_merge_cross_page);
-        } else if (typeof Zotero !== "undefined" && Zotero.Prefs) {
-          try {
-            mergeCrossPage = Boolean(Zotero.Prefs.get("extensions.zocrates.datalabMergeCrossPage", true));
-          } catch (e) {}
-        }
-
         if (converterId === "datalab") {
-          if (totalPages > 0) {
-            promptLines.push(`• To Convert: ${eligibleCount} document(s) (${totalPages} PDF page(s) via Datalab)`);
-            if (mergeCrossPage) {
-              promptLines.push(`• Estimated Base Cost: ~$${costUsd.toFixed(4)} USD`);
-              promptLines.push("• Cross-Page Merging: Active (incurs variable compute surcharge; final cost may be higher)");
-            } else {
-              promptLines.push(`• Estimated Cost: ~$${costUsd.toFixed(4)} USD`);
-            }
-          } else {
-            promptLines.push(`• To Convert: ${eligibleCount} non-PDF document(s) (via local fallback, $0.00 USD)`);
+          let decision = await this.renderDatalabModeModal({
+            window: options.window,
+            keys,
+            converterId,
+            force,
+            estimate,
+            fetchFn,
+            AbortControllerClass,
+            serverUrl,
+          });
+          if (!decision) {
+            Zotero.debug("Zocrates: User canceled Datalab processing-mode dialog.");
+            return;
+          }
+          datalabMode = decision.mode;
+          // The accepted (mode-consistent) estimate is what /batch-convert will bill, so
+          // the progress counters follow it too.
+          let frozenEstimate = decision.estimate || estimate;
+          if (frozenEstimate) {
+            let frozenAlreadyConverted = frozenEstimate.already_converted_count || 0;
+            eligibleCount = frozenEstimate.eligible_documents ??
+              Math.max((frozenEstimate.target_documents || keys.length) - frozenAlreadyConverted, 0);
           }
         } else {
+          let promptLines = [
+            `Convert ${keys.length} document${keys.length === 1 ? "" : "s"} with ${converterLabel}?`,
+            "",
+            `• Selected items: ${keys.length}`,
+          ];
+
+          if (alreadyConverted > 0) {
+            promptLines.push(`• Already converted (will skip): ${alreadyConverted}`);
+          }
+
           promptLines.push(`• To Convert: ${eligibleCount} document(s)`);
-        }
 
-        if (converterId !== "datalab" && estimate && estimate.vlm_captioning && estimate.vlm_captioning.enabled) {
-          let vlmModel = estimate.vlm_captioning.model || "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free";
-          let provLabel = estimate.vlm_captioning.provider === "ollama" ? "Ollama" : "OpenRouter";
-          promptLines.push(`• Figure Enrichment: Active (${provLabel}: ${vlmModel.replace("openrouter/", "")})`);
-        }
+          if (estimate && estimate.vlm_captioning && estimate.vlm_captioning.enabled) {
+            let vlmModel = estimate.vlm_captioning.model || "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free";
+            let provLabel = estimate.vlm_captioning.provider === "ollama" ? "Ollama" : "OpenRouter";
+            promptLines.push(`• Figure Enrichment: Active (${provLabel}: ${vlmModel.replace("openrouter/", "")})`);
+          }
 
-        promptLines.push("");
-        promptLines.push("Proceed with conversion?");
+          promptLines.push("");
+          promptLines.push("Proceed with conversion?");
 
-        if (typeof Services !== "undefined" && Services.prompt) {
-          let confirmed = Services.prompt.confirm(
-            options.window || null,
-            `Zocrates: ${converterLabel}`,
-            promptLines.join("\n")
-          );
-          if (!confirmed) {
-            Zotero.debug("Zocrates: User canceled batch conversion prompt.");
-            return;
+          if (typeof Services !== "undefined" && Services.prompt) {
+            let confirmed = Services.prompt.confirm(
+              options.window || null,
+              `Zocrates: ${converterLabel}`,
+              promptLines.join("\n")
+            );
+            if (!confirmed) {
+              Zotero.debug("Zocrates: User canceled batch conversion prompt.");
+              return;
+            }
           }
         }
       }
@@ -917,6 +1391,7 @@ var BatchConverter = {
             item_keys: keys,
             converter_id: converterId,
             force: force,
+            ...(datalabMode ? { datalab_mode: datalabMode } : {}),
           }),
           signal: abortSignal,
         });

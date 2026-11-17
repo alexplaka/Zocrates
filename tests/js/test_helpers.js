@@ -1002,6 +1002,9 @@ function setupMockEnvironment() {
     "zocrates-toolbar-btn",
     "zocrates-toolbar-style",
     "zocrates-info-modal-overlay",
+    // Owned by BatchConverter.renderDatalabModeModal: created on render and removed on
+    // close, so a lookup must never auto-vivify a detached stand-in element.
+    "zocrates-datalab-mode-overlay",
   ]);
 
   function findElementById(root, id) {
