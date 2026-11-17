@@ -765,8 +765,10 @@ var BatchConverter = {
   // structurally incompatible with the option set Zocrates always sends.
   DATALAB_MODES: ["fast", "balanced", "accurate"],
 
-  // Phase 1 hardcodes the dialog's pre-selected mode. Phase 2 will drive it from the
-  // mode echoed by /cost-estimate (which will then follow the configured global default).
+  // Fallback of last resort for the dialog's pre-selected mode: used only when the
+  // /cost-estimate echo is absent or carries an unknown datalab_mode. The normal path
+  // pre-selects the mode echoed by /cost-estimate, which follows the configured
+  // global default (datalab_processing_mode).
   DATALAB_DEFAULT_MODE: "balanced",
 
   _isDatalabMergeCrossPageActive(estimate) {
@@ -821,8 +823,8 @@ var BatchConverter = {
     const DEFAULT_MODE = this.DATALAB_DEFAULT_MODE;
     const NEXT_TIER_MODE = { fast: "balanced", balanced: "accurate", accurate: null };
     const converterLabel = this.getConverterLabel(converterId);
-    // Phase 1 hook: the initial /cost-estimate call is issued with &mode=DEFAULT_MODE,
-    // so this resolves to "balanced" until Phase 2 makes the echo follow the global default.
+    // Pre-select the mode echoed by /cost-estimate (the configured global default);
+    // DEFAULT_MODE only covers a missing/unknown echo.
     const initialMode = estimate && MODES.indexOf(estimate.datalab_mode) !== -1
       ? estimate.datalab_mode
       : DEFAULT_MODE;
