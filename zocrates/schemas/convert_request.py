@@ -43,3 +43,4 @@ class BatchConvertRequest(BaseModel):
     item_keys: list[str]
     converter_id: str | None = None
     force: bool = False
+    datalab_mode: Literal["fast", "balanced", "accurate"] | None = None

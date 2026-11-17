@@ -1959,11 +1959,13 @@ class DatalabConverter(BaseDocumentConverter):
                 ast_copy = dict(ast_data)
                 ast_copy["parse_quality_score"] = score
                 ast_copy["checkpoint_id"] = checkpoint_id
+                ast_copy["mode"] = mode
                 json_path.write_text(json.dumps(ast_copy, indent=2), encoding="utf-8")
             else:
                 meta_dump = {
                     "parse_quality_score": score,
                     "checkpoint_id": checkpoint_id,
+                    "mode": mode,
                     "runtime": getattr(result, "runtime", None),
                     "page_count": getattr(result, "page_count", None),
                 }
