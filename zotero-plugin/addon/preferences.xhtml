@@ -507,6 +507,91 @@
       .zc-drawer-chevron {
         transition: none !important;
       }
+
+      .zc-apply-flash {
+        animation: none;
+      }
+    }
+    /* Unsaved-change indicators (A+C): per-card header dot + sticky bottom pill.
+       Driven by the existing dirty-state comparison — settings that save
+       immediately never enter a dirty state, so they never trigger these. */
+    .zc-dirty-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #f59e0b;
+      flex-shrink: 0;
+      margin-left: 8px;
+      box-shadow: 0 0 6px rgba(245, 158, 11, 0.55);
+    }
+
+    /* Per-control unsaved dot: same amber signal as the card-level dot, but
+       smaller and inline after the control's label text so it reads as
+       subordinate to the card indicator while naming the exact option. */
+    .zc-field-dirty-dot {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #f59e0b;
+      flex-shrink: 0;
+      margin-left: 6px;
+      box-shadow: 0 0 5px rgba(245, 158, 11, 0.5);
+    }
+
+    .zc-unsaved-pill-stack {
+      position: fixed;
+      bottom: 18px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      pointer-events: none;
+    }
+
+    .zc-unsaved-pill {
+      all: unset;
+      pointer-events: auto;
+      box-sizing: border-box;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      border-radius: 999px;
+      /* Theme-token background/text so the pill adapts to light mode; the
+         amber border + dot carry the unsaved-changes signal in both modes. */
+      background: var(--zc-card-bg);
+      border: 1px solid rgba(245, 158, 11, 0.45);
+      color: var(--zc-text-main);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 12.5px;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+    }
+
+    .zc-unsaved-pill:hover {
+      border-color: #f59e0b;
+    }
+
+    /* all:unset zeroes the focus outline on this real button; keep keyboard
+       focus visible (same pattern as .zc-drawer-header). */
+    .zc-unsaved-pill:focus-visible {
+      outline: 2px solid var(--zc-accent);
+      outline-offset: 2px;
+    }
+
+    @keyframes zcApplyFlash {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+      40% { box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.45); }
+    }
+
+    .zc-apply-flash {
+      animation: zcApplyFlash 0.9s ease-in-out 2;
     }
   </html:style>
 
@@ -649,7 +734,10 @@
           <html:span class="zc-card-title">Citation Verification</html:span>
           <html:span class="zc-card-desc">Probabilistic verification of synthesized claims against supporting source content using fast decision models.</html:span>
         </html:span>
-        <html:span class="zc-drawer-chevron"></html:span>
+        <html:span style="display: flex; align-items: center; gap: 8px;">
+          <html:span id="citation-verification-dirty-dot" class="zc-dirty-dot" style="display: none;"></html:span>
+          <html:span class="zc-drawer-chevron"></html:span>
+        </html:span>
       </html:button>
       <html:div class="zc-card-body-wrap" id="citation-verification-card-body">
         <html:div class="zc-card-body">
@@ -657,12 +745,12 @@
           <!-- Enable Toggle -->
           <html:div class="zc-form-group-row" style="margin-bottom: 12px;">
             <html:input type="checkbox" id="citation-verification-enabled-toggle" />
-            <html:label for="citation-verification-enabled-toggle">Enable Citation Verification</html:label>
+            <html:label for="citation-verification-enabled-toggle">Enable Citation Verification<html:span id="citation-verification-enabled-toggle-dirty-dot" class="zc-field-dirty-dot" style="display: none;"></html:span></html:label>
           </html:div>
 
           <!-- Provider Select -->
           <html:div class="zc-form-group" id="verification-provider-group">
-            <html:label for="verification-provider-select">Decision Model Provider</html:label>
+            <html:label for="verification-provider-select">Decision Model Provider<html:span id="verification-provider-select-dirty-dot" class="zc-field-dirty-dot" style="display: none;"></html:span></html:label>
             <html:select id="verification-provider-select">
               <html:option value="openrouter">OpenRouter (Remote Decision Models)</html:option>
               <html:option value="local_laya">Laya Local Server (Offline / Private uv Tool)</html:option>
@@ -678,7 +766,7 @@
           <!-- OpenRouter Model Group -->
           <html:div class="zc-form-group" id="verification-openrouter-model-group">
             <html:div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-              <html:label for="verification-model-select">Active Remote Model</html:label>
+              <html:label for="verification-model-select">Active Remote Model<html:span id="verification-model-select-dirty-dot" class="zc-field-dirty-dot" style="display: none;"></html:span></html:label>
               <html:button type="button" id="refresh-verification-models-btn" class="zc-refresh-icon-btn" title="Refresh decision model catalog from OpenRouter">&#x21BB;</html:button>
             </html:div>
             <html:select id="verification-model-select">
@@ -713,7 +801,7 @@
 
             <html:div class="zc-form-group-row" style="margin-top: 10px; margin-bottom: 0;">
               <html:input type="checkbox" id="auto-start-laya-toggle" checked="checked" />
-              <html:label for="auto-start-laya-toggle" style="font-size: 12px;">Automatically start and manage Laya daemon with Zocrates</html:label>
+              <html:label for="auto-start-laya-toggle" style="font-size: 12px;">Automatically start and manage Laya daemon with Zocrates<html:span id="auto-start-laya-toggle-dirty-dot" class="zc-field-dirty-dot" style="display: none;"></html:span></html:label>
             </html:div>
 
             <html:div class="zc-help-text" style="margin-top: 6px; font-size: 11.5px; opacity: 0.8;">
@@ -723,7 +811,7 @@
 
           <!-- Threshold Input with Stepper -->
           <html:div class="zc-form-group">
-            <html:label for="verification-threshold-input">Support Probability Threshold (&#964;)</html:label>
+            <html:label for="verification-threshold-input">Support Probability Threshold (&#964;)<html:span id="verification-threshold-input-dirty-dot" class="zc-field-dirty-dot" style="display: none;"></html:span></html:label>
             <html:div style="display: flex; align-items: center; gap: 10px; margin-top: 4px;">
               <html:input type="number" id="verification-threshold-input" min="0.00" max="0.95" step="0.05" value="0.60" style="max-width: 110px; padding: 6px 10px; font-weight: 600; font-size: 13px; text-align: center;" />
               <html:span style="font-size: 12px; color: var(--zc-text-muted);">(Range: 0.00 &#8211; 0.95, default: 0.60)</html:span>
@@ -760,14 +848,17 @@
           <html:span class="zc-card-title">LLM Provider and Model</html:span>
           <html:span class="zc-card-desc">Configure remote or local LLMs used by Zocrates.</html:span>
         </html:span>
-        <html:span class="zc-drawer-chevron"></html:span>
+        <html:span style="display: flex; align-items: center; gap: 8px;">
+          <html:span id="llm-provider-dirty-dot" class="zc-dirty-dot" style="display: none;"></html:span>
+          <html:span class="zc-drawer-chevron"></html:span>
+        </html:span>
       </html:button>
       <html:div class="zc-card-body-wrap" id="llm-provider-card-body">
         <html:div class="zc-card-body">
 
       <!-- LLM Provider Select -->
       <html:div class="zc-form-group">
-        <html:label for="llm-provider-select">LLM Provider</html:label>
+        <html:label for="llm-provider-select">LLM Provider<html:span id="llm-provider-select-dirty-dot" class="zc-field-dirty-dot" style="display: none;"></html:span></html:label>
         <html:select id="llm-provider-select">
           <html:option value="openrouter_llm">OpenRouter (Remote Models)</html:option>
           <html:option value="ollama">Ollama (Local Server)</html:option>
@@ -784,13 +875,13 @@
 
       <!-- Base URL Input for Local Providers -->
       <html:div class="zc-form-group" id="llm-base-url-group" style="display: none;">
-        <html:label for="llm-base-url-input">Server Base URL</html:label>
+        <html:label for="llm-base-url-input">Server Base URL<html:span id="llm-base-url-input-dirty-dot" class="zc-field-dirty-dot" style="display: none;"></html:span></html:label>
         <html:input type="text" id="llm-base-url-input" placeholder="http://localhost:11434" />
       </html:div>
 
       <!-- LLM Model Selection -->
       <html:div class="zc-form-group" id="llm-model-group">
-        <html:label for="llm-model-select">LLM</html:label>
+        <html:label for="llm-model-select">LLM<html:span id="llm-model-select-dirty-dot" class="zc-field-dirty-dot" style="display: none;"></html:span></html:label>
         <!-- Quick Filter Chips -->
         <html:div id="llm-filter-chips" style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;">
           <html:button type="button" class="zc-chip-btn zc-chip-active" data-filter="all">All</html:button>
@@ -859,23 +950,29 @@
           <html:span class="zc-card-title">Document Converter</html:span>
           <html:span class="zc-card-desc">Select the document conversion engine used for processing attachments.</html:span>
         </html:span>
-        <html:span class="zc-drawer-chevron"></html:span>
+        <html:span style="display: flex; align-items: center; gap: 8px;">
+          <html:span id="document-converter-dirty-dot" class="zc-dirty-dot" style="display: none;"></html:span>
+          <html:span class="zc-drawer-chevron"></html:span>
+        </html:span>
       </html:button>
       <html:div class="zc-card-body-wrap" id="document-converter-card-body">
         <html:div class="zc-card-body">
 
       <!-- Converter Engine Selector -->
       <html:div class="zc-form-group">
-        <html:select id="document-converter-select">
-          <html:option value="markitdown">Markitdown (Local)</html:option>
-          <html:option value="docling_local">Docling (Local)</html:option>
-          <html:option value="datalab">Datalab (Cloud)</html:option>
-        </html:select>
+        <html:div style="display: flex; align-items: center;">
+          <html:select id="document-converter-select" style="flex: 1; min-width: 0;">
+            <html:option value="markitdown">Markitdown (Local)</html:option>
+            <html:option value="docling_local">Docling (Local)</html:option>
+            <html:option value="datalab">Datalab (Cloud)</html:option>
+          </html:select>
+          <html:span id="document-converter-select-dirty-dot" class="zc-field-dirty-dot" style="display: none;"></html:span>
+        </html:div>
       </html:div>
 
       <!-- Datalab API Key Panel -->
       <html:div class="zc-form-group" id="datalab-key-group" style="display: none; margin-top: 8px;">
-        <html:label for="datalab-api-key-input">Datalab API Key</html:label>
+        <html:label for="datalab-api-key-input">Datalab API Key<html:span id="datalab-api-key-input-dirty-dot" class="zc-field-dirty-dot" style="display: none;"></html:span></html:label>
         <html:div style="display: flex; gap: 8px; align-items: center;">
           <html:input type="password" id="datalab-api-key-input" placeholder="datalab-api-key-..." style="flex: 1;" />
           <html:button type="button" id="toggle-datalab-key-btn" class="zc-input-action-btn">Show</html:button>
@@ -889,11 +986,28 @@
         </html:div>
       </html:div>
 
+      <!-- Datalab Processing Mode Setting (Visible only when Datalab is selected) -->
+      <html:div class="zc-form-group" id="datalab-processing-mode-container" style="display: none; margin-top: 12px; padding: 12px; border-radius: 8px; background-color: var(--zc-hw-bg); border: 1px solid var(--zc-border);">
+        <html:label for="datalab-processing-mode-select" style="font-weight: 600; font-size: 13px; color: var(--zc-text-main); margin-bottom: 4px; display: block;">Processing mode<html:span id="datalab-processing-mode-select-dirty-dot" class="zc-field-dirty-dot" style="display: none;"></html:span></html:label>
+        <html:div style="font-size: 12px; color: var(--zc-text-muted); margin-bottom: 8px;">
+          Default mode for Datalab conversions without an explicit on-demand selection.
+        </html:div>
+        <html:select id="datalab-processing-mode-select">
+          <html:option value="fast">Fast ($0.00133/page)</html:option>
+          <html:option value="balanced">Balanced ($0.004/page)</html:option>
+          <html:option value="accurate">Accurate ($0.010/page)</html:option>
+        </html:select>
+        <html:div style="font-size: 11px; color: var(--zc-text-muted); margin-top: 6px; line-height: 1.4;">
+          Lower tiers are cheaper but may trigger one automatic retry at the next tier when parse quality is low.
+        </html:div>
+      </html:div>
+
       <!-- Datalab Merge Cross Page Setting (Visible only when Datalab is selected) -->
       <html:div class="zc-form-group" id="datalab-merge-cross-page-container" style="display: none; margin-top: 12px; padding: 12px; border-radius: 8px; background-color: var(--zc-hw-bg); border: 1px solid var(--zc-border);">
         <html:label style="display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; color: var(--zc-text-main); cursor: pointer; margin-bottom: 4px;">
           <html:input type="checkbox" id="datalab-merge-cross-page-checkbox" />
           <html:span>Merge tables &amp; paragraphs across page breaks</html:span>
+          <html:span id="datalab-merge-cross-page-checkbox-dirty-dot" class="zc-field-dirty-dot" style="display: none;"></html:span>
         </html:label>
         <html:div style="font-size: 11px; color: var(--zc-text-muted); line-height: 1.4;">
           Stitches multi-page tables and split paragraphs into cohesive blocks.<html:br />
@@ -903,7 +1017,7 @@
 
       <!-- Datalab Non-PDF Fallback Setting (Visible only when Datalab is selected) -->
       <html:div class="zc-form-group" id="datalab-fallback-container" style="display: none; margin-top: 12px; padding: 12px; border-radius: 8px; background-color: var(--zc-hw-bg); border: 1px solid var(--zc-border);">
-        <html:label style="font-weight: 600; font-size: 13px; color: var(--zc-text-main); margin-bottom: 4px; display: block;">Non-PDF Fallback Converter</html:label>
+        <html:label style="font-weight: 600; font-size: 13px; color: var(--zc-text-main); margin-bottom: 4px; display: block;">Non-PDF Fallback Converter<html:span id="datalab-fallback-dirty-dot" class="zc-field-dirty-dot" style="display: none;"></html:span></html:label>
         <html:div style="font-size: 12px; color: var(--zc-text-muted); margin-bottom: 8px;">
           Datalab only accepts PDF attachments. Choose an offline engine to process HTML web snapshots and other non-PDF files:
         </html:div>
@@ -924,6 +1038,7 @@
         <html:label style="display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; color: var(--zc-text-main); cursor: pointer; margin-bottom: 4px;">
           <html:input type="checkbox" id="enable-vlm-captioning-checkbox" checked="checked" />
           <html:span>Automatically caption figures &amp; diagrams during conversion</html:span>
+          <html:span id="enable-vlm-captioning-checkbox-dirty-dot" class="zc-field-dirty-dot" style="display: none;"></html:span>
         </html:label>
         <html:div style="font-size: 11px; color: var(--zc-text-muted); margin-bottom: 12px; line-height: 1.4;">
           Uses a Vision-Language Model (VLM) to generate structured visual descriptions, making plots, flowcharts, and diagrams searchable via hybrid RAG.
@@ -940,6 +1055,8 @@
               <html:input type="radio" name="vlm-captioning-provider" id="vlm-provider-ollama" value="ollama" />
               <html:span><html:b>Ollama</html:b> (Local)</html:span>
             </html:label>
+            <!-- One dot for the provider pair: both radios persist the same field. -->
+            <html:span id="vlm-provider-dirty-dot" class="zc-field-dirty-dot" style="display: none;"></html:span>
           </html:div>
           <html:div id="vlm-key-missing-notice" style="display: none; font-size: 12px; margin-top: 4px;" class="zc-text-warning">
             &#x26A0;&#xFE0F; OPENROUTER_API_KEY missing. VLM figure captioning disabled until a key is provided or the Ollama option is selected.
@@ -952,7 +1069,7 @@
           <html:div class="zc-form-group" id="vlm-cloud-model-group" style="margin: 0; display: flex; flex-direction: column; gap: 10px;">
             <!-- Primary VLM Select -->
             <html:div class="zc-form-group" style="margin: 0;">
-              <html:label for="vlm-primary-model-select">Primary VLM Model (Cloud)</html:label>
+              <html:label for="vlm-primary-model-select">Primary VLM Model (Cloud)<html:span id="vlm-primary-model-select-dirty-dot" class="zc-field-dirty-dot" style="display: none;"></html:span></html:label>
               <html:select id="vlm-primary-model-select" style="width: 100%; box-sizing: border-box;">
                 <html:option value="openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free">nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free (Free)</html:option>
               </html:select>
@@ -961,7 +1078,7 @@
 
             <!-- Fallback VLM Select -->
             <html:div class="zc-form-group" style="margin: 0;">
-              <html:label for="vlm-backup-model-select">Fallback VLM Model (Cloud)</html:label>
+              <html:label for="vlm-backup-model-select">Fallback VLM Model (Cloud)<html:span id="vlm-backup-model-select-dirty-dot" class="zc-field-dirty-dot" style="display: none;"></html:span></html:label>
               <html:select id="vlm-backup-model-select" style="width: 100%; box-sizing: border-box;">
                 <html:option value="openrouter/qwen/qwen3.7-flash">qwen/qwen3.7-flash</html:option>
               </html:select>
@@ -974,13 +1091,13 @@
 
           <!-- Local Model Input -->
           <html:div class="zc-form-group" id="vlm-local-model-group" style="display: none; margin: 0;">
-            <html:label for="vlm-local-model-input">Local Ollama Vision Model</html:label>
+            <html:label for="vlm-local-model-input">Local Ollama Vision Model<html:span id="vlm-local-model-input-dirty-dot" class="zc-field-dirty-dot" style="display: none;"></html:span></html:label>
             <html:input type="text" id="vlm-local-model-input" placeholder="e.g. llava:latest, minicpm-v:latest" style="width: 100%; box-sizing: border-box;" />
           </html:div>
 
           <!-- Max Images per Doc Input -->
           <html:div class="zc-form-group-row" id="vlm-max-images-group" style="margin: 0; justify-content: space-between;">
-            <html:label for="vlm-max-images-input" style="font-size: 13px; margin: 0;">Max Images / Document</html:label>
+            <html:label for="vlm-max-images-input" style="font-size: 13px; margin: 0;">Max Images / Document<html:span id="vlm-max-images-input-dirty-dot" class="zc-field-dirty-dot" style="display: none;"></html:span></html:label>
             <html:input type="number" id="vlm-max-images-input" min="1" max="200" value="100" style="width: 70px; text-align: center;" />
           </html:div>
         </html:div>
@@ -1013,14 +1130,17 @@
           <html:span class="zc-card-title">Embeddings Provider &amp; Model</html:span>
           <html:span class="zc-card-desc">Configure embeddings mode (local vs cloud provider) and embedding model.</html:span>
         </html:span>
-        <html:span class="zc-drawer-chevron"></html:span>
+        <html:span style="display: flex; align-items: center; gap: 8px;">
+          <html:span id="embeddings-dirty-dot" class="zc-dirty-dot" style="display: none;"></html:span>
+          <html:span class="zc-drawer-chevron"></html:span>
+        </html:span>
       </html:button>
       <html:div class="zc-card-body-wrap" id="embeddings-card-body">
         <html:div class="zc-card-body">
 
       <!-- Embedding Mode Selection Selector -->
       <html:div class="zc-form-group">
-        <html:label for="embedding-mode-select">Embeddings Mode</html:label>
+        <html:label for="embedding-mode-select">Embeddings Mode<html:span id="embedding-mode-select-dirty-dot" class="zc-field-dirty-dot" style="display: none;"></html:span></html:label>
         <html:select id="embedding-mode-select">
           <html:option value="local">Local</html:option>
           <html:option value="cloud">Cloud (OpenRouter)</html:option>
@@ -1039,7 +1159,7 @@
 
       <!-- Permanent Embeddings Model Selector -->
       <html:div class="zc-form-group" id="embedding-model-group">
-        <html:label for="embedding-model-select">Embeddings Model</html:label>
+        <html:label for="embedding-model-select">Embeddings Model<html:span id="embedding-model-select-dirty-dot" class="zc-field-dirty-dot" style="display: none;"></html:span></html:label>
         <html:select id="embedding-model-select" style="width: 100%; box-sizing: border-box;">
           <html:option value="jinaai/jina-embeddings-v5-text-nano">jinaai/jina-embeddings-v5-text-nano (768d)</html:option>
         </html:select>
@@ -1182,5 +1302,29 @@
         </html:div>
       </html:div>
     </html:div>
+  </html:div>
+
+  <!-- Sticky unsaved-changes pills: one per Apply-gated card, stacked at the
+       bottom of the settings window. Each pill is visible while its card has
+       dirty options, regardless of scroll position or drawer state; clicking
+       scrolls to and flashes that card's Apply button. Card-specific labels
+       keep multiple simultaneous dirty cards unambiguous. -->
+  <html:div id="zc-unsaved-pill-stack" class="zc-unsaved-pill-stack">
+    <html:button type="button" id="zc-unsaved-llm-pill" class="zc-unsaved-pill" style="display: none;">
+      <html:span class="zc-dirty-dot" style="margin-left: 0;"></html:span>
+      <html:span>Unsaved LLM changes — Apply</html:span>
+    </html:button>
+    <html:button type="button" id="zc-unsaved-embedding-pill" class="zc-unsaved-pill" style="display: none;">
+      <html:span class="zc-dirty-dot" style="margin-left: 0;"></html:span>
+      <html:span>Unsaved embedding changes — Apply</html:span>
+    </html:button>
+    <html:button type="button" id="zc-unsaved-verification-pill" class="zc-unsaved-pill" style="display: none;">
+      <html:span class="zc-dirty-dot" style="margin-left: 0;"></html:span>
+      <html:span>Unsaved verification changes — Apply</html:span>
+    </html:button>
+    <html:button type="button" id="zc-unsaved-converter-pill" class="zc-unsaved-pill" style="display: none;">
+      <html:span class="zc-dirty-dot" style="margin-left: 0;"></html:span>
+      <html:span>Unsaved converter changes — Apply</html:span>
+    </html:button>
   </html:div>
 </vbox>

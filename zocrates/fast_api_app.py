@@ -134,6 +134,18 @@ from zocrates.rag.bundle_catalog import generate_root_index_md
 
 _SAFE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+\Z")
 
+# Datalab Convert API per-page list prices by processing mode. Rates retrieved
+# 2026-11-16 from
+# https://documentation.datalab.to/docs/recipes/conversion/conversion-api-overview#processing-modes
+# List prices are deliberately used as the maximum-cost disclosure: the
+# maintainer's account is billed 75% of list on all three modes (opt-in
+# data-training discount), so an estimate may over-report by up to 33%.
+DATALAB_COST_PER_PAGE: dict[str, float] = {
+    "fast": 0.00133,
+    "balanced": 0.004,
+    "accurate": 0.01,
+}
+
 
 def _validate_item_key(item_key: str) -> bool:
     """Validate item key to prevent path traversal."""
@@ -771,6 +783,7 @@ async def status(request: Request) -> dict:
         get_datalab_api_key,
         get_datalab_merge_cross_page,
         get_datalab_non_pdf_fallback,
+        get_datalab_processing_mode,
         get_docling_mode,
         get_enable_vlm_captioning,
         get_force_cpu_pref,
@@ -847,6 +860,7 @@ async def status(request: Request) -> dict:
             "conversion_timeout_seconds": get_conversion_timeout_seconds(syncer._zotero_data_dir, cfg=cfg),
             "datalab_non_pdf_fallback": get_datalab_non_pdf_fallback(syncer._zotero_data_dir, cfg=cfg),
             "datalab_merge_cross_page": get_datalab_merge_cross_page(syncer._zotero_data_dir, cfg=cfg),
+            "datalab_processing_mode": get_datalab_processing_mode(syncer._zotero_data_dir, cfg=cfg),
             "has_datalab_key": bool(get_datalab_api_key(syncer._zotero_data_dir)),
             "has_openalex_api_key": bool(get_openalex_api_key(syncer._zotero_data_dir)),
             "docling_mode": get_docling_mode(syncer._zotero_data_dir, cfg=cfg),
@@ -916,6 +930,7 @@ async def status(request: Request) -> dict:
             "document_converter_mode": cfg.get("document_converter_mode", "local"),
             "datalab_non_pdf_fallback": get_datalab_non_pdf_fallback(cfg=cfg),
             "datalab_merge_cross_page": get_datalab_merge_cross_page(cfg=cfg),
+            "datalab_processing_mode": get_datalab_processing_mode(cfg=cfg),
             "has_datalab_key": bool(get_datalab_api_key()),
             "has_openalex_api_key": bool(get_openalex_api_key()),
             "docling_mode": get_docling_mode(cfg=cfg),
@@ -1581,41 +1596,51 @@ async def convert_item(item_key: str, request: ConvertRequest | None = None) -> 
         effective_id = syncer.processor.datalab_non_pdf_fallback or "markitdown"
 
     force = request.force if request else False
+    effective_mode: str | None = None
+    if effective_id == "datalab":
+        from zocrates.config import get_datalab_processing_mode
+
+        # An explicit on-demand override wins over the configured global default.
+        requested_mode = request.datalab_mode if request else None
+        effective_mode = requested_mode or get_datalab_processing_mode(
+            syncer._zotero_data_dir
+        )
     if not force and syncer.processor.is_cached(attachment.item_key):
-        from zocrates.rag.document_processor import _file_sha256
+        from zocrates.rag.document_processor import _file_sha256, matches_conversion_identity
 
         meta = syncer.processor.get_metadata(attachment.item_key)
         if meta and meta.get("converter_id") == effective_id:
+            current_hash = None
             try:
                 current_hash = _file_sha256(attachment.path)
-                if meta.get("source_hash") == current_hash:
-                    if attachment.parent_item_key:
-                        from zocrates.rag.library_syncer import (
-                            supersede_metadata_bundle_if_needed,
-                        )
-
-                        supersede_metadata_bundle_if_needed(attachment.parent_item_key, syncer)
-                    logger.info(
-                        "Skipping already converted item %s ('%s') with %s",
-                        attachment.item_key,
-                        p_title,
-                        effective_id,
-                    )
-                    return {
-                        "status": "skipped",
-                        "message": f"Already converted with {effective_id}",
-                        "item_key": attachment.item_key,
-                        "parent_item_key": attachment.parent_item_key,
-                        "title": p_title,
-                        "converter_id": effective_id,
-                        "already_converted": True,
-                    }
             except Exception as exc:
                 logger.warning(
                     "Failed to verify source hash for %s: %s",
                     attachment.item_key,
                     exc,
                 )
+            if matches_conversion_identity(meta, effective_id, effective_mode, current_hash):
+                if attachment.parent_item_key:
+                    from zocrates.rag.library_syncer import (
+                        supersede_metadata_bundle_if_needed,
+                    )
+
+                    supersede_metadata_bundle_if_needed(attachment.parent_item_key, syncer)
+                logger.info(
+                    "Skipping already converted item %s ('%s') with %s",
+                    attachment.item_key,
+                    p_title,
+                    effective_id,
+                )
+                return {
+                    "status": "skipped",
+                    "message": f"Already converted with {effective_id}",
+                    "item_key": attachment.item_key,
+                    "parent_item_key": attachment.parent_item_key,
+                    "title": p_title,
+                    "converter_id": effective_id,
+                    "already_converted": True,
+                }
 
     try:
         from zocrates.config import get_conversion_timeout_seconds
@@ -1638,6 +1663,19 @@ async def convert_item(item_key: str, request: ConvertRequest | None = None) -> 
                 doi=p_doi,
                 url=p_url,
                 abstract=p_abstract,
+                # Re-check under the per-item lock: the gate above runs before this
+                # thread is dispatched, so a concurrent request may have converted
+                # the item in the meantime.
+                skip_converted=not force,
+                # Absent override -> options stay unset so the processor resolves
+                # the configured global default mode.
+                options=(
+                    {"mode": request.datalab_mode}
+                    if effective_id == "datalab"
+                    and request is not None
+                    and request.datalab_mode
+                    else None
+                ),
             ),
             timeout=timeout_sec,
         )
@@ -1784,9 +1822,17 @@ async def cost_estimate(
         converter_id: str = "datalab",
         item_keys: str | None = None,
         force: bool = False,
+        mode: str | None = None,
 ) -> dict:
-    """Estimate page count and USD cost for a paid converter across targeted items."""
-    from zocrates.rag.document_processor import _file_sha256
+    """Estimate page count and USD cost for a paid converter across targeted items.
+
+    ``mode`` selects the Datalab processing mode priced here; when omitted the
+    central resolver supplies the configured default
+    (``datalab_processing_mode``, ``'balanced'`` out of the box).
+    An unsupported explicit value is rejected with HTTP 422.
+    """
+    from zocrates.config import get_datalab_processing_mode, validate_datalab_mode
+    from zocrates.rag.document_processor import _file_sha256, matches_conversion_identity
     from zocrates.rag.pdf_utils import count_pdf_pages
 
     try:
@@ -1797,14 +1843,32 @@ async def cost_estimate(
             detail="Zocrates backend is not registered. Call /register first.",
         ) from exc
 
+    requested_mode = mode.strip() if isinstance(mode, str) else None
+    if not requested_mode:
+        requested_mode = None  # omitted/blank flows through the central resolver
+    effective_mode = validate_datalab_mode(requested_mode)
+    if effective_mode is None:
+        if requested_mode is not None:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Unsupported Datalab processing mode '{requested_mode}'. "
+                    "Expected one of 'fast', 'balanced', 'accurate'."
+                ),
+            )
+        effective_mode = get_datalab_processing_mode(syncer._zotero_data_dir)
+
     COST_PER_PAGE_MAP = {
         "markitdown": 0.0,
         "docling_local": 0.0,
-        "datalab": 0.004,
         "gemini_vision": 0.0005,
         "google_document_ai": 0.0015,
     }
-    cost_per_page = COST_PER_PAGE_MAP.get(converter_id, 0.0)
+    cost_per_page = (
+        DATALAB_COST_PER_PAGE[effective_mode]
+        if converter_id == "datalab"
+        else COST_PER_PAGE_MAP.get(converter_id, 0.0)
+    )
 
     target_keys = (
         [k.strip() for k in item_keys.split(",") if k.strip()]
@@ -1813,8 +1877,9 @@ async def cost_estimate(
     )
 
     logger.info(
-        "Cost estimate requested for converter='%s', item_keys=%s, force=%s",
+        "Cost estimate requested for converter='%s', mode='%s', item_keys=%s, force=%s",
         converter_id,
+        effective_mode,
         target_keys,
         force,
     )
@@ -1892,26 +1957,39 @@ async def cost_estimate(
 
     already_converted = []
     eligible_attachments = []
+    non_pdf_already_converted = 0
+    non_pdf_target_count = 0
+    datalab_fallback_id: str | None = None
+    if converter_id == "datalab":
+        datalab_fallback_id = syncer.processor.datalab_non_pdf_fallback or "markitdown"
 
     for att in attachments:
         is_pdf = att.content_type == "application/pdf" or (
                 att.path and att.path.suffix.lower() == ".pdf"
         )
-        if converter_id == "datalab" and not is_pdf:
-            effective_id = syncer.processor.datalab_non_pdf_fallback or "markitdown"
+        is_datalab_fallback = converter_id == "datalab" and not is_pdf
+        if is_datalab_fallback:
+            effective_id = datalab_fallback_id or "markitdown"
+            non_pdf_target_count += 1
         else:
             effective_id = converter_id
 
         if not force:
             meta = syncer.processor.get_metadata(att.item_key)
             if meta and meta.get("converter_id") == effective_id:
+                # The recorded Datalab mode is part of the conversion identity, so a
+                # 'fast' conversion stays eligible for a 'balanced' request.
+                gate_mode = effective_mode if effective_id == "datalab" else None
+                current_hash = None
                 try:
                     current_hash = _file_sha256(att.path)
-                    if meta.get("source_hash") == current_hash:
-                        already_converted.append(att)
-                        continue
                 except Exception:
                     pass
+                if matches_conversion_identity(meta, effective_id, gate_mode, current_hash):
+                    already_converted.append(att)
+                    if is_datalab_fallback:
+                        non_pdf_already_converted += 1
+                    continue
         eligible_attachments.append(att)
 
     total_pages = sum(
@@ -1970,8 +2048,13 @@ async def cost_estimate(
         "status": "success",
         "converter_id": converter_id,
         "datalab_merge_cross_page": merge_cross_page,
+        "datalab_mode": effective_mode,
+        "datalab_cost_per_page_usd": dict(DATALAB_COST_PER_PAGE),
         "target_documents": len(attachments),
         "already_converted_count": len(already_converted),
+        "non_pdf_already_converted_count": non_pdf_already_converted,
+        "non_pdf_target_count": non_pdf_target_count,
+        "datalab_fallback_id": datalab_fallback_id,
         "eligible_documents": len(eligible_attachments),
         "total_pages": total_pages,
         "cost_per_page_usd": cost_per_page,
@@ -2005,7 +2088,7 @@ async def batch_convert(
         get_conversion_timeout_seconds,
         get_document_converter_id,
     )
-    from zocrates.rag.document_processor import _file_sha256
+    from zocrates.rag.document_processor import _file_sha256, matches_conversion_identity
 
     active_id = str(
         batch_req.converter_id
@@ -2026,11 +2109,22 @@ async def batch_convert(
             },
         ) from exc
 
+    # Resolve once, before the item loop, so a later preference change cannot
+    # alter the mode of remaining items mid-batch.
+    effective_mode: str | None = None
+    if active_id == "datalab":
+        from zocrates.config import get_datalab_processing_mode
+
+        effective_mode = batch_req.datalab_mode or get_datalab_processing_mode(
+            syncer._zotero_data_dir
+        )
+
     logger.info(
-        "Batch convert requested for %d keys with converter='%s' (force=%s): %s",
+        "Batch convert requested for %d keys with converter='%s' (force=%s, datalab_mode=%s): %s",
         len(batch_req.item_keys),
         active_id,
         batch_req.force,
+        effective_mode,
         batch_req.item_keys,
     )
 
@@ -2107,6 +2201,32 @@ async def batch_convert(
         skipped = 0
         failed = 0
         failed_items: list[dict[str, Any]] = []
+        # Modes recorded by the conversions that survived this batch. Only a
+        # uniform set can be summarized as one actual mode on the final event.
+        recorded_modes: set[str] = set()
+
+        def mode_fields(actual_mode: str | None = None) -> dict[str, Any]:
+            """Return Datalab processing-mode annotations for an SSE payload.
+
+            Non-Datalab batches gain no keys at all, keeping their payloads
+            identical to the pre-mode contract. ``requested_mode`` is the mode
+            resolved once at request start; ``actual_mode`` is the mode recorded
+            by the surviving conversion, emitted only on completion events and
+            only when the Datalab engine performed the conversion (the non-PDF
+            fallback engine has no mode).
+
+            Args:
+                actual_mode: Recorded mode of the surviving conversion, if any.
+
+            Returns:
+                Mapping to splat into the SSE payload.
+            """
+            if active_id != "datalab" or not effective_mode:
+                return {}
+            fields: dict[str, Any] = {"requested_mode": effective_mode}
+            if actual_mode:
+                fields["actual_mode"] = actual_mode
+            return fields
 
         logger.info(
             "Starting batch conversion loop for %d target documents with engine '%s'",
@@ -2154,6 +2274,7 @@ async def batch_convert(
                         "current_title": title,
                         "status": "failed",
                         "error": err_msg,
+                        **mode_fields(),
                     }),
                 }
                 continue
@@ -2169,36 +2290,41 @@ async def batch_convert(
             if not batch_req.force:
                 meta = syncer.processor.get_metadata(att.item_key)
                 if meta and meta.get("converter_id") == effective_id:
+                    # The recorded Datalab mode is part of the conversion identity,
+                    # so a 'fast' conversion stays eligible for a 'balanced' request.
+                    gate_mode = effective_mode if effective_id == "datalab" else None
+                    current_hash = None
                     try:
                         current_hash = _file_sha256(att.path)
-                        if meta.get("source_hash") == current_hash:
-                            if att.parent_item_key:
-                                from zocrates.rag.library_syncer import (
-                                    supersede_metadata_bundle_if_needed,
-                                )
-
-                                supersede_metadata_bundle_if_needed(att.parent_item_key, syncer)
-                            skipped += 1
-                            logger.info("[%d/%d] Skipping already converted item %s ('%s') with %s", idx, total,
-                                        att.item_key, title, effective_id)
-                            yield {
-                                "event": "progress",
-                                "data": json.dumps({
-                                    "processed": processed,
-                                    "skipped": skipped,
-                                    "failed": failed,
-                                    "total": total,
-                                    "current_index": idx,
-                                    "current_key": att.item_key,
-                                    "current_title": title,
-                                    "status": "skipped",
-                                    "message": f"Already converted with {effective_id}",
-                                    "error": None,
-                                }),
-                            }
-                            continue
                     except Exception:
                         pass
+                    if matches_conversion_identity(meta, effective_id, gate_mode, current_hash):
+                        if att.parent_item_key:
+                            from zocrates.rag.library_syncer import (
+                                supersede_metadata_bundle_if_needed,
+                            )
+
+                            supersede_metadata_bundle_if_needed(att.parent_item_key, syncer)
+                        skipped += 1
+                        logger.info("[%d/%d] Skipping already converted item %s ('%s') with %s", idx, total,
+                                    att.item_key, title, effective_id)
+                        yield {
+                            "event": "progress",
+                            "data": json.dumps({
+                                "processed": processed,
+                                "skipped": skipped,
+                                "failed": failed,
+                                "total": total,
+                                "current_index": idx,
+                                "current_key": att.item_key,
+                                "current_title": title,
+                                "status": "skipped",
+                                "message": f"Already converted with {effective_id}",
+                                "error": None,
+                                **mode_fields(),
+                            }),
+                        }
+                        continue
 
             # Execute conversion serially
             p_type = parent_item.item_type if (parent_item and isinstance(getattr(parent_item, "item_type", None), str)) else None
@@ -2225,6 +2351,7 @@ async def batch_convert(
                     "current_title": title,
                     "status": "converting",
                     "error": None,
+                    **mode_fields(),
                 }),
             }
 
@@ -2246,9 +2373,41 @@ async def batch_convert(
                         doi=p_doi,
                         url=p_url,
                         abstract=p_abstract,
+                        # Datalab mode resolved once at request start; other
+                        # converters ignore the options dictionary.
+                        options=(
+                            {"mode": effective_mode} if effective_id == "datalab" else None
+                        ),
+                        # Re-check under the per-item lock: the gate above runs
+                        # before this thread is dispatched, so a concurrent
+                        # request may have converted the item in the meantime.
+                        skip_converted=not batch_req.force,
                     ),
                     timeout=get_conversion_timeout_seconds(syncer._zotero_data_dir),
                 )
+
+                # Read the mode the surviving conversion recorded (persisted by
+                # convert_with before it returned). Guardrail retries record the
+                # mode of the result that survived, so actual_mode differing from
+                # requested_mode is the exact signal of a quality-retry upgrade.
+                actual_mode: str | None = None
+                if effective_id == "datalab":
+                    try:
+                        recorded = syncer.processor.get_metadata(att.item_key)
+                        recorded_mode = (
+                            recorded.get("converter_mode")
+                            if isinstance(recorded, dict)
+                            else None
+                        )
+                        if isinstance(recorded_mode, str) and recorded_mode:
+                            actual_mode = recorded_mode
+                            recorded_modes.add(actual_mode)
+                    except Exception as exc:
+                        logger.warning(
+                            "Could not read recorded conversion mode for %s: %s",
+                            att.item_key,
+                            exc,
+                        )
 
                 yield {
                     "event": "progress",
@@ -2262,6 +2421,7 @@ async def batch_convert(
                         "current_title": title,
                         "status": "indexing",
                         "error": None,
+                        **mode_fields(),
                     }),
                 }
 
@@ -2364,6 +2524,7 @@ async def batch_convert(
                         "current_title": title,
                         "status": "completed",
                         "error": None,
+                        **mode_fields(actual_mode),
                     }),
                 }
 
@@ -2395,6 +2556,7 @@ async def batch_convert(
                         "current_title": title,
                         "status": "failed",
                         "error": timeout_msg,
+                        **mode_fields(),
                     }),
                 }
             except Exception as exc:
@@ -2422,6 +2584,7 @@ async def batch_convert(
                         "current_title": title,
                         "status": "failed",
                         "error": err_msg,
+                        **mode_fields(),
                     }),
                 }
 
@@ -2433,6 +2596,9 @@ async def batch_convert(
             total,
         )
 
+        # A batch whose conversions all recorded the same mode reports it as the
+        # single actual mode; a mixed-mode batch has no single answer and omits it.
+        batch_actual_mode = next(iter(recorded_modes)) if len(recorded_modes) == 1 else None
         yield {
             "event": "complete",
             "data": json.dumps({
@@ -2441,6 +2607,7 @@ async def batch_convert(
                 "skipped": skipped,
                 "failed": failed,
                 "failed_items": failed_items,
+                **mode_fields(batch_actual_mode),
             }),
         }
 
@@ -3888,6 +4055,7 @@ async def get_config() -> dict:
         get_compaction_config,
         get_datalab_api_key,
         get_datalab_merge_cross_page,
+        get_datalab_processing_mode,
         get_openalex_api_key,
         get_secure_api_key,
         get_session_maintenance_config,
@@ -3944,6 +4112,7 @@ async def get_config() -> dict:
         "has_datalab_key": has_datalab,
         "has_openalex_api_key": has_openalex,
         "datalab_merge_cross_page": get_datalab_merge_cross_page(zot_dir, cfg=cfg),
+        "datalab_processing_mode": get_datalab_processing_mode(zot_dir, cfg=cfg),
         "citations_enabled": cfg.get("citations_enabled", DEFAULT_CITATIONS_ENABLED),
         "references_section_enabled": cfg.get("references_section_enabled", DEFAULT_REFERENCES_SECTION_ENABLED),
         "auto_render_mermaid_diagrams": cfg.get("auto_render_mermaid_diagrams", DEFAULT_AUTO_RENDER_MERMAID_DIAGRAMS),
@@ -4026,6 +4195,8 @@ async def update_config(request: ConfigRequest) -> dict:
         save_datalab_api_key(request.datalab_api_key.strip() if request.datalab_api_key else None)
     if request.datalab_merge_cross_page is not None:
         updates["datalab_merge_cross_page"] = request.datalab_merge_cross_page
+    if request.datalab_processing_mode is not None:
+        updates["datalab_processing_mode"] = request.datalab_processing_mode
     if request.citations_enabled is not None:
         updates["citations_enabled"] = request.citations_enabled
     if request.references_section_enabled is not None:
@@ -4177,6 +4348,7 @@ async def update_config(request: ConfigRequest) -> dict:
             "predictive_prompt_model": cfg.get("predictive_prompt_model"),
             "sentence_attribution_model": cfg.get("sentence_attribution_model", DEFAULT_SENTENCE_ATTRIBUTION_MODEL),
             "datalab_merge_cross_page": cfg.get("datalab_merge_cross_page"),
+            "datalab_processing_mode": cfg.get("datalab_processing_mode"),
             "user_research_profile": cfg.get("user_research_profile", ""),
             "citation_verification_enabled": cfg.get("citation_verification_enabled"),
             "citation_verification_provider": cfg.get("citation_verification_provider"),
@@ -4566,6 +4738,7 @@ async def update_active_converter(request: ConverterChangeRequest) -> dict:
         from zocrates.config import (
             get_datalab_merge_cross_page,
             get_datalab_non_pdf_fallback,
+            get_datalab_processing_mode,
             get_docling_mode,
             get_document_converter_id,
             get_document_converter_mode,
@@ -4583,6 +4756,7 @@ async def update_active_converter(request: ConverterChangeRequest) -> dict:
         target_docling_mode = request.docling_mode
         target_datalab_fallback = request.datalab_non_pdf_fallback
         target_datalab_merge_cross_page = request.datalab_merge_cross_page
+        target_datalab_processing_mode = request.datalab_processing_mode
         target_datalab_key = request.datalab_api_key
         target_conversion_timeout = request.conversion_timeout_seconds
 
@@ -4604,6 +4778,8 @@ async def update_active_converter(request: ConverterChangeRequest) -> dict:
             config_updates["datalab_non_pdf_fallback"] = target_datalab_fallback
         if target_datalab_merge_cross_page is not None:
             config_updates["datalab_merge_cross_page"] = target_datalab_merge_cross_page
+        if target_datalab_processing_mode is not None:
+            config_updates["datalab_processing_mode"] = target_datalab_processing_mode
         if target_datalab_key is not None:
             from pydantic import SecretStr
 
@@ -4681,6 +4857,7 @@ async def update_active_converter(request: ConverterChangeRequest) -> dict:
             "docling_mode": current_docling,
             "datalab_non_pdf_fallback": current_datalab_fallback,
             "datalab_merge_cross_page": get_datalab_merge_cross_page(data_dir),
+            "datalab_processing_mode": get_datalab_processing_mode(data_dir),
             "enable_vlm_captioning": get_enable_vlm_captioning(data_dir),
             "vlm_captioning_provider": get_vlm_captioning_provider(data_dir),
             "vlm_captioning_model": get_vlm_captioning_model(data_dir),

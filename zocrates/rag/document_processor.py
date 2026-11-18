@@ -28,6 +28,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from zocrates.config import get_datalab_processing_mode, validate_datalab_mode
 from zocrates.rag.document_converters import (
     BaseDocumentConverter,
     DatalabConverter,
@@ -67,6 +68,7 @@ CREATE TABLE IF NOT EXISTS conversion_meta (
     parent_item_key     TEXT,
     parse_quality_score REAL,
     checkpoint_id       TEXT,
+    converter_mode      TEXT,            -- Datalab processing mode (NULL for other converters)
     abstract            TEXT,
     abstract_source     TEXT,
     keywords            TEXT,
@@ -103,6 +105,35 @@ _INITIALIZED_META_DBS: set[Path] = set()
 _note_bundle_lock = threading.Lock()
 # Lock protecting concurrent metadata bundle materialization (atomic directory swap).
 _metadata_bundle_lock = threading.Lock()
+
+# Per-item conversion locks. ``convert_with`` stages into a fixed
+# ``.tmp_<item_key>`` directory and destructively replaces the item bundle, so
+# two overlapping conversions of the same item (separate ``/convert/{key}``,
+# ``/batch-convert``, and sync requests all run via ``asyncio.to_thread``) would
+# clobber each other's staging directory. One lock per (corpus dir, item key),
+# created on demand and retained for the process lifetime — bounded by the
+# number of distinct items converted in this process.
+_ITEM_CONVERSION_LOCKS: dict[tuple[str, str], threading.Lock] = {}
+_ITEM_CONVERSION_LOCKS_GUARD = threading.Lock()
+
+
+def _item_conversion_lock(cache_dir: Path, item_key: str) -> threading.Lock:
+    """Return the per-item conversion lock for ``item_key`` within ``cache_dir``.
+
+    Args:
+        cache_dir: Root corpus directory owning the item bundle.
+        item_key: Zotero item key being converted.
+
+    Returns:
+        The (lazily created) ``threading.Lock`` serializing conversions of this item.
+    """
+    key = (str(cache_dir.resolve()), item_key)
+    with _ITEM_CONVERSION_LOCKS_GUARD:
+        lock = _ITEM_CONVERSION_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _ITEM_CONVERSION_LOCKS[key] = lock
+        return lock
 
 
 def _open_meta_db(cache_dir: Path) -> sqlite3.Connection:
@@ -169,6 +200,11 @@ def _open_meta_db(cache_dir: Path) -> sqlite3.Connection:
                         conn.execute("ALTER TABLE conversion_meta ADD COLUMN keywords TEXT;")
                     except sqlite3.OperationalError:
                         pass
+                if "converter_mode" not in existing_cols:
+                    try:
+                        conn.execute("ALTER TABLE conversion_meta ADD COLUMN converter_mode TEXT;")
+                    except sqlite3.OperationalError:
+                        pass
                 try:
                     conn.execute(
                         """
@@ -196,6 +232,24 @@ def _open_meta_db(cache_dir: Path) -> sqlite3.Connection:
                 if current_version < 1:
                     _migrate_storage_paths_to_relative(meta_path, conn=conn)
                     _sanitize_cached_bundle_image_links(cache_dir)
+
+                # One-time backfill of the Datalab processing mode: legacy rows
+                # were produced by code whose intended default was 'balanced'
+                # (pricing and guardrail), so stamp them ``balanced``. Guarded by
+                # ``user_version`` so it runs exactly once per database and never
+                # rewrites a mode recorded by this feature.
+                if current_version < 2:
+                    try:
+                        conn.execute(
+                            "UPDATE conversion_meta SET converter_mode = 'balanced' "
+                            "WHERE converter_id = 'datalab' AND converter_mode IS NULL;"
+                        )
+                        conn.execute("PRAGMA user_version = 2;")
+                        conn.commit()
+                    except sqlite3.OperationalError as exc:
+                        logger.warning(
+                            "Could not backfill converter_mode in %s: %s", meta_path, exc
+                        )
 
                 _INITIALIZED_META_DBS.add(cache_dir)
 
@@ -397,6 +451,39 @@ def _file_sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def matches_conversion_identity(
+        meta: dict[str, Any] | None,
+        converter_id: str,
+        converter_mode: str | None,
+        source_hash: str | None,
+) -> bool:
+    """Return True when stored metadata already satisfies an incremental request.
+
+    The recorded Datalab processing mode is part of the conversion identity, so
+    a ``fast`` conversion no longer blocks a ``balanced`` request. A stored
+    ``NULL`` mode matches any requested mode: legacy rows (pre-``converter_mode``)
+    and every non-Datalab converter record ``NULL``.
+
+    Args:
+        meta: Metadata dictionary from ``get_metadata`` (None when unconverted).
+        converter_id: Effective converter ID for the request.
+        converter_mode: Effective Datalab processing mode (None for non-Datalab).
+        source_hash: SHA-256 hex digest of the current source file, or None when
+            it could not be computed.
+
+    Returns:
+        True when the item counts as already converted for this request.
+    """
+    if not meta or source_hash is None:
+        return False
+    if meta.get("converter_id") != converter_id:
+        return False
+    stored_mode = meta.get("converter_mode")
+    if stored_mode is not None and stored_mode != converter_mode:
+        return False
+    return meta.get("source_hash") == source_hash
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -428,6 +515,7 @@ class DocumentProcessor:
             converters: list[BaseDocumentConverter] | None = None,
             document_converter_id: str | None = None,
             datalab_non_pdf_fallback: str = "markitdown",
+            zotero_data_dir: Path | None = None,
     ) -> None:
         """Initialize the DocumentProcessor.
 
@@ -443,11 +531,15 @@ class DocumentProcessor:
                 priority chain is used directly.
             datalab_non_pdf_fallback: Fallback converter ID when active converter
                 is 'datalab' and content_type is not PDF ('markitdown' or 'docling_local').
+            zotero_data_dir: Optional Zotero data directory used to resolve the
+                configured Datalab processing mode; falls back to environment
+                discovery when None.
         """
         self._cache_dir = cache_dir
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         self._document_converter_id = document_converter_id
         self._datalab_non_pdf_fallback = datalab_non_pdf_fallback
+        self._zotero_data_dir = zotero_data_dir
         if converters is None:
             self._converters: list[BaseDocumentConverter] = [
                 DirectReadConverter(),
@@ -553,31 +645,36 @@ class DocumentProcessor:
             logger.warning("Attachment not found on disk: %s", source_path)
             return None
 
-        current_hash = _file_sha256(source_path)
-        cached_md = self._load_from_cache(item_key, current_hash)
-        if cached_md is not None:
-            return cached_md
+        # The per-item lock makes the cache check below the post-acquisition
+        # gate recheck: a concurrent request that already converted this item
+        # is observed as a cache hit instead of duplicate paid work.
+        with _item_conversion_lock(self._cache_dir, item_key):
+            current_hash = _file_sha256(source_path)
+            cached_md = self._load_from_cache(item_key, current_hash)
+            if cached_md is not None:
+                return cached_md
 
-        # Convert using active converter or priority chain fallback
-        converter = self._resolve_converter(content_type, source_path)
-        if converter is None:
-            logger.warning("No suitable converter found for %s", source_path)
-            return None
+            # Convert using active converter or priority chain fallback
+            converter = self._resolve_converter(content_type, source_path)
+            if converter is None:
+                logger.warning("No suitable converter found for %s", source_path)
+                return None
 
-        markdown = self._run_converter(converter, item_key, source_path, content_type)
-        if markdown is None:
-            return None
+            markdown = self._run_converter(converter, item_key, source_path, content_type)
+            if markdown is None:
+                return None
 
-        full_md = self._save_to_cache(
-            item_key, source_path, content_type, current_hash, markdown,
-            converter.converter_id, converter.converter_version,
-            parent_item_type=parent_item_type, title=title, collections=collections,
-            parent_item_key=parent_item_key,
-            authors=authors, year=year, publication=publication, doi=doi, url=url,
-            abstract=abstract, abstract_source=abstract_source,
-            update_root_index=update_root_index,
-        )
-        return full_md
+            full_md = self._save_to_cache(
+                item_key, source_path, content_type, current_hash, markdown,
+                converter.converter_id, converter.converter_version,
+                parent_item_type=parent_item_type, title=title, collections=collections,
+                parent_item_key=parent_item_key,
+                authors=authors, year=year, publication=publication, doi=doi, url=url,
+                abstract=abstract, abstract_source=abstract_source,
+                converter_mode=self._hook_converter_mode(converter, item_key),
+                update_root_index=update_root_index,
+            )
+            return full_md
 
     def convert_with(
             self,
@@ -597,6 +694,8 @@ class DocumentProcessor:
             abstract: str | None = None,
             abstract_source: str | None = None,
             update_root_index: bool = True,
+            options: dict[str, Any] | None = None,
+            skip_converted: bool = False,
     ) -> str:
         """Convert a document with a specific converter engine.
 
@@ -625,6 +724,16 @@ class DocumentProcessor:
             abstract: Optional item abstract.
             abstract_source: Optional source of item abstract.
             update_root_index: If True (default), updates the root index.md.
+            options: Optional converter-agnostic options dictionary. For the
+                Datalab converter, ``options["mode"]`` selects the processing
+                mode and is resolved here (explicit valid mode > config default)
+                before reaching the converter; other converters ignore it.
+            skip_converted: If True, re-check for an already converted item
+                *inside* the per-item lock and return the cached Markdown
+                instead of converting. Endpoints use this for non-forced
+                requests so two concurrent requests for the same item cannot
+                both pay for a duplicate conversion. Unattended callers
+                (``get_or_convert``) must leave this False.
 
         Returns:
             The converted Markdown text (with YAML frontmatter).
@@ -664,54 +773,68 @@ class DocumentProcessor:
                 )
 
         # Convert into a temporary directory first so the existing bundle
-        # is preserved if conversion fails.
-        tmp_dir = self._cache_dir / f".tmp_{item_key}"
-        if tmp_dir.exists():
-            shutil.rmtree(tmp_dir)
-        tmp_dir.mkdir(parents=True)
+        # is preserved if conversion fails. The whole staging -> conversion ->
+        # bundle replacement -> metadata persistence window is guarded by the
+        # per-item lock because the staging directory path is fixed per item.
+        with _item_conversion_lock(self._cache_dir, item_key):
+            # Resolve inside the lock so a queued conversion picks up the
+            # current config default at execution time, not wait-start time.
+            effective_options = self._resolve_datalab_options(converter, item_key, options)
+            current_hash = _file_sha256(source_path)
 
-        current_hash = _file_sha256(source_path)
+            if skip_converted:
+                cached_md = self._recheck_already_converted(
+                    item_key, converter.converter_id, effective_options, current_hash
+                )
+                if cached_md is not None:
+                    return cached_md
 
-        try:
-            markdown = converter.convert(
-                item_key, source_path, content_type, tmp_dir
+            tmp_dir = self._cache_dir / f".tmp_{item_key}"
+            if tmp_dir.exists():
+                shutil.rmtree(tmp_dir)
+            tmp_dir.mkdir(parents=True)
+
+            try:
+                markdown = converter.convert(
+                    item_key, source_path, content_type, tmp_dir, options=effective_options
+                )
+            except Exception as exc:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+                self.record_failure(item_key, converter_id, str(exc), current_hash)
+                raise RuntimeError(
+                    f"Converter '{converter_id}' failed for {source_path}: {exc}"
+                ) from exc
+
+            if markdown is None:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+                err_msg = f"Converter '{converter_id}' returned empty content for {source_path}"
+                self.record_failure(item_key, converter_id, err_msg, current_hash)
+                raise RuntimeError(err_msg)
+
+            # Conversion succeeded -- destroy old bundle and swap in the new one
+            item_dir = self._cache_dir / item_key
+            if item_dir.exists():
+                shutil.rmtree(item_dir)
+            tmp_dir.rename(item_dir)
+
+            # Replace any temporary directory references in the converted markdown
+            markdown = _relativize_staging_markdown_links(markdown, tmp_dir)
+
+            self.clear_failure(item_key, converter_id)
+            if converter.converter_id != converter_id:
+                self.clear_failure(item_key, converter.converter_id)
+
+            self._save_to_cache(
+                item_key, source_path, content_type, current_hash, markdown,
+                converter.converter_id, converter.converter_version,
+                parent_item_type=parent_item_type, title=title, collections=collections,
+                parent_item_key=parent_item_key,
+                authors=authors, year=year, publication=publication, doi=doi, url=url,
+                abstract=abstract, abstract_source=abstract_source,
+                converter_mode=self._hook_converter_mode(converter, item_key),
+                update_root_index=update_root_index,
             )
-        except Exception as exc:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-            self.record_failure(item_key, converter_id, str(exc), current_hash)
-            raise RuntimeError(
-                f"Converter '{converter_id}' failed for {source_path}: {exc}"
-            ) from exc
-
-        if markdown is None:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-            err_msg = f"Converter '{converter_id}' returned empty content for {source_path}"
-            self.record_failure(item_key, converter_id, err_msg, current_hash)
-            raise RuntimeError(err_msg)
-
-        # Conversion succeeded -- destroy old bundle and swap in the new one
-        item_dir = self._cache_dir / item_key
-        if item_dir.exists():
-            shutil.rmtree(item_dir)
-        tmp_dir.rename(item_dir)
-
-        # Replace any temporary directory references in the converted markdown
-        markdown = _relativize_staging_markdown_links(markdown, tmp_dir)
-
-        self.clear_failure(item_key, converter_id)
-        if converter.converter_id != converter_id:
-            self.clear_failure(item_key, converter.converter_id)
-
-        self._save_to_cache(
-            item_key, source_path, content_type, current_hash, markdown,
-            converter.converter_id, converter.converter_version,
-            parent_item_type=parent_item_type, title=title, collections=collections,
-            parent_item_key=parent_item_key,
-            authors=authors, year=year, publication=publication, doi=doi, url=url,
-            abstract=abstract, abstract_source=abstract_source,
-            update_root_index=update_root_index,
-        )
-        return self.read_cached(item_key) or markdown
+            return self.read_cached(item_key) or markdown
 
     def delete_cached(self, item_key: str, update_root_index: bool = True) -> bool:
         """Delete an item bundle from disk and conversion_meta DB.
@@ -831,7 +954,8 @@ class DocumentProcessor:
                 """
                 SELECT item_key, title, converter_id, converter_version, source_path, content_type,
                        parent_item_type, converted_at, indexed_at, source_hash, char_count,
-                       parent_item_key, parse_quality_score, checkpoint_id, abstract, abstract_source
+                       parent_item_key, parse_quality_score, checkpoint_id, abstract, abstract_source,
+                       converter_mode
                 FROM conversion_meta WHERE item_key = ?
                 """,
                 (item_key,),
@@ -853,6 +977,7 @@ class DocumentProcessor:
             "parent_item_key": row["parent_item_key"],
             "parse_quality_score": row["parse_quality_score"],
             "checkpoint_id": row["checkpoint_id"],
+            "converter_mode": row["converter_mode"] if "converter_mode" in row.keys() else None,
             "abstract": row["abstract"] if "abstract" in row.keys() else None,
             "abstract_source": row["abstract_source"] if "abstract_source" in row.keys() else None,
         }
@@ -985,6 +1110,7 @@ class DocumentProcessor:
                     "parent_item_key": row["parent_item_key"],
                     "parse_quality_score": row["parse_quality_score"],
                     "checkpoint_id": row["checkpoint_id"],
+                    "converter_mode": row["converter_mode"] if "converter_mode" in row.keys() else None,
                     "abstract": row["abstract"] if "abstract" in row.keys() else None,
                     "abstract_source": row["abstract_source"] if "abstract_source" in row.keys() else None,
                 }
@@ -1098,11 +1224,168 @@ class DocumentProcessor:
         )
         item_dir = self._cache_dir / item_key
         item_dir.mkdir(parents=True, exist_ok=True)
+        # Unattended paths have no explicit options, so the converter receives
+        # the resolved config default (Phase 1: 'balanced').
+        options = self._resolve_datalab_options(converter, item_key, None)
         try:
-            return converter.convert(item_key, source_path, content_type, item_dir)
+            return converter.convert(
+                item_key, source_path, content_type, item_dir, options=options
+            )
         except Exception as exc:
             logger.error("Conversion failed for %s: %s", source_path, exc)
             return None
+
+    def _resolve_datalab_options(
+            self,
+            converter: BaseDocumentConverter,
+            item_key: str,
+            options: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Return converter options with the Datalab processing mode filled in.
+
+        Mode resolution precedence: an explicit valid ``options["mode"]`` wins;
+        a missing/blank/invalid value falls back to the configured default
+        (``get_datalab_processing_mode``, ``'balanced'`` in Phase 1) with a
+        warning for invalid explicit values. Non-Datalab converters receive
+        ``options`` untouched, and the Datalab converter never reads global
+        configuration for the mode itself.
+
+        Args:
+            converter: Converter selected for this item.
+            item_key: Zotero item key (used for logging only).
+            options: Caller-supplied converter options, or None.
+
+        Returns:
+            Options to forward to ``converter.convert``. A new dictionary is
+            returned for Datalab so the caller's dict is never mutated.
+        """
+        if not isinstance(converter, DatalabConverter):
+            return options
+
+        requested_mode = (options or {}).get("mode")
+        if isinstance(requested_mode, str) and not requested_mode.strip():
+            requested_mode = None  # blank/empty string counts as unprovided
+        resolved_mode = validate_datalab_mode(requested_mode)
+        if resolved_mode is None:
+            resolved_mode = get_datalab_processing_mode(self._zotero_data_dir)
+            if requested_mode is not None:
+                logger.warning(
+                    "Invalid Datalab processing mode %r requested for %s; "
+                    "using configured default %r.",
+                    requested_mode, item_key, resolved_mode,
+                )
+        return {**(options or {}), "mode": resolved_mode}
+
+    @staticmethod
+    def _hook_converter_mode(
+            converter: BaseDocumentConverter, item_key: str
+    ) -> str | None:
+        """Return the attempt-local Datalab processing mode recorded by ``converter``.
+
+        The in-memory hook is written by each conversion attempt, so it reflects
+        the mode of the *surviving* result (the original when a quality retry
+        fails) rather than the requested one. Non-Datalab converters record no
+        mode.
+
+        Args:
+            converter: Converter instance that performed this attempt.
+            item_key: Zotero item key.
+
+        Returns:
+            A validated mode string, or None when unavailable/not Datalab.
+        """
+        try:
+            if not hasattr(converter, "get_metadata"):
+                return None
+            meta = converter.get_metadata(item_key)
+        except Exception:
+            return None
+        if isinstance(meta, dict):
+            return validate_datalab_mode(meta.get("mode"))
+        return None
+
+    def _recheck_already_converted(
+            self,
+            item_key: str,
+            converter_id: str,
+            effective_options: dict[str, Any] | None,
+            current_hash: str,
+    ) -> str | None:
+        """Return cached Markdown when the item is already converted as requested.
+
+        Endpoint pre-checks run before ``convert_with`` is dispatched, so two
+        concurrent non-forced requests for the same item can both pass them. This
+        re-check runs under the per-item lock and suppresses the duplicate
+        (paid) conversion.
+
+        Args:
+            item_key: Zotero item key.
+            converter_id: Converter ID that will perform the conversion.
+            effective_options: Resolved options for this attempt.
+            current_hash: SHA-256 hex digest of the current source file.
+
+        Returns:
+            The cached Markdown when the item is already converted for this
+            request, else None (conversion proceeds).
+        """
+        effective_mode = (
+            (effective_options or {}).get("mode") if converter_id == "datalab" else None
+        )
+        try:
+            meta = self.get_metadata(item_key)
+        except Exception as exc:
+            logger.warning("Could not re-check conversion metadata for %s: %s", item_key, exc)
+            return None
+        if not matches_conversion_identity(meta, converter_id, effective_mode, current_hash):
+            return None
+        cached_md = self.read_cached(item_key)
+        if cached_md is None:
+            return None
+        logger.info(
+            "Skipping already converted item %s ('%s', mode=%s) under the per-item lock",
+            item_key, converter_id, effective_mode,
+        )
+        return cached_md
+
+    def _resolve_recorded_converter_mode(
+            self,
+            converter_id: str,
+            item_key: str,
+            item_dir: Path,
+    ) -> str | None:
+        """Return the Datalab processing mode that the recorded conversion used.
+
+        Reads the in-memory converter hook first (the attempt-local source, which
+        survives only until the process exits) and falls back to the mode written
+        into ``datalab_document.json``, which is how a mode recorded after a
+        backend restart is recovered.
+
+        Args:
+            converter_id: ID of the converter that produced the Markdown.
+            item_key: Zotero item key.
+            item_dir: Item bundle directory holding ``datalab_document.json``.
+
+        Returns:
+            A validated mode string, or None when unavailable/not Datalab.
+        """
+        if converter_id != "datalab":
+            return None
+        try:
+            conv = self._get_converter_by_id(converter_id)
+            mode = self._hook_converter_mode(conv, item_key)
+            if mode is not None:
+                return mode
+        except Exception:
+            pass
+
+        json_path = item_dir / "datalab_document.json"
+        if json_path.exists():
+            try:
+                ast_data = json.loads(json_path.read_text(encoding="utf-8"))
+                return validate_datalab_mode(ast_data.get("mode"))
+            except Exception:
+                pass
+        return None
 
     def _load_from_cache(self, item_key: str, current_hash: str) -> str | None:
         """Return cached Markdown if the source file hasn't changed."""
@@ -1140,6 +1423,7 @@ class DocumentProcessor:
             url: str | None = None,
             abstract: str | None = None,
             abstract_source: str | None = None,
+            converter_mode: str | None = None,
             update_root_index: bool = True,
     ) -> str:
         """Write Markdown with frontmatter to disk, write catalogs, and upsert DB metadata.
@@ -1165,6 +1449,9 @@ class DocumentProcessor:
             url: Optional source URL string.
             abstract: Optional abstract or summary text.
             abstract_source: Optional abstract source tag ('zotero', 'generated', 'extractive').
+            converter_mode: Optional Datalab processing mode the recorded conversion
+                actually used. Resolved from the converter hook and then
+                ``datalab_document.json`` when None for a Datalab conversion.
             update_root_index: If True (default), updates the root index.md catalog.
 
         Returns:
@@ -1197,6 +1484,14 @@ class DocumentProcessor:
                             checkpoint_id = ast_data["checkpoint_id"]
                     except Exception:
                         pass
+
+        # The Datalab processing mode is part of the conversion identity, so it is
+        # resolved independently of the quality/checkpoint conditional above: a
+        # conversion that reports no score still records its mode.
+        if converter_mode is None and converter_id == "datalab":
+            converter_mode = self._resolve_recorded_converter_mode(
+                converter_id, item_key, item_dir
+            )
 
         markdown = wrap_standalone_markdown_tables(markdown)
         converted_at = datetime.now(UTC).isoformat()
@@ -1297,8 +1592,9 @@ class DocumentProcessor:
                 INSERT OR REPLACE INTO conversion_meta
                     (item_key, title, converter_id, converter_version, source_path,
                      content_type, parent_item_type, converted_at, source_hash, char_count,
-                     parent_item_key, parse_quality_score, checkpoint_id, abstract, abstract_source, keywords)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     parent_item_key, parse_quality_score, checkpoint_id, abstract, abstract_source, keywords,
+                     converter_mode)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     item_key,
@@ -1317,6 +1613,7 @@ class DocumentProcessor:
                     effective_abstract,
                     effective_abstract_source,
                     effective_keywords,
+                    converter_mode,
                 ),
             )
 

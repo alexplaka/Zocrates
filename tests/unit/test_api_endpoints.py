@@ -434,6 +434,196 @@ class TestConvertItemEndpoint:
             mock_syncer.processor.update_indexed_at.assert_called_once_with("ATTACH_KEY1")
 
 
+    @pytest.mark.parametrize(
+        ("stored_mode", "expect_skipped"),
+        [
+            ("balanced", True),
+            ("fast", False),
+            ("accurate", False),
+            (None, True),
+        ],
+    )
+    def test_convert_item_mode_aware_gate(self, client, tmp_path, stored_mode, expect_skipped) -> None:
+        """A row recorded at another mode no longer blocks the request (plan §3.4)."""
+        from zocrates.rag.document_processor import _file_sha256
+
+        mock_syncer = MagicMock()
+        dummy_pdf = tmp_path / "paper.pdf"
+        dummy_pdf.write_text("pdf bytes", encoding="utf-8")
+
+        mock_att = MagicMock()
+        mock_att.item_key = "ATTACH_KEY1"
+        mock_att.parent_item_key = None
+        mock_att.item_id = 42
+        mock_att.parent_item_id = None
+        mock_att.content_type = "application/pdf"
+        mock_att.path = dummy_pdf
+
+        mock_syncer.db.get_attachment_by_key.return_value = mock_att
+        mock_syncer.db.get_item.return_value = None
+        mock_syncer.processor.is_cached.return_value = True
+        mock_syncer.processor.get_metadata.return_value = {
+            "converter_id": "datalab",
+            "converter_mode": stored_mode,
+            "source_hash": _file_sha256(dummy_pdf),
+        }
+        mock_syncer.processor.convert_with.return_value = (
+            "---\ntype: journalArticle\n---\n# Sample Paper Title\n\nContent body"
+        )
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer), \
+             patch("zocrates.config.get_datalab_processing_mode", return_value="balanced"):
+            res = client.post("/convert/ATTACH_KEY1", json={"converter_id": "datalab"})
+
+        assert res.status_code == 200
+        data = res.json()
+        if expect_skipped:
+            assert data["status"] == "skipped"
+            mock_syncer.processor.convert_with.assert_not_called()
+        else:
+            assert data["status"] == "success"
+            mock_syncer.processor.convert_with.assert_called_once()
+
+    @pytest.mark.parametrize("force", [False, True])
+    def test_convert_item_passes_skip_converted_flag(self, client, tmp_path, force) -> None:
+        """Non-forced requests re-check the gate inside the per-item lock."""
+        mock_syncer = MagicMock()
+        dummy_pdf = tmp_path / "paper.pdf"
+        dummy_pdf.write_text("pdf bytes", encoding="utf-8")
+
+        mock_att = MagicMock()
+        mock_att.item_key = "ATTACH_KEY1"
+        mock_att.parent_item_key = None
+        mock_att.item_id = 42
+        mock_att.parent_item_id = None
+        mock_att.content_type = "application/pdf"
+        mock_att.path = dummy_pdf
+
+        mock_syncer.db.get_attachment_by_key.return_value = mock_att
+        mock_syncer.db.get_item.return_value = None
+        mock_syncer.processor.is_cached.return_value = False
+        mock_syncer.processor.convert_with.return_value = (
+            "---\ntype: journalArticle\n---\n# Sample Paper Title\n\nContent body"
+        )
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer), \
+             patch("zocrates.config.get_datalab_processing_mode", return_value="balanced"):
+            res = client.post(
+                "/convert/ATTACH_KEY1", json={"converter_id": "datalab", "force": force}
+            )
+
+        assert res.status_code == 200
+        call_kwargs = mock_syncer.processor.convert_with.call_args[1]
+        assert call_kwargs["skip_converted"] is not force
+
+    @pytest.mark.parametrize("bad_mode", ["lite", "garbage", 3])
+    def test_convert_item_rejects_unsupported_datalab_mode(self, client, bad_mode) -> None:
+        """ConvertRequest.datalab_mode is Literal-validated (plan §3.2/§3.7)."""
+        res = client.post(
+            "/convert/ATTACH_KEY1", json={"converter_id": "datalab", "datalab_mode": bad_mode}
+        )
+        assert res.status_code == 422
+
+    def test_convert_item_explicit_datalab_mode_overrides_global_default(self, client, tmp_path) -> None:
+        """An explicit datalab_mode wins over the configured default in gate and options."""
+        from zocrates.rag.document_processor import _file_sha256
+
+        mock_syncer = MagicMock()
+        dummy_pdf = tmp_path / "paper.pdf"
+        dummy_pdf.write_text("pdf bytes", encoding="utf-8")
+
+        mock_att = MagicMock()
+        mock_att.item_key = "ATTACH_KEY1"
+        mock_att.parent_item_key = None
+        mock_att.item_id = 42
+        mock_att.parent_item_id = None
+        mock_att.content_type = "application/pdf"
+        mock_att.path = dummy_pdf
+
+        mock_syncer.db.get_attachment_by_key.return_value = mock_att
+        mock_syncer.db.get_item.return_value = None
+        mock_syncer.processor.is_cached.return_value = True
+        # Recorded at the global default: only the explicit override makes it eligible.
+        mock_syncer.processor.get_metadata.return_value = {
+            "converter_id": "datalab",
+            "converter_mode": "accurate",
+            "source_hash": _file_sha256(dummy_pdf),
+        }
+        mock_syncer.processor.convert_with.return_value = "# body"
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer), \
+             patch("zocrates.config.get_datalab_processing_mode", return_value="accurate"):
+            res = client.post(
+                "/convert/ATTACH_KEY1",
+                json={"converter_id": "datalab", "datalab_mode": "fast"},
+            )
+
+        assert res.status_code == 200
+        assert res.json()["status"] == "success"
+        mock_syncer.processor.convert_with.assert_called_once()
+        call_kwargs = mock_syncer.processor.convert_with.call_args[1]
+        assert call_kwargs["options"] == {"mode": "fast"}
+
+    def test_convert_item_absent_datalab_mode_gate_uses_global_default(self, client, tmp_path) -> None:
+        """None -> the central resolver's global default drives the gate."""
+        from zocrates.rag.document_processor import _file_sha256
+
+        mock_syncer = MagicMock()
+        dummy_pdf = tmp_path / "paper.pdf"
+        dummy_pdf.write_text("pdf bytes", encoding="utf-8")
+
+        mock_att = MagicMock()
+        mock_att.item_key = "ATTACH_KEY1"
+        mock_att.parent_item_key = None
+        mock_att.item_id = 42
+        mock_att.parent_item_id = None
+        mock_att.content_type = "application/pdf"
+        mock_att.path = dummy_pdf
+
+        mock_syncer.db.get_attachment_by_key.return_value = mock_att
+        mock_syncer.db.get_item.return_value = None
+        mock_syncer.processor.is_cached.return_value = True
+        mock_syncer.processor.get_metadata.return_value = {
+            "converter_id": "datalab",
+            "converter_mode": "accurate",
+            "source_hash": _file_sha256(dummy_pdf),
+        }
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer), \
+             patch("zocrates.config.get_datalab_processing_mode", return_value="accurate"):
+            res = client.post("/convert/ATTACH_KEY1", json={"converter_id": "datalab"})
+
+        assert res.status_code == 200
+        assert res.json()["status"] == "skipped"
+        mock_syncer.processor.convert_with.assert_not_called()
+
+    def test_convert_item_absent_datalab_mode_leaves_options_unset(self, client, tmp_path) -> None:
+        """Without an override, options stay None so the processor resolves the default."""
+        mock_syncer = MagicMock()
+        dummy_pdf = tmp_path / "paper.pdf"
+        dummy_pdf.write_text("pdf bytes", encoding="utf-8")
+
+        mock_att = MagicMock()
+        mock_att.item_key = "ATTACH_KEY1"
+        mock_att.parent_item_key = None
+        mock_att.item_id = 42
+        mock_att.parent_item_id = None
+        mock_att.content_type = "application/pdf"
+        mock_att.path = dummy_pdf
+
+        mock_syncer.db.get_attachment_by_key.return_value = mock_att
+        mock_syncer.db.get_item.return_value = None
+        mock_syncer.processor.is_cached.return_value = False
+        mock_syncer.processor.convert_with.return_value = "# body"
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer), \
+             patch("zocrates.config.get_datalab_processing_mode", return_value="balanced"):
+            res = client.post("/convert/ATTACH_KEY1", json={"converter_id": "datalab"})
+
+        assert res.status_code == 200
+        call_kwargs = mock_syncer.processor.convert_with.call_args[1]
+        assert call_kwargs["options"] is None
+
     def test_convert_item_datalab_non_pdf_resolves_to_fallback(self, client, tmp_path) -> None:
         mock_syncer = MagicMock()
         dummy_html = tmp_path / "web.html"
@@ -562,6 +752,9 @@ class TestCostEstimateEndpoint:
                 # Phase 7 default alignment (§5.2): the default VLM model is
                 # now the paid deepseek-v4.1-flash, so it is not free-tier.
                 assert data["vlm_captioning"]["is_free_tier"] is False
+                # Non-Datalab requests never use the PDF-only fallback
+                assert data["datalab_fallback_id"] is None
+                assert data["non_pdf_already_converted_count"] == 0
 
     def test_cost_estimate_parent_item_resolution(self, client, tmp_path) -> None:
         mock_syncer = MagicMock()
@@ -616,6 +809,46 @@ class TestCostEstimateEndpoint:
             assert data["eligible_documents"] == 1
             assert data["total_pages"] == 0
             assert data["estimated_cost_usd"] == 0.0
+            # Unconverted non-PDF docs are eligible (routed to fallback at conversion time)
+            assert data["non_pdf_already_converted_count"] == 0
+            assert data["non_pdf_target_count"] == 1
+            assert data["datalab_fallback_id"] == "markitdown"
+
+    def test_cost_estimate_datalab_mixed_pdf_and_snapshot_target_counts(self, client, tmp_path) -> None:
+        """non_pdf_target_count distinguishes a snapshot-only selection from mixed."""
+        mock_syncer = MagicMock()
+        dummy_pdf = tmp_path / "paper.pdf"
+        dummy_pdf.write_text("pdf content", encoding="utf-8")
+        dummy_html = tmp_path / "snapshot.html"
+        dummy_html.write_text("<html>body</html>", encoding="utf-8")
+
+        def att_for(key: str, ctype: str, path):
+            m = MagicMock()
+            m.item_key = key
+            m.content_type = ctype
+            m.path = path
+            return m
+
+        attachments = [
+            att_for("PDF_KEY", "application/pdf", dummy_pdf),
+            att_for("HTML_KEY", "text/html", dummy_html),
+        ]
+
+        def attachment_side(key):
+            return attachments[0] if key == "PDF_KEY" else attachments[1]
+
+        mock_syncer.db.get_attachment_by_key.side_effect = attachment_side
+        mock_syncer.processor.get_metadata.return_value = None
+        mock_syncer.processor.datalab_non_pdf_fallback = "markitdown"
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            res = client.get("/cost-estimate?converter_id=datalab&item_keys=PDF_KEY,HTML_KEY")
+            assert res.status_code == 200
+            data = res.json()
+            assert data["target_documents"] == 2
+            assert data["non_pdf_target_count"] == 1
+            assert data["eligible_documents"] == 2
+            assert data["total_pages"] > 0
 
     def test_cost_estimate_incremental_skips_already_converted(self, client, tmp_path) -> None:
         mock_syncer = MagicMock()
@@ -636,6 +869,7 @@ class TestCostEstimateEndpoint:
             "converter_id": "datalab",
             "source_hash": file_hash,
         }
+        mock_syncer.processor.datalab_non_pdf_fallback = "markitdown"
 
         with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
             res = client.get("/cost-estimate?converter_id=datalab&item_keys=CONV_KEY")
@@ -654,6 +888,183 @@ class TestCostEstimateEndpoint:
             data_forced = res_forced.json()
             assert data_forced["already_converted_count"] == 0
             assert data_forced["eligible_documents"] == 1
+            # PDFs converted with the requested converter are not counted as non-PDF fallback hits
+            assert data["non_pdf_already_converted_count"] == 0
+            assert data_forced["non_pdf_already_converted_count"] == 0
+            assert data["datalab_fallback_id"] == "markitdown"
+
+    def test_cost_estimate_datalab_non_pdf_fallback_already_converted(self, client, tmp_path) -> None:
+        """An HTML snapshot already converted with the markitdown fallback is reported
+        as a non-PDF already-converted hit so the frontend can explain why Datalab
+        was not applied."""
+        mock_syncer = MagicMock()
+        dummy_html = tmp_path / "snapshot.html"
+        dummy_html.write_text("<html>body</html>", encoding="utf-8")
+
+        mock_att = MagicMock()
+        mock_att.item_key = "HTML_CONV_KEY"
+        mock_att.content_type = "text/html"
+        mock_att.path = dummy_html
+
+        from zocrates.rag.document_processor import _file_sha256
+
+        file_hash = _file_sha256(dummy_html)
+
+        mock_syncer.db.get_attachment_by_key.return_value = mock_att
+        mock_syncer.processor.get_metadata.return_value = {
+            "converter_id": "markitdown",
+            "source_hash": file_hash,
+        }
+        mock_syncer.processor.datalab_non_pdf_fallback = "markitdown"
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            res = client.get("/cost-estimate?converter_id=datalab&item_keys=HTML_CONV_KEY")
+            assert res.status_code == 200
+            data = res.json()
+            assert data["status"] == "success"
+            assert data["target_documents"] == 1
+            assert data["already_converted_count"] == 1
+            assert data["non_pdf_already_converted_count"] == 1
+            assert data["datalab_fallback_id"] == "markitdown"
+            assert data["eligible_documents"] == 0
+
+            # force=true treats the snapshot as eligible again and clears the fallback hit count
+            res_forced = client.get("/cost-estimate?converter_id=datalab&item_keys=HTML_CONV_KEY&force=true")
+            assert res_forced.status_code == 200
+            data_forced = res_forced.json()
+            assert data_forced["already_converted_count"] == 0
+            assert data_forced["non_pdf_already_converted_count"] == 0
+            assert data_forced["eligible_documents"] == 1
+
+    @pytest.mark.parametrize(
+        ("mode", "rate"),
+        [("fast", 0.00133), ("balanced", 0.004), ("accurate", 0.01)],
+    )
+    def test_cost_estimate_datalab_mode_pricing(self, client, tmp_path, mode, rate) -> None:
+        """Each processing mode is priced at its own list rate and echoed back."""
+        mock_syncer = MagicMock()
+        dummy_pdf = tmp_path / "paper.pdf"
+        dummy_pdf.write_text("pdf content", encoding="utf-8")
+
+        mock_att = MagicMock()
+        mock_att.item_key = "KEY1"
+        mock_att.content_type = "application/pdf"
+        mock_att.path = dummy_pdf
+
+        mock_syncer.db.get_attachment_by_key.return_value = mock_att
+        mock_syncer.processor.get_metadata.return_value = None
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            with patch("zocrates.rag.pdf_utils.count_pdf_pages", return_value=10):
+                res = client.get(f"/cost-estimate?converter_id=datalab&item_keys=KEY1&mode={mode}")
+
+        assert res.status_code == 200
+        data = res.json()
+        assert data["datalab_mode"] == mode
+        assert data["cost_per_page_usd"] == rate
+        assert data["estimated_cost_usd"] == round(10 * rate, 4)
+        assert data["eligible_documents"] == 1
+        assert data["datalab_cost_per_page_usd"] == {
+            "fast": 0.00133,
+            "balanced": 0.004,
+            "accurate": 0.01,
+        }
+
+    @pytest.mark.parametrize("mode", ["lite", "garbage", "FAST!"])
+    def test_cost_estimate_invalid_mode_returns_422(self, client, tmp_path, mode) -> None:
+        mock_syncer = MagicMock()
+        dummy_pdf = tmp_path / "paper.pdf"
+        dummy_pdf.write_text("pdf content", encoding="utf-8")
+
+        mock_att = MagicMock()
+        mock_att.item_key = "KEY1"
+        mock_att.content_type = "application/pdf"
+        mock_att.path = dummy_pdf
+
+        mock_syncer.db.get_attachment_by_key.return_value = mock_att
+        mock_syncer.processor.get_metadata.return_value = None
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            res = client.get(f"/cost-estimate?converter_id=datalab&item_keys=KEY1&mode={mode}")
+
+        assert res.status_code == 422
+        assert "Unsupported Datalab processing mode" in res.json()["detail"]
+
+    def test_cost_estimate_omitted_mode_uses_central_resolver(self, client, tmp_path) -> None:
+        mock_syncer = MagicMock()
+        mock_syncer.db.get_all_convertible_attachments.return_value = []
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer), \
+             patch("zocrates.config.get_datalab_processing_mode", return_value="accurate") as resolver:
+            res = client.get("/cost-estimate?converter_id=datalab")
+
+        assert res.status_code == 200
+        assert resolver.called
+        data = res.json()
+        assert data["datalab_mode"] == "accurate"
+        assert data["cost_per_page_usd"] == 0.01
+
+    def test_cost_estimate_non_datalab_keeps_datalab_fields(self, client, tmp_path) -> None:
+        """The mode/rate-map fields are always present; pricing stays converter-specific."""
+        mock_syncer = MagicMock()
+        mock_syncer.db.get_all_convertible_attachments.return_value = []
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            res = client.get("/cost-estimate?converter_id=markitdown")
+
+        assert res.status_code == 200
+        data = res.json()
+        assert data["datalab_mode"] == "balanced"
+        assert data["cost_per_page_usd"] == 0.0
+        assert data["datalab_cost_per_page_usd"]["balanced"] == 0.004
+
+    @pytest.mark.parametrize(
+        ("stored_mode", "requested_mode", "expect_already_converted"),
+        [
+            ("fast", "balanced", False),
+            ("fast", "fast", True),
+            ("balanced", "balanced", True),
+            ("accurate", "balanced", False),
+            (None, "balanced", True),
+            (None, "accurate", True),
+        ],
+    )
+    def test_cost_estimate_mode_aware_gate(
+        self, client, tmp_path, stored_mode, requested_mode, expect_already_converted
+    ) -> None:
+        """Gate truth table: stored mode is part of the conversion identity."""
+        from zocrates.rag.document_processor import _file_sha256
+
+        mock_syncer = MagicMock()
+        dummy_pdf = tmp_path / "paper.pdf"
+        dummy_pdf.write_text("pdf content", encoding="utf-8")
+
+        mock_att = MagicMock()
+        mock_att.item_key = "KEY1"
+        mock_att.content_type = "application/pdf"
+        mock_att.path = dummy_pdf
+
+        mock_syncer.db.get_attachment_by_key.return_value = mock_att
+        mock_syncer.processor.get_metadata.return_value = {
+            "converter_id": "datalab",
+            "converter_mode": stored_mode,
+            "source_hash": _file_sha256(dummy_pdf),
+        }
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            res = client.get(
+                f"/cost-estimate?converter_id=datalab&item_keys=KEY1&mode={requested_mode}"
+            )
+
+        assert res.status_code == 200
+        data = res.json()
+        assert data["datalab_mode"] == requested_mode
+        if expect_already_converted:
+            assert data["already_converted_count"] == 1
+            assert data["eligible_documents"] == 0
+        else:
+            assert data["already_converted_count"] == 0
+            assert data["eligible_documents"] == 1
 
     def test_cost_estimate_datalab_merge_cross_page_flag(self, client, tmp_path) -> None:
         """Verify datalab_merge_cross_page is present and reflects configured value."""
@@ -790,6 +1201,12 @@ class TestBatchConvertEndpoint:
             assert events[6]["data"]["total"] == 2
             assert events[6]["data"]["processed"] == 2
             assert events[6]["data"]["failed"] == 0
+
+            # Non-Datalab batches gain no mode keys: the payload contract is
+            # unchanged for every other consumer of these events.
+            for evt in events:
+                assert "requested_mode" not in evt["data"]
+                assert "actual_mode" not in evt["data"]
 
             # Ingestion called for each document
             assert mock_syncer.store.ingest_document.call_count == 2
@@ -952,6 +1369,313 @@ class TestBatchConvertEndpoint:
             # Verify convert_with was called with markitdown fallback
             call_kwargs = mock_syncer.processor.convert_with.call_args[1]
             assert call_kwargs["converter_id"] == "markitdown"
+            # The requested Datalab mode is still reported (informational), but the
+            # fallback engine records no mode, so no actual_mode is emitted.
+            assert events[0]["data"]["requested_mode"] == "balanced"
+            assert "actual_mode" not in events[0]["data"]
+            assert events[2]["data"]["requested_mode"] == "balanced"
+            assert "actual_mode" not in events[2]["data"]
+
+    @pytest.mark.parametrize(
+        ("stored_mode", "requested_mode", "expect_skipped"),
+        [
+            ("fast", "balanced", False),
+            ("fast", "fast", True),
+            ("balanced", "balanced", True),
+            (None, "balanced", True),
+        ],
+    )
+    def test_batch_convert_mode_aware_gate(self, client, tmp_path, stored_mode, requested_mode, expect_skipped) -> None:
+        """The batch gate honors the resolved mode, not just converter + hash."""
+        from zocrates.rag.document_processor import _file_sha256
+
+        mock_syncer = MagicMock()
+        mock_conv = MagicMock()
+        mock_conv.converter_id = "datalab"
+        mock_syncer.processor._get_converter_by_id.return_value = mock_conv
+        mock_syncer.processor.convert_with.return_value = "# Doc"
+
+        pdf1 = tmp_path / "mode_gate.pdf"
+        pdf1.write_text("pdf 1 content", encoding="utf-8")
+
+        att = MagicMock()
+        att.item_key = "ATT_MODE"
+        att.content_type = "application/pdf"
+        att.path = pdf1
+        att.parent_item_id = None
+        att.item_id = 1
+        att.parent_item_key = None
+
+        mock_syncer.db.get_attachment_by_key.return_value = att
+        mock_syncer.processor.get_metadata.return_value = {
+            "converter_id": "datalab",
+            "converter_mode": stored_mode,
+            "source_hash": _file_sha256(pdf1),
+        }
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            res = client.post(
+                "/batch-convert",
+                json={
+                    "item_keys": ["ATT_MODE"],
+                    "converter_id": "datalab",
+                    "datalab_mode": requested_mode,
+                },
+            )
+
+        assert res.status_code == 200
+        events = parse_sse_events(res.text)
+        complete = events[-1]
+        assert complete["event"] == "complete"
+
+        if expect_skipped:
+            assert complete["data"]["skipped"] == 1
+            assert complete["data"]["processed"] == 0
+            mock_syncer.processor.convert_with.assert_not_called()
+        else:
+            assert complete["data"]["processed"] == 1
+            call_kwargs = mock_syncer.processor.convert_with.call_args[1]
+            assert call_kwargs["options"] == {"mode": requested_mode}
+            assert call_kwargs["skip_converted"] is True
+
+    def test_batch_convert_omitted_mode_uses_resolver(self, client, tmp_path) -> None:
+        mock_syncer = MagicMock()
+        mock_conv = MagicMock()
+        mock_conv.converter_id = "datalab"
+        mock_syncer.processor._get_converter_by_id.return_value = mock_conv
+        mock_syncer.processor.convert_with.return_value = "# Doc"
+
+        pdf1 = tmp_path / "resolver.pdf"
+        pdf1.write_text("pdf content", encoding="utf-8")
+
+        att = MagicMock()
+        att.item_key = "ATT_RESOLVER"
+        att.content_type = "application/pdf"
+        att.path = pdf1
+        att.parent_item_id = None
+        att.item_id = 1
+        att.parent_item_key = None
+
+        mock_syncer.db.get_attachment_by_key.return_value = att
+        mock_syncer.processor.get_metadata.return_value = None
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer), \
+             patch("zocrates.config.get_datalab_processing_mode", return_value="accurate"):
+            res = client.post(
+                "/batch-convert", json={"item_keys": ["ATT_RESOLVER"], "converter_id": "datalab"}
+            )
+
+        assert res.status_code == 200
+        call_kwargs = mock_syncer.processor.convert_with.call_args[1]
+        assert call_kwargs["options"] == {"mode": "accurate"}
+
+    @pytest.mark.parametrize("bad_mode", ["lite", "garbage", ""])
+    def test_batch_convert_rejects_unsupported_datalab_mode(self, client, tmp_path, bad_mode) -> None:
+        mock_syncer = MagicMock()
+        mock_conv = MagicMock()
+        mock_conv.converter_id = "datalab"
+        mock_syncer.processor._get_converter_by_id.return_value = mock_conv
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            res = client.post(
+                "/batch-convert",
+                json={
+                    "item_keys": ["ATT1"],
+                    "converter_id": "datalab",
+                    "datalab_mode": bad_mode,
+                },
+            )
+
+        assert res.status_code == 422
+
+    def test_batch_convert_force_passes_skip_converted_false(self, client, tmp_path) -> None:
+        mock_syncer = MagicMock()
+        mock_conv = MagicMock()
+        mock_conv.converter_id = "markitdown"
+        mock_syncer.processor._get_converter_by_id.return_value = mock_conv
+        mock_syncer.processor._document_converter_id = "markitdown"
+        mock_syncer.processor.convert_with.return_value = "# Doc"
+        mock_syncer.processor.get_metadata.return_value = None
+
+        pdf1 = tmp_path / "force.pdf"
+        pdf1.write_text("pdf content", encoding="utf-8")
+
+        att = MagicMock()
+        att.item_key = "ATT_FORCE"
+        att.content_type = "application/pdf"
+        att.path = pdf1
+        att.parent_item_id = None
+        att.item_id = 1
+        att.parent_item_key = None
+
+        mock_syncer.db.get_attachment_by_key.return_value = att
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            res = client.post(
+                "/batch-convert",
+                json={"item_keys": ["ATT_FORCE"], "converter_id": "markitdown", "force": True},
+            )
+
+        assert res.status_code == 200
+        call_kwargs = mock_syncer.processor.convert_with.call_args[1]
+        assert call_kwargs["skip_converted"] is False
+        # Non-Datalab converters receive no mode options.
+        assert call_kwargs["options"] is None
+
+    def test_batch_convert_datalab_sse_reports_requested_and_actual_mode(self, client, tmp_path) -> None:
+        """Datalab SSE events carry the requested mode and the surviving recorded mode."""
+        mock_syncer = MagicMock()
+        mock_conv = MagicMock()
+        mock_conv.converter_id = "datalab"
+        mock_syncer.processor._get_converter_by_id.return_value = mock_conv
+        mock_syncer.processor.convert_with.return_value = "# Doc"
+        # The quality guardrail retried the requested 'fast' conversion at
+        # 'balanced'; conversion_meta records the mode of the surviving result.
+        mock_syncer.processor.get_metadata.return_value = {
+            "converter_id": "datalab",
+            "converter_mode": "balanced",
+        }
+
+        pdf1 = tmp_path / "mode_sse.pdf"
+        pdf1.write_text("pdf content", encoding="utf-8")
+
+        att = MagicMock()
+        att.item_key = "ATT_MODE_SSE"
+        att.content_type = "application/pdf"
+        att.path = pdf1
+        att.parent_item_id = None
+        att.item_id = 1
+        att.parent_item_key = None
+
+        mock_syncer.db.get_attachment_by_key.return_value = att
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            res = client.post(
+                "/batch-convert",
+                json={
+                    "item_keys": ["ATT_MODE_SSE"],
+                    "converter_id": "datalab",
+                    "datalab_mode": "fast",
+                    "force": True,
+                },
+            )
+
+        assert res.status_code == 200
+        events = parse_sse_events(res.text)
+        assert [e["event"] for e in events] == ["progress", "progress", "progress", "complete"]
+
+        converting, indexing, completed, complete = (e["data"] for e in events)
+
+        assert converting["status"] == "converting"
+        assert converting["requested_mode"] == "fast"
+        assert "actual_mode" not in converting
+
+        assert indexing["status"] == "indexing"
+        assert indexing["requested_mode"] == "fast"
+        assert "actual_mode" not in indexing
+
+        assert completed["status"] == "completed"
+        assert completed["requested_mode"] == "fast"
+        assert completed["actual_mode"] == "balanced"
+
+        assert complete["requested_mode"] == "fast"
+        assert complete["actual_mode"] == "balanced"
+
+    def test_batch_convert_datalab_skipped_event_carries_requested_mode_only(self, client, tmp_path) -> None:
+        """Skipped items report the requested mode but never an actual mode."""
+        from zocrates.rag.document_processor import _file_sha256
+
+        mock_syncer = MagicMock()
+        mock_conv = MagicMock()
+        mock_conv.converter_id = "datalab"
+        mock_syncer.processor._get_converter_by_id.return_value = mock_conv
+
+        pdf1 = tmp_path / "skipped_mode.pdf"
+        pdf1.write_text("pdf content", encoding="utf-8")
+
+        att = MagicMock()
+        att.item_key = "ATT_SKIP_MODE"
+        att.content_type = "application/pdf"
+        att.path = pdf1
+        att.parent_item_id = None
+        att.item_id = 1
+        att.parent_item_key = None
+
+        mock_syncer.db.get_attachment_by_key.return_value = att
+        mock_syncer.processor.get_metadata.return_value = {
+            "converter_id": "datalab",
+            "converter_mode": "fast",
+            "source_hash": _file_sha256(pdf1),
+        }
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            res = client.post(
+                "/batch-convert",
+                json={
+                    "item_keys": ["ATT_SKIP_MODE"],
+                    "converter_id": "datalab",
+                    "datalab_mode": "fast",
+                    "force": False,
+                },
+            )
+
+        assert res.status_code == 200
+        events = parse_sse_events(res.text)
+        assert len(events) == 2
+        skipped_event, complete_event = (e["data"] for e in events)
+
+        assert skipped_event["status"] == "skipped"
+        assert skipped_event["requested_mode"] == "fast"
+        assert "actual_mode" not in skipped_event
+
+        assert complete_event["skipped"] == 1
+        assert complete_event["requested_mode"] == "fast"
+        assert "actual_mode" not in complete_event
+
+    def test_batch_convert_datalab_mixed_actual_modes_omit_final_actual_mode(self, client, tmp_path) -> None:
+        """A batch whose items recorded different modes has no single actual mode."""
+        mock_syncer = MagicMock()
+        mock_conv = MagicMock()
+        mock_conv.converter_id = "datalab"
+        mock_syncer.processor._get_converter_by_id.return_value = mock_conv
+        mock_syncer.processor.convert_with.return_value = "# Doc"
+
+        pdf1 = tmp_path / "mixed1.pdf"
+        pdf1.write_text("pdf one", encoding="utf-8")
+        pdf2 = tmp_path / "mixed2.pdf"
+        pdf2.write_text("pdf two", encoding="utf-8")
+
+        att1 = MagicMock(item_key="ATT_MIX_1", content_type="application/pdf", path=pdf1, parent_item_id=None, item_id=1, parent_item_key=None)
+        att2 = MagicMock(item_key="ATT_MIX_2", content_type="application/pdf", path=pdf2, parent_item_id=None, item_id=2, parent_item_key=None)
+
+        atts = {"ATT_MIX_1": att1, "ATT_MIX_2": att2}
+        mock_syncer.db.get_attachment_by_key.side_effect = atts.get
+        # Only the second item hit the guardrail, so the surviving modes differ.
+        recorded_modes = {"ATT_MIX_1": "fast", "ATT_MIX_2": "balanced"}
+        mock_syncer.processor.get_metadata.side_effect = lambda item_key: {
+            "converter_id": "datalab",
+            "converter_mode": recorded_modes.get(item_key),
+        }
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            res = client.post(
+                "/batch-convert",
+                json={
+                    "item_keys": ["ATT_MIX_1", "ATT_MIX_2"],
+                    "converter_id": "datalab",
+                    "datalab_mode": "fast",
+                    "force": True,
+                },
+            )
+
+        assert res.status_code == 200
+        events = parse_sse_events(res.text)
+        completed_events = [e["data"] for e in events if e["data"].get("status") == "completed"]
+        assert [e["actual_mode"] for e in completed_events] == ["fast", "balanced"]
+
+        complete_event = events[-1]["data"]
+        assert complete_event["requested_mode"] == "fast"
+        assert "actual_mode" not in complete_event
 
     def test_batch_convert_partial_failure_isolation(self, client, tmp_path) -> None:
         mock_syncer = MagicMock()
@@ -1808,6 +2532,87 @@ class TestDoclingModeAndTimeoutEndpoints:
                 data = res.json()
                 assert "timed out" in data["detail"]["message"]
                 mock_syncer.processor.record_failure.assert_called_once()
+
+
+class TestDatalabProcessingModeConfig:
+    """Verify datalab_processing_mode SSOT exposure and persistence (plan §3.7)."""
+
+    def test_status_exposes_datalab_processing_mode(self, client) -> None:
+        res = client.get("/status")
+        assert res.status_code == 200
+        assert res.json()["datalab_processing_mode"] in ("fast", "balanced", "accurate")
+
+        with patch("zocrates.fast_api_app.get_syncer", side_effect=RuntimeError("Not registered")):
+            res_unreg = client.get("/status")
+            assert res_unreg.status_code == 200
+            assert res_unreg.json()["datalab_processing_mode"] in (
+                "fast",
+                "balanced",
+                "accurate",
+            )
+
+    def test_rag_converter_persists_and_echoes_datalab_processing_mode(
+        self, client, tmp_path
+    ) -> None:
+        mock_syncer = MagicMock()
+        mock_syncer.processor._document_converter_id = "datalab"
+        mock_syncer._zotero_data_dir = tmp_path
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer), \
+             patch("zocrates.config.resolve_zotero_data_dir", return_value=tmp_path):
+            res = client.post(
+                "/rag/converter",
+                json={"document_converter_id": "datalab", "datalab_processing_mode": "fast"},
+            )
+            assert res.status_code == 200
+            data = res.json()
+            assert data["status"] == "success"
+            assert data["datalab_processing_mode"] == "fast"
+
+            from zocrates.config import clear_config_cache, load_zocrates_config
+
+            clear_config_cache()
+            assert load_zocrates_config(tmp_path)["datalab_processing_mode"] == "fast"
+
+    def test_rag_converter_rejects_unsupported_datalab_processing_mode(self, client, tmp_path) -> None:
+        mock_syncer = MagicMock()
+        mock_syncer.processor._document_converter_id = "datalab"
+        mock_syncer._zotero_data_dir = tmp_path
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer), \
+             patch("zocrates.config.resolve_zotero_data_dir", return_value=tmp_path), \
+             patch("zocrates.config.save_zocrates_config") as mock_save:
+            for bad_mode in ("lite", "garbage"):
+                res = client.post(
+                    "/rag/converter", json={"datalab_processing_mode": bad_mode}
+                )
+                assert res.status_code == 422
+            mock_save.assert_not_called()
+
+    def test_config_endpoint_round_trips_datalab_processing_mode(self, client, tmp_path) -> None:
+        with patch("zocrates.config.resolve_zotero_data_dir", return_value=tmp_path), \
+             patch("zocrates.agents.app.set_agent_models"):
+            cfg_res = client.get("/config")
+            assert cfg_res.status_code == 200
+            assert cfg_res.json()["datalab_processing_mode"] == "balanced"
+
+            post_cfg = client.post("/config", json={"datalab_processing_mode": "accurate"})
+            assert post_cfg.status_code == 200
+            assert post_cfg.json()["config"]["datalab_processing_mode"] == "accurate"
+
+            cfg_after = client.get("/config")
+            assert cfg_after.status_code == 200
+            assert cfg_after.json()["datalab_processing_mode"] == "accurate"
+
+    def test_config_endpoint_rejects_unsupported_datalab_processing_mode(
+        self, client, tmp_path
+    ) -> None:
+        with patch("zocrates.config.resolve_zotero_data_dir", return_value=tmp_path), \
+             patch("zocrates.agents.app.set_agent_models"), \
+             patch("zocrates.config.save_zocrates_config") as mock_save:
+            res = client.post("/config", json={"datalab_processing_mode": "lite"})
+            assert res.status_code == 422
+            mock_save.assert_not_called()
 
 
 class TestLibraryConversionStatusEndpoint:

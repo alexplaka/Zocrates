@@ -26,7 +26,7 @@ dependencies = [
     "filelock>=3.0.0",
     "pypdf",
     "docling",
-    "datalab-python-sdk>=0.7.1",
+    "datalab-python-sdk>=0.10.0",
     "Pillow",
     "resvg-py>=0.4.0",
     # [asyncio] extra is REQUIRED: it pulls greenlet, which sqlalchemy.ext.asyncio
@@ -60,8 +60,8 @@ lint = [
 ]
 
 [tool.codespell]
-ignore-words-list = "rouge,ans,ure,nin,ths,unparseable,disjointness,re-uses,pre-selected,pre-select,pre-selecting,pre-emptive,pre-emptively,astroid,discreet,asai"
-skip = "./locust_env/*,uv.lock,.venv,./frontend,**/package-lock.json,./scratch/*,*mermaid.min.js,*.min.js,*.min.css,*.pdf,*.json,*.log,./site/*,./build_dist/*,./scripts/datalab_experiment/*,./scripts/dialogue_agent_proto_evals/*,./tests/*"
+ignore-words-list = "rouge,ans,ure,nin,ths,unparseable,disjointness,re-uses,pre-selected,pre-select,pre-selects,pre-selecting,pre-emptive,pre-emptively,astroid,discreet,asai"
+skip = "./locust_env/*,uv.lock,.venv,./frontend,**/package-lock.json,./scratch/*,*mermaid.min.js,*.min.js,*.min.css,*.pdf,*.json,*.log,./site/*,./build_dist/*,./tests/*"
 
 
 [build-system]

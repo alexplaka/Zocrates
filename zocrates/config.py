@@ -284,6 +284,12 @@ CONVERSION_TIMEOUT_SECONDS: int = int(
     os.getenv("CONVERSION_TIMEOUT_SECONDS", str(DEFAULT_CONVERSION_TIMEOUT_SECONDS))
 )
 DEFAULT_DATALAB_MERGE_CROSS_PAGE: bool = False
+# Datalab processing modes Zocrates supports. ``lite`` is deliberately excluded:
+# it rejects ``extras``, ``save_checkpoint``, and ``merge_cross_page``, all of
+# which Zocrates sends on every request.
+DATALAB_PROCESSING_MODES: tuple[str, ...] = ("fast", "balanced", "accurate")
+DEFAULT_DATALAB_PROCESSING_MODE: str = "balanced"
+DATALAB_PROCESSING_MODE_KEY: str = "datalab_processing_mode"
 
 # ---------------------------------------------------------------------------
 # Citation Verification Defaults (Decision Models)
@@ -384,6 +390,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "docling_mode": "auto",
     "datalab_non_pdf_fallback": "markitdown",
     "datalab_merge_cross_page": DEFAULT_DATALAB_MERGE_CROSS_PAGE,
+    "datalab_processing_mode": DEFAULT_DATALAB_PROCESSING_MODE,
     "conversion_timeout_seconds": DEFAULT_CONVERSION_TIMEOUT_SECONDS,
     "enable_vlm_captioning": DEFAULT_ENABLE_VLM_CAPTIONING,
     "vlm_captioning_provider": DEFAULT_VLM_CAPTIONING_PROVIDER,
@@ -891,6 +898,9 @@ def load_zocrates_config(zotero_data_dir: Path | str | None = None) -> dict:
                     needs_save = True
                 if "datalab_merge_cross_page" not in loaded:
                     loaded["datalab_merge_cross_page"] = DEFAULT_DATALAB_MERGE_CROSS_PAGE
+                    needs_save = True
+                if DATALAB_PROCESSING_MODE_KEY not in loaded:
+                    loaded[DATALAB_PROCESSING_MODE_KEY] = DEFAULT_DATALAB_PROCESSING_MODE
                     needs_save = True
                 if "user_research_profile" not in loaded:
                     loaded["user_research_profile"] = DEFAULT_USER_RESEARCH_PROFILE
@@ -1443,6 +1453,63 @@ def get_datalab_merge_cross_page(
     if cfg is None:
         cfg = load_zocrates_config(zotero_data_dir)
     return bool(cfg.get("datalab_merge_cross_page", DEFAULT_DATALAB_MERGE_CROSS_PAGE))
+
+
+def validate_datalab_mode(mode: Any) -> str | None:
+    """Return the normalized Datalab processing mode, or None when not supported.
+
+    Shared validation helper for every mode resolution site: the
+    ``DocumentProcessor`` resolver, the ``DatalabConverter`` fallback of last
+    resort, and the config default.
+
+    Args:
+        mode: Candidate mode value (any type; non-strings are rejected).
+
+    Returns:
+        ``"fast"``, ``"balanced"``, or ``"accurate"`` (lower-cased and
+        stripped), or None if the value is not a supported mode.
+    """
+    if not isinstance(mode, str):
+        return None
+    normalized = mode.strip().lower()
+    return normalized if normalized in DATALAB_PROCESSING_MODES else None
+
+
+def get_datalab_processing_mode(
+    zotero_data_dir: Path | None = None,
+    cfg: dict[str, Any] | None = None,
+) -> str:
+    """Return the configured default Datalab processing mode.
+
+    Reads ``datalab_processing_mode`` from the in-memory cfg if provided,
+    otherwise from ``zocrates_config.json`` (seeded and backfilled there under
+    ``FileLock``). An absent, blank, or invalid stored value is re-validated
+    here and falls back to ``"balanced"`` with a warning for invalid values.
+
+    Args:
+        zotero_data_dir: Path to the Zotero data directory.
+        cfg: Optional in-memory config dict. If provided, bypasses disk read.
+
+    Returns:
+        One of ``"fast"``, ``"balanced"``, or ``"accurate"``.
+    """
+    if cfg is None:
+        cfg = load_zocrates_config(zotero_data_dir)
+    raw = cfg.get(DATALAB_PROCESSING_MODE_KEY)
+    if isinstance(raw, str) and not raw.strip():
+        raw = None  # blank/empty string counts as unprovided
+    validated = validate_datalab_mode(raw)
+    if validated is not None:
+        return validated
+    if raw is not None:
+        logger.warning(
+            "Invalid %s %r in zocrates_config.json (expected one of %s); using %r.",
+            DATALAB_PROCESSING_MODE_KEY,
+            raw,
+            list(DATALAB_PROCESSING_MODES),
+            DEFAULT_DATALAB_PROCESSING_MODE,
+        )
+    return DEFAULT_DATALAB_PROCESSING_MODE
 
 
 def get_enable_vlm_captioning(

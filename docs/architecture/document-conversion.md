@@ -125,16 +125,18 @@ Zotero Notes (child notes and standalone notes) are stored as HTML strings in `z
 
 For high-accuracy mathematical formula transcription, dense two-column academic layouts, and complex tabular structures:
 
-1. **Adaptive Execution Policy & Cross-Page Merging**:
-   - Initial conversion executes in `mode="balanced"` with `fence_synthetic_captions=True`, `save_checkpoint=True`, `extras="new_block_types"`, and configurable `merge_cross_page` (default `False`, configured via `datalab_merge_cross_page` in `zocrates_config.json`).
+1. **Adaptive Execution Policy, Processing Modes & Cross-Page Merging**:
+   - **Processing modes**: `fast` / `balanced` / `accurate` are selectable per conversion (right-click dialog) with prices `$1.33` / `$4.00` / `$10.00` per 1,000 pages (`DATALAB_COST_PER_PAGE` in `fast_api_app.py`, rates + provenance URL anchored to the Datalab conversion docs). `lite` is **excluded** — it rejects `extras`, `save_checkpoint`, and `merge_cross_page`, all of which Zocrates always sends. Mode selection and resolver precedence are specified in the Datalab processing-modes plan (`artifacts/plans/datalab_processing_modes_plan.md`).
+   - Initial conversion executes in the mode resolved once per request (`options={"mode": …}` → `DocumentProcessor` → converter; unattended paths resolve the configured global default `datalab_processing_mode`) with `fence_synthetic_captions=True`, `save_checkpoint=True`, `extras="new_block_types"`, and configurable `merge_cross_page` (default `False`, configured via `datalab_merge_cross_page` in `zocrates_config.json`). The converter itself performs no global config reads.
    - When `datalab_merge_cross_page=True`, multi-page tables, cross-page split paragraphs, and continuous lists are stitched into cohesive blocks by Datalab's merge model pass.
-   - If `parse_quality_score < 3.0` (out of 5.0), the engine automatically logs a diagnostic warning and retries conversion in `mode="accurate"`, preserving `merge_cross_page`.
+   - **Quality guardrail matrix**: if `parse_quality_score < 3.0` (out of 5.0), the engine logs a diagnostic warning and retries **once** one tier up — `fast → balanced`, `balanced → accurate`, `accurate → no retry` (a retry at the top tier would re-spend at identical quality). On retry failure the **original result survives**, so the recorded mode is always the surviving result's mode. Note the guardrail is score-based and dormant today: Datalab returns `parse_quality_score = None` for every mode, so the retry never fires until the upstream score becomes available.
+   - **Recorded mode**: `converter_mode` is persisted in `conversion_meta.db` (§6) and mirrored into `corpus/<item_key>/datalab_document.json` (`mode`), which is how the mode survives a backend restart.
 2. **Strict PDF Scope & Extension Safeguard**:
    - Only PDF documents are processed (`application/pdf`, `.pdf`, or `%PDF-` magic header).
    - If a valid PDF lacks the `.pdf` file extension on disk, it is dynamically staged to a temporary directory with a `.pdf` suffix prior to calling `DatalabClient.convert()`, preventing SDK/API MIME rejection.
 3. **Asset Unpacking & AST Persistence**:
    - Extracted figures and diagrams returned in `result.images` (both raw bytes and base64 strings) are decoded and saved directly into `corpus/<item_key>/images/<filename>`.
-   - The complete JSON block DOM tree is written to `corpus/<item_key>/datalab_document.json`.
+   - The complete JSON block DOM tree is written to `corpus/<item_key>/datalab_document.json` together with `parse_quality_score`, `checkpoint_id`, and `mode`.
 4. **AST-Driven Semantic Block Pairing & Markdown Generation (`generate_markdown_from_datalab_ast`)**:
    - The Datalab JSON DOM tree (`ast_data["children"]`) contains typed blocks (`Text`, `SectionHeader`, `Equation`, `Diagram`, `Figure`, `Caption`, `Table`, `ListGroup`).
    - On each page, the generator matches `Figure`/`Diagram` and `Table` blocks with their nearest corresponding `Caption` block (supporting both preceding and succeeding author captions).
@@ -143,8 +145,9 @@ For high-accuracy mathematical formula transcription, dense two-column academic 
    - **LaTeX Math Preservation**: Transforms `<math>` tags into `$ ... $` (inline) and `$$ ... $$` (display block).
    - **Clean List Formatting**: Detects explicit numbering (`1. `, `7. `) to preserve original reference indexes without duplicate markers (preventing `1. 1.`), and strips bullet glyphs (`•`, `\u2022`, etc.) while safeguarding Markdown bold markers (`**bold**`).
    - **Robust Fallback**: Falls back to regex-based pairing (`_format_datalab_markdown`) if AST JSON is absent or malformed.
-5. **Quality & Checkpoint Persistence**:
+5. **Quality, Mode & Checkpoint Persistence**:
    - `parse_quality_score` (0.0 to 5.0) and `checkpoint_id` (UUID) are stamped into OKF-0.2 frontmatter `provenance` and persisted in `conversion_meta.db`.
+   - The processing mode actually used (`converter_mode`) is persisted alongside them and surfaced in the ItemPane **Engine** row as `datalab (v1.0) · accurate` (§10.3).
 
 ### 3.6. Attachment-Free & Abstract-Only Item Materialization (`materialize_item_metadata_bundle`)
 
@@ -257,6 +260,7 @@ CREATE TABLE IF NOT EXISTS conversion_meta (
     char_count        INTEGER NOT NULL,  -- Character length of full Markdown (including frontmatter)
     parse_quality_score REAL,            -- Normalized parse quality score (0.0 to 5.0)
     checkpoint_id     TEXT,              -- Cloud state checkpoint UUID (e.g. Datalab)
+    converter_mode    TEXT,              -- Datalab processing mode ('fast'|'balanced'|'accurate'), NULL for other engines
     title             TEXT,              -- Ingested document title
     abstract          TEXT,              -- Ingested document abstract
     abstract_source   TEXT,              -- Abstract origin ('zotero', 'openrouter', 'extractive')
@@ -277,6 +281,8 @@ To ensure that `zocrates-data` can be copied across machines and operating syste
   5. Updates matching rows to storage-relative `storage/<key>/<filename>` (or `storage/<key>`).
   6. Sets `PRAGMA user_version = 1` and commits.
   7. Calls `_sanitize_cached_bundle_image_links(cache_dir)` to convert file URIs in cached `document.md` files to bundle-relative `images/<name>` links while enforcing strict line-count invariance.
+- **`PRAGMA user_version = 2` (Datalab processing mode)**: the `converter_mode` column is added by the existing `existing_cols` add-column guard (nullable, so pre-existing rows stay valid). A one-time backfill then runs **only** inside the `current_version < 2` block — `UPDATE conversion_meta SET converter_mode = 'balanced' WHERE converter_id = 'datalab' AND converter_mode IS NULL` — and stamps `PRAGMA user_version = 2`. Legacy Datalab rows were produced by code whose effective default was `balanced`, so stamping them keeps the mode-aware “already converted” gate (`matches_conversion_identity`) truthful, while rows recorded by this feature are never rewritten. The migration targets only the authoritative corpus database (`<cache_dir>/conversion_meta.db`); legacy root-level `conversion_meta.db` files are not migrated.
+- **Mode-aware conversion identity**: an attachment counts as already converted only when `converter_id` matches **and** `converter_mode in (None, requested_mode)` — a stored `NULL` mode matches any request (non-Datalab engines and legacy rows), while a Datalab row recorded as `fast` no longer blocks a `balanced` re-conversion. The same `matches_conversion_identity` helper backs all gates (`/cost-estimate`, `/batch-convert`, `/convert/{item_key}`, and the per-item-lock recheck inside `convert_with`).
 - **Zero Ongoing DB Overhead**: Successful initialization registers `cache_dir` in a module-level set `_INITIALIZED_META_DBS: set[Path]`. Subsequent connections and queries evaluate `cache_dir in _INITIALIZED_META_DBS` in Python memory (~50ns check), performing **0 disk I/O**, **0 PRAGMA queries**, and **0 query interception**.
 
 ---
@@ -407,6 +413,7 @@ CREATE TABLE IF NOT EXISTS conversion_failures (
 2. **Sidebar Drawer (`sidebar.js`)**: Listens for notifications, displays the notification count badge on the header icon, and renders notifications with timestamps.
 3. **ItemPane Section (`lib/itemPane.js`)**:
    - Annotates failed engines in the dropdown: `Docling Local ⚠️ (Failed previously)`.
+   - Merges the recorded Datalab processing mode into the **Engine** row: `datalab (v1.0) · accurate`. The mode comes from `GET /items/{item_key}/status` (the `converter_mode` column exposed through `get_metadata`) and is appended only when present, so non-Datalab engines render exactly as before (`markitdown (v1.0)`).
    - Renders a compact warning alert box explaining why the active bundle remains MarkItDown.
    - Dispatches non-blocking notifications to the drawer on re-conversion errors instead of modal popup alerts.
 
@@ -501,6 +508,10 @@ For paid cloud converters (e.g. Datalab Chandra):
    - Default fallback: returns `1`.
 2. **Cost Calculation**:
    $$\text{Estimated Cost USD} = \text{Total PDF Pages} \times \text{Cost Per Page}$$
+3. **Per-Mode Datalab Pricing (`GET /cost-estimate?mode=…`)**:
+   - `DATALAB_COST_PER_PAGE = {"fast": 0.00133, "balanced": 0.004, "accurate": 0.01}` (list prices retrieved 2026-11-16 from the Datalab conversion docs; the maintainer's account is billed 75% of list, so the estimate intentionally over-reports rather than under-reports).
+   - `mode` is optional: omitted/blank flows through the central resolver (configured global default `datalab_processing_mode`), an unsupported value is rejected with `HTTP 422`, and non-Datalab converters ignore it.
+   - The response carries `datalab_mode`, `cost_per_page_usd` (the resolved rate) and `datalab_cost_per_page_usd` (the full map) so the frontend can re-price without guessing; `already_converted_count` / `eligible_documents` are computed under the **mode-aware gate**, so the displayed skip counts and cost match what `/batch-convert` will bill.
 
 ---
 
@@ -543,12 +554,15 @@ When new documents are added to Zotero during a live user session (via browser c
 For bulk document conversions triggered via the right-click context menu (`Zocrates -> Convert with...`) or the **Library Conversion Status Modal**:
 
 1. **Multi-Phase SSE Progress Stream (`POST /batch-convert`)**:
-   - Streams real-time Server-Sent Events per item: `batch_start`, `item_start`, `item_success`, `item_error`, and `batch_complete`.
+   - Streams real-time Server-Sent Events per item (`status` values `converting`, `indexing`, `completed`, `skipped`, `failed`) plus a terminal `complete` summary (`total`, `processed`, `skipped`, `failed`, `failed_items`).
    - Sidebar renders an active Batch Progress Card with live item title, engine badge, progress bar (N / M), and a **Stop** button.
+   - **Datalab mode annotations (additive keys only)**: for `converter_id == "datalab"` the per-item events additionally carry `requested_mode` (resolved once at request start) and, on the per-item `completed` event, `actual_mode` — the mode recorded by the **surviving** conversion. The terminal `complete` event carries `requested_mode` plus `actual_mode` when every converted item recorded the same mode (a mixed-mode batch has no single actual mode and omits it). Non-Datalab batches emit byte-identical payloads; the non-PDF fallback engine reports `requested_mode` but never `actual_mode` (it has no mode). The sidebar renders the suffix `Datalab (Cloud) · fast`, or `Datalab (Cloud) · fast → balanced (quality retry)` when the guardrail upgraded the conversion, so a guardrail retry is never silent.
 2. **Effective Converter ID & Pre-Flight Cost Estimation (`GET /cost-estimate`)**:
    - Computes `effective_converter_id` per document in the selection:
      - PDF attachments route to `datalab` (counting pages for USD cost estimation).
      - Non-PDF attachments route to `datalab_non_pdf_fallback` (`markitdown` or `docling_local`) with $0 page cost.
+   - **Datalab processing-mode modal** (`renderDatalabModeModal`, replacing the plain `Services.prompt.confirm` for Datalab only; distinct overlay id `zocrates-datalab-mode-overlay`): a `Processing mode:` dropdown (`fast` / `balanced` / `accurate`), a live cost line re-priced from `datalab_cost_per_page_usd` (with a `estimated_cost_usd / total_pages` fallback for version skew), a guardrail disclosure line (one automatic retry at the next tier may add billing), and a variable-surcharge warning when `datalab_merge_cross_page` is active. Ordering rules: every estimate request carries a generation token and its mode, stale out-of-order responses are discarded, **Proceed** stays disabled until a matching estimate reports `eligible_documents > 0`, and estimate failure renders an explicit error state instead of a $0.00 fallback. A selection that is entirely already converted still opens the modal (informational line + disabled Proceed) so the dropdown can rescue it; non-Datalab converters keep the legacy alert + plain confirmation.
+   - Dispatches the frozen mode of the accepted estimate as `datalab_mode`; the backend resolves it once before the item loop (`batch_req.datalab_mode or get_datalab_processing_mode(...)`) and passes `options={"mode": effective_mode}` to `convert_with`, so a concurrent preference change cannot alter the mode of remaining items.
    - Prompts user confirmation showing separate breakdowns: `• To Convert: N PDF document(s) (X pages, ~$Y USD)` and `• To Convert: M non-PDF document(s) (via Fallback Engine)`.
 3. **3-Way Library Partitioning & Fast Batch Indexing (`POST /batch-index`)**:
    - `GET /library/conversion-status` partitions the library into three explicit states:
@@ -599,11 +613,11 @@ For extracted figures, diagrams, and plots in Markdown documents that lack descr
 | `GET` | `/converters` | List all registered converter engines (id, version, mode) |
 | `POST` | `/rag/converter` | Update active converter ID, mode, and `datalab_non_pdf_fallback` in config |
 | `POST` | `/convert/{item_key}` | Re-convert an item with specified `converter_id`, replace bundle on success, and re-index vector store |
-| `POST` | `/batch-convert` | SSE stream for serial batch document conversions across multiple items |
+| `POST` | `/batch-convert` | SSE stream for serial batch document conversions across multiple items (optional `datalab_mode`: `fast` / `balanced` / `accurate`; payloads carry `requested_mode` / `actual_mode` for Datalab) |
 | `POST` | `/batch-index` | SSE stream for fast chunking and vector embedding of pending cached documents without re-conversion |
 | `GET` | `/items/{item_key}/status` | Get item metadata, bundle status, and `failed_converters` mapping |
 | `GET` | `/library/conversion-status` | Single-query bulk summary of indexed, pending-index, and unconverted items across the entire library |
-| `GET` | `/cost-estimate` | Pre-scan targeted items' PDF page counts and calculate estimated USD cost with non-PDF fallback routing |
+| `GET` | `/cost-estimate` | Pre-scan targeted items' PDF page counts and calculate estimated USD cost with non-PDF fallback routing (optional `mode` for Datalab per-mode pricing) |
 
 ---
 

@@ -118,6 +118,79 @@ async function runTests() {
       global.fetch = originalFetch;
     }
   });
+
+  // 3. Engine row (Datalab processing mode merge)
+  const renderEngineRow = async (meta) => {
+    const body = createMockElement("div");
+    body.ownerDocument = env.document;
+
+    const mockItem = {
+      key: "ITEM_ENGINE_ROW",
+      isAttachment: () => true,
+      isRegularItem: () => false,
+    };
+
+    const statusPayload = {
+      attachments: [
+        {
+          item_key: "ATT_ENGINE_ROW",
+          filename: "paper.pdf",
+          content_type: "application/pdf",
+          is_cached: true,
+          is_indexed: true,
+          metadata: meta,
+        },
+      ],
+    };
+    const convertersPayload = {
+      converters: [
+        { id: meta.converter_id, name: meta.converter_id, version: meta.converter_version },
+      ],
+    };
+
+    const originalFetch = global.fetch;
+    global.fetch = async (url) => {
+      if (String(url).includes("/items/")) {
+        return { ok: true, json: async () => statusPayload };
+      }
+      return { ok: true, json: async () => convertersPayload };
+    };
+
+    try {
+      await ZocratesItemPane.onRender({ body, item: mockItem });
+      return body.textContent;
+    } finally {
+      global.fetch = originalFetch;
+    }
+  };
+
+  await testAsync("onRender: appends the Datalab processing mode to the Engine row", async () => {
+    const text = await renderEngineRow({
+      converter_id: "datalab",
+      converter_version: "1.0",
+      converter_mode: "fast",
+      char_count: 1234,
+    });
+
+    assert.ok(
+      text.includes("datalab (v1.0) · fast"),
+      `Engine row should merge the recorded mode, got: ${text}`
+    );
+  });
+
+  await testAsync("onRender: renders the Engine row unchanged when no mode is recorded", async () => {
+    const text = await renderEngineRow({
+      converter_id: "markitdown",
+      converter_version: "1.0",
+      char_count: 1234,
+    });
+
+    assert.ok(
+      text.includes("markitdown (v1.0)"),
+      `Engine row should keep the plain label, got: ${text}`
+    );
+    assert.ok(!text.includes("markitdown (v1.0) ·"), "No mode separator should be appended");
+  });
 }
 
 if (require.main === module) {

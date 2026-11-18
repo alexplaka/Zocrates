@@ -727,6 +727,7 @@ class BaseDocumentConverter(ABC):
         source_path: Path,
         content_type: str,
         cache_dir: Path,
+        options: dict[str, Any] | None = None,
     ) -> str | None:
         """Convert source document to Markdown text.
 
@@ -737,6 +738,9 @@ class BaseDocumentConverter(ABC):
             cache_dir: Item-level bundle directory (``corpus/<item_key>/``).
                 Converters should write extracted assets (images, tables) into
                 subdirectories relative to this path (e.g., ``cache_dir / "images/"``).
+            options: Optional converter-agnostic options dictionary resolved by
+                ``DocumentProcessor`` (e.g. ``{"mode": "fast"}``). Converters
+                that do not consume options ignore it.
 
         Returns:
             Converted Markdown text, or None if conversion failed or produced empty content.
@@ -772,6 +776,7 @@ class DirectReadConverter(BaseDocumentConverter):
         source_path: Path,
         content_type: str,
         cache_dir: Path,
+        options: dict[str, Any] | None = None,
     ) -> str | None:
         """Read Markdown or text content directly from disk.
 
@@ -780,6 +785,7 @@ class DirectReadConverter(BaseDocumentConverter):
             source_path: Path to the source file.
             content_type: MIME type of the file.
             cache_dir: Item-level bundle directory (unused by this converter).
+            options: Optional converter options (unused by this converter).
 
         Returns:
             UTF-8 content string, or None if empty.
@@ -830,6 +836,7 @@ class MarkItDownConverter(BaseDocumentConverter):
         source_path: Path,
         content_type: str,
         cache_dir: Path,
+        options: dict[str, Any] | None = None,
     ) -> str | None:
         """Convert document using MarkItDown and inject extracted PDF images if applicable.
 
@@ -838,6 +845,7 @@ class MarkItDownConverter(BaseDocumentConverter):
             source_path: Path to the source file on disk.
             content_type: MIME type of the file.
             cache_dir: Item-level bundle directory (``corpus/<item_key>/``).
+            options: Optional converter options (unused by this converter).
 
         Returns:
             Converted Markdown string, or None if conversion failed or returned empty text.
@@ -1076,6 +1084,7 @@ class DoclingLocalConverter(BaseDocumentConverter):
         source_path: Path,
         content_type: str,
         cache_dir: Path,
+        options: dict[str, Any] | None = None,
     ) -> str | None:
         """Convert document using Docling and save AST, images, and tables to bundle.
 
@@ -1084,6 +1093,7 @@ class DoclingLocalConverter(BaseDocumentConverter):
             source_path: Path to the source file on disk.
             content_type: MIME type of the file.
             cache_dir: Item-level bundle directory (``corpus/<item_key>/``).
+            options: Optional converter options (unused by this converter).
 
         Returns:
             Converted Markdown string, or None if conversion failed or returned empty text.
@@ -1666,6 +1676,15 @@ def _format_datalab_markdown(markdown_text: str) -> str:
 class DatalabConverter(BaseDocumentConverter):
     """Remote document conversion engine via Datalab OCR API."""
 
+    # Mode-aware Adaptive Quality Guardrail targets: a low parse quality score
+    # retries one tier up the cost/quality ladder, and ``accurate`` never
+    # retries (already the maximum-quality tier).
+    RETRY_MODE_BY_MODE: dict[str, str | None] = {
+        "fast": "balanced",
+        "balanced": "accurate",
+        "accurate": None,
+    }
+
     def __init__(self) -> None:
         """Initialize the remote Datalab converter instance."""
         self._metadata: dict[str, dict[str, Any]] = {}
@@ -1710,7 +1729,7 @@ class DatalabConverter(BaseDocumentConverter):
             item_key: Zotero item key.
 
         Returns:
-            Dictionary containing parse_quality_score, checkpoint_id, etc.
+            Dictionary containing parse_quality_score, checkpoint_id, mode, etc.
         """
         return self._metadata.get(item_key, {})
 
@@ -1720,6 +1739,7 @@ class DatalabConverter(BaseDocumentConverter):
         source_path: Path,
         content_type: str,
         cache_dir: Path,
+        options: dict[str, Any] | None = None,
     ) -> str | None:
         """Convert document via Datalab API with adaptive retry and asset unpacking.
 
@@ -1730,6 +1750,8 @@ class DatalabConverter(BaseDocumentConverter):
             source_path: Source file path on disk.
             content_type: MIME type string.
             cache_dir: Bundle directory (or temporary staging directory).
+            options: Optional converter options resolved by ``DocumentProcessor``;
+                ``options["mode"]`` selects the Datalab processing mode.
 
         Returns:
             Converted Markdown string with <figure> tags, or None on failure.
@@ -1740,9 +1762,13 @@ class DatalabConverter(BaseDocumentConverter):
             with tempfile.TemporaryDirectory() as tmpdir:
                 staged_path = Path(tmpdir) / f"{source_path.stem}.pdf"
                 shutil.copy2(source_path, staged_path)
-                return self._convert_internal(item_key, staged_path, content_type, cache_dir)
+                return self._convert_internal(
+                    item_key, staged_path, content_type, cache_dir, options
+                )
         else:
-            return self._convert_internal(item_key, source_path, content_type, cache_dir)
+            return self._convert_internal(
+                item_key, source_path, content_type, cache_dir, options
+            )
 
     def _convert_internal(
         self,
@@ -1750,11 +1776,34 @@ class DatalabConverter(BaseDocumentConverter):
         source_path: Path,
         content_type: str,
         cache_dir: Path,
+        options: dict[str, Any] | None = None,
     ) -> str | None:
-        """Internal conversion routine executing against Datalab API."""
+        """Internal conversion routine executing against Datalab API.
+
+        The processing mode arrives fully resolved in ``options["mode"]``; this
+        converter performs local validation only and never reads global
+        configuration for the mode (``DocumentProcessor`` owns the resolution).
+        """
         import base64
         import json
-        from zocrates.config import get_datalab_api_key, get_datalab_merge_cross_page
+        from zocrates.config import (
+            get_datalab_api_key,
+            get_datalab_merge_cross_page,
+            validate_datalab_mode,
+        )
+
+        requested_mode = (options or {}).get("mode")
+        if isinstance(requested_mode, str) and not requested_mode.strip():
+            requested_mode = None  # blank/empty string counts as unprovided
+        mode = validate_datalab_mode(requested_mode)
+        if mode is None:
+            if requested_mode is not None:
+                logger.warning(
+                    "Invalid Datalab processing mode %r for %s; falling back to 'balanced'.",
+                    requested_mode,
+                    item_key,
+                )
+            mode = "balanced"
 
         api_key = get_datalab_api_key()
         if not api_key:
@@ -1774,9 +1823,9 @@ class DatalabConverter(BaseDocumentConverter):
 
         client = DatalabClient(api_key=api_key)
 
-        options = ConvertOptions(
+        convert_options = ConvertOptions(
             output_format="markdown,json",
-            mode="balanced",
+            mode=mode,
             paginate=False,
             disable_image_extraction=False,
             disable_image_captions=False,
@@ -1787,7 +1836,7 @@ class DatalabConverter(BaseDocumentConverter):
         )
 
         try:
-            result = client.convert(source_path, options=options)
+            result = client.convert(source_path, options=convert_options)
         except Exception as exc:
             logger.error("Datalab API request failed for %s: %s", source_path, exc)
             raise RuntimeError(f"Datalab API request failed: {exc}") from exc
@@ -1796,7 +1845,7 @@ class DatalabConverter(BaseDocumentConverter):
             error_msg = getattr(result, "error", None) or "Datalab conversion returned unsuccessful status"
             raise RuntimeError(f"Datalab conversion failed: {error_msg}")
 
-        # Adaptive Quality Guardrail: If parse quality is below 3.0 / 5.0, retry in 'accurate' mode
+        # Adaptive quality score extraction (0.0-5.0 scale, None when unreported)
         def _extract_score(res: Any) -> float | None:
             """Extract parse quality score from Datalab response object.
 
@@ -1820,16 +1869,23 @@ class DatalabConverter(BaseDocumentConverter):
 
         score = _extract_score(result)
 
-        if score is not None and score < 3.0:
+        # Adaptive Quality Guardrail: retry one tier up when parse quality is
+        # below 3.0 / 5.0. ``accurate`` has no higher tier, so it never retries.
+        # The retry only fires when Datalab reports a score (today it does not,
+        # so the guardrail stays dormant).
+        retry_mode = self.RETRY_MODE_BY_MODE.get(mode)
+        if retry_mode is not None and score is not None and score < 3.0:
             logger.info(
                 "Parse quality score %.2f/5.0 for %s is below threshold (3.0). "
-                "Retrying conversion with mode='accurate'...",
+                "Retrying conversion with mode='%s' (selected mode='%s')...",
                 score,
                 item_key,
+                retry_mode,
+                mode,
             )
-            options_accurate = ConvertOptions(
+            options_retry = ConvertOptions(
                 output_format="markdown,json",
-                mode="accurate",
+                mode=retry_mode,
                 paginate=False,
                 disable_image_extraction=False,
                 disable_image_captions=False,
@@ -1839,23 +1895,28 @@ class DatalabConverter(BaseDocumentConverter):
                 merge_cross_page=merge_cross_page,
             )
             try:
-                retry_result = client.convert(source_path, options=options_accurate)
+                retry_result = client.convert(source_path, options=options_retry)
                 if getattr(retry_result, "success", False) and getattr(retry_result, "markdown", None):
                     result = retry_result
+                    # The surviving result defines the recorded mode.
+                    mode = retry_mode
                     retry_score = _extract_score(result)
                     if retry_score is not None:
                         score = retry_score
             except Exception as retry_exc:
                 logger.warning(
-                    "Datalab 'accurate' mode retry failed for %s: %s; keeping balanced result",
+                    "Datalab '%s' mode retry failed for %s: %s; keeping '%s' result",
+                    retry_mode,
                     item_key,
                     retry_exc,
+                    mode,
                 )
 
         checkpoint_id = getattr(result, "checkpoint_id", None)
         self._metadata[item_key] = {
             "parse_quality_score": score,
             "checkpoint_id": checkpoint_id,
+            "mode": mode,
         }
 
         # 1. Unpack images
@@ -1898,11 +1959,13 @@ class DatalabConverter(BaseDocumentConverter):
                 ast_copy = dict(ast_data)
                 ast_copy["parse_quality_score"] = score
                 ast_copy["checkpoint_id"] = checkpoint_id
+                ast_copy["mode"] = mode
                 json_path.write_text(json.dumps(ast_copy, indent=2), encoding="utf-8")
             else:
                 meta_dump = {
                     "parse_quality_score": score,
                     "checkpoint_id": checkpoint_id,
+                    "mode": mode,
                     "runtime": getattr(result, "runtime", None),
                     "page_count": getattr(result, "page_count", None),
                 }

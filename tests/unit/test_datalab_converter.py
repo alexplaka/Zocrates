@@ -2,6 +2,7 @@
 
 import base64
 import json
+import logging
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -634,3 +635,285 @@ class TestDocumentProcessorDatalabIntegration:
         assert mock_client.convert.call_count == 2
         meta = conv.get_metadata("ITEM_ZERO")
         assert meta["parse_quality_score"] == 3.8
+
+
+class TestDatalabProcessingModeGuardrail:
+    """Mode-aware Adaptive Quality Guardrail matrix and options threading (plan §3.3, §3.1)."""
+
+    def _convert(
+        self,
+        conv: DatalabConverter,
+        item_key: str,
+        pdf_path: Path,
+        bundle_dir: Path,
+        results: list[DummyDatalabResult] | DummyDatalabResult,
+        options: dict[str, Any] | None = None,
+    ) -> MagicMock:
+        """Run DatalabConverter.convert against a mocked DatalabClient and return the client mock."""
+        mock_client = MagicMock()
+        mock_client.convert.side_effect = results if isinstance(results, list) else None
+        if not isinstance(results, list):
+            mock_client.convert.return_value = results
+
+        with patch("zocrates.config.get_datalab_api_key", return_value="fake-datalab-key"), \
+             patch("zocrates.config.get_datalab_merge_cross_page", return_value=False), \
+             patch("datalab_sdk.DatalabClient", return_value=mock_client):
+            conv.convert(item_key, pdf_path, "application/pdf", bundle_dir, options=options)
+        return mock_client
+
+    @staticmethod
+    def _call_modes(mock_client: MagicMock) -> list[str]:
+        """Return the ConvertOptions.mode of every DatalabClient.convert call."""
+        return [call[1]["options"].mode for call in mock_client.convert.call_args_list]
+
+    def test_fast_mode_retries_at_balanced(self, tmp_path):
+        conv = DatalabConverter()
+        pdf_path = tmp_path / "scan.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4 scan")
+        bundle_dir = tmp_path / "bundle_fast"
+        bundle_dir.mkdir()
+
+        low_res = DummyDatalabResult(markdown="Poor fast text.", parse_quality_score=2.0)
+        high_res = DummyDatalabResult(markdown="Recovered balanced text.", parse_quality_score=4.4)
+
+        client = self._convert(
+            conv, "ITEM_FAST", pdf_path, bundle_dir, [low_res, high_res], options={"mode": "fast"}
+        )
+
+        assert self._call_modes(client) == ["fast", "balanced"]
+        meta = conv.get_metadata("ITEM_FAST")
+        assert meta["mode"] == "balanced"
+        assert meta["parse_quality_score"] == 4.4
+
+    def test_balanced_mode_retries_at_accurate(self, tmp_path):
+        conv = DatalabConverter()
+        pdf_path = tmp_path / "scan.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4 scan")
+        bundle_dir = tmp_path / "bundle_balanced"
+        bundle_dir.mkdir()
+
+        low_res = DummyDatalabResult(markdown="Poor balanced text.", parse_quality_score=2.0)
+        high_res = DummyDatalabResult(markdown="Recovered accurate text.", parse_quality_score=4.6)
+
+        client = self._convert(conv, "ITEM_BALANCED", pdf_path, bundle_dir, [low_res, high_res])
+
+        assert self._call_modes(client) == ["balanced", "accurate"]
+        meta = conv.get_metadata("ITEM_BALANCED")
+        assert meta["mode"] == "accurate"
+
+    def test_accurate_mode_never_retries(self, tmp_path):
+        conv = DatalabConverter()
+        pdf_path = tmp_path / "scan.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4 scan")
+        bundle_dir = tmp_path / "bundle_accurate"
+        bundle_dir.mkdir()
+
+        low_res = DummyDatalabResult(markdown="Poor accurate text.", parse_quality_score=2.0)
+
+        client = self._convert(
+            conv, "ITEM_ACCURATE", pdf_path, bundle_dir, low_res, options={"mode": "accurate"}
+        )
+
+        assert self._call_modes(client) == ["accurate"]
+        meta = conv.get_metadata("ITEM_ACCURATE")
+        assert meta["mode"] == "accurate"
+        assert meta["parse_quality_score"] == 2.0
+
+    def test_retry_failure_records_original_mode(self, tmp_path):
+        conv = DatalabConverter()
+        pdf_path = tmp_path / "scan.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4 scan")
+        bundle_dir = tmp_path / "bundle_retry_fail"
+        bundle_dir.mkdir()
+
+        low_res = DummyDatalabResult(
+            markdown="Original fast text survives.", parse_quality_score=2.0, checkpoint_id="chk-fast"
+        )
+
+        mock_client = MagicMock()
+        mock_client.convert.side_effect = [low_res, RuntimeError("API exploded")]
+
+        with patch("zocrates.config.get_datalab_api_key", return_value="fake-datalab-key"), \
+             patch("zocrates.config.get_datalab_merge_cross_page", return_value=False), \
+             patch("datalab_sdk.DatalabClient", return_value=mock_client):
+            out_md = conv.convert(
+                "ITEM_RETRY_FAIL", pdf_path, "application/pdf", bundle_dir, options={"mode": "fast"}
+            )
+
+        assert self._call_modes(mock_client) == ["fast", "balanced"]
+        assert "Original fast text survives." in out_md
+        meta = conv.get_metadata("ITEM_RETRY_FAIL")
+        assert meta["mode"] == "fast"
+        assert meta["checkpoint_id"] == "chk-fast"
+
+    def test_none_score_never_retries(self, tmp_path):
+        conv = DatalabConverter()
+        pdf_path = tmp_path / "scan.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4 scan")
+        bundle_dir = tmp_path / "bundle_no_score"
+        bundle_dir.mkdir()
+
+        res = DummyDatalabResult(
+            markdown="Unscored text.", parse_quality_score=None, checkpoint_id="chk-noscore"
+        )
+
+        client = self._convert(
+            conv, "ITEM_NO_SCORE", pdf_path, bundle_dir, res, options={"mode": "balanced"}
+        )
+
+        assert self._call_modes(client) == ["balanced"]
+        meta = conv.get_metadata("ITEM_NO_SCORE")
+        assert meta["mode"] == "balanced"
+        assert meta["parse_quality_score"] is None
+
+    def test_no_options_defaults_to_balanced(self, tmp_path):
+        conv = DatalabConverter()
+        pdf_path = tmp_path / "scan.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4 scan")
+        bundle_dir = tmp_path / "bundle_no_options"
+        bundle_dir.mkdir()
+
+        res = DummyDatalabResult(markdown="Default text.", parse_quality_score=4.9)
+
+        client = self._convert(conv, "ITEM_NO_OPTIONS", pdf_path, bundle_dir, res)
+
+        assert self._call_modes(client) == ["balanced"]
+        assert conv.get_metadata("ITEM_NO_OPTIONS")["mode"] == "balanced"
+
+    def test_invalid_mode_in_options_falls_back_to_balanced(self, tmp_path, caplog):
+        conv = DatalabConverter()
+        pdf_path = tmp_path / "scan.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4 scan")
+        bundle_dir = tmp_path / "bundle_invalid_mode"
+        bundle_dir.mkdir()
+
+        res = DummyDatalabResult(markdown="Fallback text.", parse_quality_score=4.2)
+
+        with caplog.at_level(logging.WARNING, logger="zocrates.rag.document_converters"):
+            client = self._convert(
+                conv, "ITEM_INVALID_MODE", pdf_path, bundle_dir, res, options={"mode": "lite"}
+            )
+
+        assert self._call_modes(client) == ["balanced"]
+        assert "lite" in caplog.text
+
+    def test_processor_threads_resolved_mode_to_datalab_client(self, tmp_path):
+        """convert_with(options={'mode': ...}) reaches the Datalab SDK options object."""
+        cache_dir = tmp_path / "cache"
+        dp = DocumentProcessor(cache_dir=cache_dir)
+
+        pdf_path = tmp_path / "threaded.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4 threaded")
+
+        mock_res = DummyDatalabResult(
+            success=True, markdown="# Threaded mode", parse_quality_score=4.7
+        )
+        mock_client = MagicMock()
+        mock_client.convert.return_value = mock_res
+
+        with patch("zocrates.config.get_datalab_api_key", return_value="fake-datalab-key"), \
+             patch("zocrates.config.get_datalab_merge_cross_page", return_value=False), \
+             patch("datalab_sdk.DatalabClient", return_value=mock_client):
+            doc_md = dp.convert_with(
+                item_key="THREAD1",
+                converter_id="datalab",
+                source_path=pdf_path,
+                content_type="application/pdf",
+                options={"mode": "accurate"},
+            )
+
+        assert "Threaded mode" in doc_md
+        assert self._call_modes(mock_client) == ["accurate"]
+
+
+class TestDatalabDocumentJsonMode:
+    """datalab_document.json records the surviving mode for post-restart recovery (plan §3.4)."""
+
+    def _convert(
+        self,
+        tmp_path: Path,
+        item_key: str,
+        mode: str,
+        ast_json: dict[str, Any] | None,
+        score: float | None = 4.6,
+    ) -> DocumentProcessor:
+        """Convert one item in ``mode`` and return the processor holding its bundle."""
+        cache_dir = tmp_path / "cache"
+        dp = DocumentProcessor(cache_dir=cache_dir)
+
+        pdf_path = tmp_path / f"{item_key}.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4 mode json contents")
+
+        mock_res = DummyDatalabResult(
+            success=True,
+            markdown="# Mode Paper\n\nBody text.",
+            json=ast_json,
+            parse_quality_score=score,
+            checkpoint_id="chk-mode-1",
+        )
+        mock_client = MagicMock()
+        mock_client.convert.return_value = mock_res
+
+        with patch("zocrates.config.get_datalab_api_key", return_value="fake-datalab-key"), \
+             patch("zocrates.config.get_datalab_merge_cross_page", return_value=False), \
+             patch("datalab_sdk.DatalabClient", return_value=mock_client):
+            dp.convert_with(
+                item_key=item_key,
+                converter_id="datalab",
+                source_path=pdf_path,
+                content_type="application/pdf",
+                options={"mode": mode},
+            )
+        return dp
+
+    def test_ast_branch_records_surviving_mode(self, tmp_path):
+        dp = self._convert(tmp_path, "JSON_AST_MODE", "fast", {"pages": []})
+
+        json_path = dp.cache_dir / "JSON_AST_MODE" / "datalab_document.json"
+        ast_data = json.loads(json_path.read_text(encoding="utf-8"))
+        assert ast_data["mode"] == "fast"
+        # Existing fields are unchanged.
+        assert ast_data["parse_quality_score"] == 4.6
+        assert ast_data["checkpoint_id"] == "chk-mode-1"
+        assert dp.get_metadata("JSON_AST_MODE")["converter_mode"] == "fast"
+
+    def test_meta_dump_fallback_branch_records_mode(self, tmp_path):
+        dp = self._convert(tmp_path, "JSON_DUMP_MODE", "accurate", None, score=None)
+
+        json_path = dp.cache_dir / "JSON_DUMP_MODE" / "datalab_document.json"
+        meta_dump = json.loads(json_path.read_text(encoding="utf-8"))
+        assert meta_dump["mode"] == "accurate"
+        assert meta_dump["parse_quality_score"] is None
+        assert meta_dump["checkpoint_id"] == "chk-mode-1"
+        assert dp.get_metadata("JSON_DUMP_MODE")["converter_mode"] == "accurate"
+
+    def test_guardrail_retry_records_retry_mode(self, tmp_path):
+        """The mode of the surviving result is recorded, not the requested one."""
+        cache_dir = tmp_path / "cache"
+        dp = DocumentProcessor(cache_dir=cache_dir)
+        pdf_path = tmp_path / "retry_mode.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4 retry mode")
+
+        low_res = DummyDatalabResult(markdown="Poor fast text.", parse_quality_score=2.0, json=None)
+        high_res = DummyDatalabResult(markdown="Recovered balanced text.", parse_quality_score=4.5, json=None)
+        mock_client = MagicMock()
+        mock_client.convert.side_effect = [low_res, high_res]
+
+        with patch("zocrates.config.get_datalab_api_key", return_value="fake-datalab-key"), \
+             patch("zocrates.config.get_datalab_merge_cross_page", return_value=False), \
+             patch("datalab_sdk.DatalabClient", return_value=mock_client):
+            dp.convert_with(
+                item_key="RETRY_MODE",
+                converter_id="datalab",
+                source_path=pdf_path,
+                content_type="application/pdf",
+                options={"mode": "fast"},
+            )
+
+        meta = dp.get_metadata("RETRY_MODE")
+        assert meta["converter_mode"] == "balanced"
+        assert meta["parse_quality_score"] == 4.5
+        json_data = json.loads(
+            (cache_dir / "RETRY_MODE" / "datalab_document.json").read_text(encoding="utf-8")
+        )
+        assert json_data["mode"] == "balanced"

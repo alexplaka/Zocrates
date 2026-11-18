@@ -76,6 +76,7 @@ class LibrarySyncer:
             md_cache,
             document_converter_id=active_converter,
             datalab_non_pdf_fallback=datalab_fallback,
+            zotero_data_dir=zotero_data_dir,
         )
 
         embedder = get_embedder()

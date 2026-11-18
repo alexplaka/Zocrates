@@ -844,6 +844,92 @@ async function runTests() {
     await new Promise((resolve) => setTimeout(resolve, 50));
   });
 
+  // Test 10c: Datalab processing mode container follows the converter selection
+  await testAsync("datalabProcessingMode: container visibility follows the converter selection", async () => {
+    resetSpies();
+
+    const converterSelect = env.document.getElementById("document-converter-select");
+    const modeContainer = env.document.getElementById("datalab-processing-mode-container");
+    assert.ok(modeContainer, "datalab-processing-mode-container must exist in document");
+
+    converterSelect.value = "datalab";
+    converterSelect.dispatchEvent("change");
+    assert.strictEqual(modeContainer.style.display, "block");
+
+    converterSelect.value = "docling_local";
+    converterSelect.dispatchEvent("change");
+    assert.strictEqual(modeContainer.style.display, "none");
+  });
+
+  // Test 10d: Datalab processing mode is populated from the /status echo
+  await testAsync("datalabProcessingMode: populated from the /status echo", async () => {
+    resetSpies();
+
+    const modeSelect = env.document.getElementById("datalab-processing-mode-select");
+    assert.ok(modeSelect, "datalab-processing-mode-select must exist in document");
+
+    fetchHandler = async (url, options = {}) => {
+      fetchCalls.push({ url: String(url), options });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ status: "ready", datalab_processing_mode: "accurate" }),
+        text: async () => JSON.stringify({ status: "ready" }),
+      };
+    };
+
+    await api.fetchStatus();
+
+    assert.strictEqual(modeSelect.value, "accurate");
+
+    // Reset to the default for subsequent tests
+    fetchHandler = async (url, options = {}) => {
+      fetchCalls.push({ url: String(url), options });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ status: "ready", datalab_processing_mode: "balanced" }),
+        text: async () => JSON.stringify({ status: "ready" }),
+      };
+    };
+    await api.fetchStatus();
+    assert.strictEqual(modeSelect.value, "balanced");
+  });
+
+  // Test 10e: Applying converter config includes datalab_processing_mode in the payload
+  await testAsync("applyConverterConfig: serializes datalab_processing_mode in payload", async () => {
+    resetSpies();
+
+    const converterSelect = env.document.getElementById("document-converter-select");
+    const applyBtn = env.document.getElementById("document-converter-apply-btn");
+    const modeSelect = env.document.getElementById("datalab-processing-mode-select");
+
+    converterSelect.value = "datalab";
+    converterSelect.dispatchEvent("change");
+
+    modeSelect.value = "fast";
+    modeSelect.dispatchEvent("change");
+
+    applyBtn.dispatchEvent("click");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const postCall = fetchCalls.find(
+      (c) => c.url.includes("/rag/converter") && c.options.method === "POST"
+    );
+    assert.ok(postCall, "Applying converter config must POST to /rag/converter");
+    const body = JSON.parse(postCall.options.body);
+    assert.strictEqual(body.document_converter_id, "datalab");
+    assert.strictEqual(body.datalab_processing_mode, "fast");
+
+    // Reset back to the balanced default for subsequent tests
+    modeSelect.value = "balanced";
+    modeSelect.dispatchEvent("change");
+    converterSelect.value = "docling";
+    converterSelect.dispatchEvent("change");
+    applyBtn.dispatchEvent("click");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+
   // Test 11: Offline or rejected fetch requests fail gracefully without uncaught rejections
   await testAsync("offline error resilience: network throw fails gracefully without uncaught rejection", async () => {
     resetSpies();
@@ -2517,6 +2603,203 @@ async function runTests() {
     vlmBackup.value = vlmModels[1];
     api.updateCatalogMissingNotices();
     assert.strictEqual(notices.vlm.style.display, "none", "Restoring a catalog VLM model clears the notice");
+  });
+
+  // Test 45: Converter unsaved-change indicators (sticky pill + drawer-header dot).
+  // Both are driven purely by updateConverterDirtyState, so they must appear while
+  // the card has Apply-gated unsaved options and hide again once state is clean.
+  await testAsync("converter unsaved indicators: sticky pill and header dot toggle with dirty state", async () => {
+    resetSpies();
+
+    const converterSelect = env.document.getElementById("document-converter-select");
+    const pill = env.document.getElementById("zc-unsaved-converter-pill");
+    const dot = env.document.getElementById("document-converter-dirty-dot");
+    // Per-control dots: the converter select's own dot must track only its own
+    // mismatch, leaving untouched sibling controls' dots hidden.
+    const fieldDot = env.document.getElementById("document-converter-select-dirty-dot");
+    const processingModeDot = env.document.getElementById("datalab-processing-mode-select-dirty-dot");
+    assert.ok(pill, "zc-unsaved-converter-pill must exist");
+    assert.ok(dot, "document-converter-dirty-dot must exist");
+
+    // Deterministic clean baseline: earlier tests leave savedConverterId at
+    // "datalab", so persist the current control state via a real Apply first.
+    // Also align the VLM checkbox with its saved pref (the mock checkbox
+    // defaults to unchecked while the saved value falls back to true — a
+    // mock-env artifact, not a real-world dirty state).
+    const enableVlmCheckbox = env.document.getElementById("enable-vlm-captioning-checkbox");
+    if (enableVlmCheckbox) enableVlmCheckbox.checked = true;
+    const applyBtn = env.document.getElementById("document-converter-apply-btn");
+    converterSelect.value = "markitdown";
+    converterSelect.dispatchEvent("change");
+    applyBtn.dispatchEvent("click");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.strictEqual(pill.style.display, "none", "Sticky pill hidden on a clean card");
+    assert.strictEqual(dot.style.display, "none", "Header dot hidden on a clean card");
+    assert.strictEqual(fieldDot.style.display, "none", "Converter select's own dot hidden on a clean card");
+    assert.strictEqual(processingModeDot.style.display, "none", "Datalab mode dot hidden on a clean card");
+
+    // Dirtying the card shows both indicators.
+    converterSelect.value = "datalab";
+    converterSelect.dispatchEvent("change");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.strictEqual(pill.style.display, "flex", "Sticky pill visible while the card is dirty");
+    assert.strictEqual(dot.style.display, "inline-block", "Header dot visible while the card is dirty");
+    assert.strictEqual(fieldDot.style.display, "inline-block", "Converter select's own dot shows while it is dirty");
+    assert.strictEqual(
+      processingModeDot.style.display,
+      "none",
+      "Sibling control dots stay hidden while only the converter select differs"
+    );
+
+    // Reverting the change hides both again (no stale Apply nag).
+    converterSelect.value = "markitdown";
+    converterSelect.dispatchEvent("change");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.strictEqual(pill.style.display, "none", "Sticky pill hides when changes are reverted");
+    assert.strictEqual(dot.style.display, "none", "Header dot hides when changes are reverted");
+    assert.strictEqual(fieldDot.style.display, "none", "Converter select's own dot hides when changes are reverted");
+  });
+
+  // Test 46: Generalized drawer-header dirty dots. Every Apply-gated card's
+  // update*DirtyState toggles its own dot via setDrawerDirtyDot; the dot must
+  // mirror the card's Apply enablement exactly (visible ⇔ Apply clickable).
+  // Driven through the Citation Verification card (a boolean toggle — no
+  // catalog/model resets), which exercises the shared helper end-to-end.
+  await testAsync("drawer dirty dots: verification header dot mirrors Apply enablement across a toggle round-trip", async () => {
+    resetSpies();
+
+    const verifToggle = env.document.getElementById("citation-verification-enabled-toggle");
+    const verifApplyBtn = env.document.getElementById("verification-apply-btn");
+    const verifDot = env.document.getElementById("citation-verification-dirty-dot");
+    const verifPill = env.document.getElementById("zc-unsaved-verification-pill");
+    const converterPill = env.document.getElementById("zc-unsaved-converter-pill");
+    assert.ok(verifToggle && verifApplyBtn && verifDot, "Verification toggle, Apply button, and dirty dot must exist");
+    assert.ok(verifPill && converterPill, "Verification and converter unsaved pills must exist");
+    // Per-control dots for the toggled field and an untouched sibling field.
+    const enabledFieldDot = env.document.getElementById("citation-verification-enabled-toggle-dirty-dot");
+    const providerFieldDot = env.document.getElementById("verification-provider-select-dirty-dot");
+
+    // Dots render inline-block; pills render flex — both "none" when clean.
+    const dotDisplay = () => (verifApplyBtn.disabled ? "none" : "inline-block");
+    const pillDisplay = () => (verifApplyBtn.disabled ? "none" : "flex");
+
+    // Deterministic clean baseline: earlier tests can leave other verification
+    // fields (provider/model/threshold) mismatched with their saved values, so
+    // persist the current control state via a real Apply first.
+    verifApplyBtn.dispatchEvent("click");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.strictEqual(verifApplyBtn.disabled, true, "Apply persisting current state yields a clean card");
+    const initialDisabled = verifApplyBtn.disabled;
+    assert.strictEqual(verifDot.style.display, dotDisplay(), "Dot mirrors Apply enablement at baseline");
+    assert.strictEqual(verifPill.style.display, pillDisplay(), "Sticky pill mirrors Apply enablement at baseline");
+    // A freshly persisted card has every per-control dot hidden.
+    assert.strictEqual(enabledFieldDot.style.display, "none", "Toggle's own dot hidden at baseline");
+    assert.strictEqual(providerFieldDot.style.display, "none", "Provider dot hidden at baseline");
+
+    // Flipping the toggle must change the dirty state in one direction or the
+    // other, and both the dot and the card's sticky pill must track it.
+    verifToggle.checked = !verifToggle.checked;
+    verifToggle.dispatchEvent("change");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.notStrictEqual(verifApplyBtn.disabled, initialDisabled, "Toggle flip must flip the card's dirty state");
+    // Literal display values after the flip: the card is provably dirty here
+    // (Apply state changed), so the indicators must show their concrete visible
+    // styles — a deleted setDrawerDirtyDot/setUnsavedPill call fails these.
+    assert.strictEqual(verifDot.style.display, "inline-block", "Dot shows its literal visible style after the flip");
+    assert.strictEqual(verifPill.style.display, "flex", "Sticky pill shows its literal visible style after the flip");
+    // The toggled field names itself with its own dot, and only its own dot.
+    assert.strictEqual(
+      enabledFieldDot.style.display,
+      "inline-block",
+      "The toggled field's own dot shows its literal visible style after the flip"
+    );
+    assert.strictEqual(
+      providerFieldDot.style.display,
+      "none",
+      "Untouched sibling field keeps its dot hidden while only the toggle differs"
+    );
+    // Pills are per-card: dirtying verification must not surface the converter pill.
+    assert.strictEqual(converterPill.style.display, "none", "Converter pill stays hidden while only verification is dirty");
+
+    // Flipping back restores the baseline trio exactly.
+    verifToggle.checked = !verifToggle.checked;
+    verifToggle.dispatchEvent("change");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.strictEqual(verifApplyBtn.disabled, initialDisabled, "Round-trip restores Apply enablement");
+    assert.strictEqual(verifDot.style.display, dotDisplay(), "Dot mirrors Apply enablement after the round-trip");
+    assert.strictEqual(verifPill.style.display, pillDisplay(), "Sticky pill mirrors Apply enablement after the round-trip");
+    assert.strictEqual(enabledFieldDot.style.display, "none", "Toggle's own dot hides again after the round-trip");
+
+    // Clicking a card's pill while its drawer is collapsed must auto-open the
+    // drawer, then scroll to the Apply button only after the 0.25s drawer
+    // expansion settles (scrolling immediately would target the button's
+    // mid-transition position). The mock DOM has no layout, so scrollIntoView
+    // is stubbed and only the drawer state and scroll deferral are asserted.
+    const verifCard = env.document.getElementById("citation-verification-card");
+    verifCard.classList.remove("open");
+    let scrollCalls = 0;
+    verifApplyBtn.scrollIntoView = () => { scrollCalls += 1; };
+    verifPill.dispatchEvent("click");
+    assert.strictEqual(verifCard.classList.contains("open"), true, "Pill click must open a collapsed drawer");
+    assert.strictEqual(scrollCalls, 0, "Scroll must be deferred while the drawer expansion settles");
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    assert.strictEqual(scrollCalls, 1, "Scroll must fire once after the drawer expansion");
+
+    // Clicking again on an already-open drawer scrolls immediately (no deferral).
+    scrollCalls = 0;
+    verifPill.dispatchEvent("click");
+    assert.strictEqual(scrollCalls, 1, "Scroll fires immediately when the drawer is already open");
+    assert.strictEqual(verifCard.classList.contains("open"), true, "Pill click must never close an open drawer");
+  });
+
+  // Test 47: Embeddings mode round-trip must not leave the local placeholder
+  // model stuck in the select. Switching cloud -> local clobbers the model
+  // select with the local placeholder; switching back to cloud previously kept
+  // that placeholder ("sticky"), surfacing a spurious dirty state against the
+  // saved/applied cloud model.
+  await testAsync("embedding mode round-trip: returning to cloud restores the last cloud model, not the sticky local placeholder", async () => {
+    resetSpies();
+
+    const modeSelect = env.document.getElementById("embedding-mode-select");
+    const embeddingModelSelect = env.document.getElementById("embedding-model-select");
+    assert.ok(modeSelect && embeddingModelSelect, "Embedding mode and model selects must exist");
+
+    // Simulate a cloud selection in progress (any non-placeholder cloud model).
+    modeSelect.value = "cloud";
+    const cloudModel = "openrouter/nvidia/nemotron-3-embed-1b:free";
+    embeddingModelSelect.value = cloudModel;
+
+    // Cloud -> local: the select is clobbered with the local placeholder, and
+    // the cloud selection must be captured for later restoration.
+    modeSelect.value = "local";
+    modeSelect.dispatchEvent("change");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.strictEqual(
+      embeddingModelSelect.value,
+      "jinaai/jina-embeddings-v5-text-nano",
+      "Local mode selects the local placeholder model"
+    );
+
+    // Local -> cloud: the last cloud selection must be restored instead of the
+    // sticky placeholder (regardless of whether the catalog renders from cache
+    // or the fetch materializes the configured model).
+    modeSelect.value = "cloud";
+    modeSelect.dispatchEvent("change");
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.strictEqual(
+      embeddingModelSelect.value,
+      cloudModel,
+      "Returning to cloud mode restores the last cloud selection"
+    );
+
+    // Staying in cloud mode (e.g. unrelated re-renders) must keep the selection.
+    modeSelect.dispatchEvent("change");
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.strictEqual(
+      embeddingModelSelect.value,
+      cloudModel,
+      "A cloud-mode re-render preserves the current selection"
+    );
   });
   } finally {
     global.fetch = origFetch;

@@ -9,6 +9,89 @@ function initZocratesPreferences() {
   const converterWarning = document.getElementById("document-converter-warning");
   const converterStatusBadge = document.getElementById("document-converter-status-badge");
   const converterApplyBtn = document.getElementById("document-converter-apply-btn");
+  const converterDirtyDot = document.getElementById("document-converter-dirty-dot");
+  // Sticky unsaved-changes pills: one per Apply-gated card, stacked at the
+  // bottom of the settings window. Each card's update*DirtyState toggles its
+  // pill, so unsaved work stays visible regardless of scroll position or
+  // drawer state.
+  const converterUnsavedPill = document.getElementById("zc-unsaved-converter-pill");
+  const llmUnsavedPill = document.getElementById("zc-unsaved-llm-pill");
+  const embeddingUnsavedPill = document.getElementById("zc-unsaved-embedding-pill");
+  const verificationUnsavedPill = document.getElementById("zc-unsaved-verification-pill");
+  // Drawer-header unsaved dots for the Apply-gated cards. Each card's
+  // update*DirtyState toggles its dot, so any drawer with Apply-gated options
+  // signals unsaved work even while collapsed or scrolled out of view.
+  const llmDirtyDot = document.getElementById("llm-provider-dirty-dot");
+  const embeddingDirtyDot = document.getElementById("embeddings-dirty-dot");
+  const verificationDirtyDot = document.getElementById("citation-verification-dirty-dot");
+
+  function setDrawerDirtyDot(dotEl, isDirty) {
+    if (!dotEl) return;
+    dotEl.style.display = isDirty ? "inline-block" : "none";
+  }
+
+  // Per-control unsaved dot: one per Apply-gated option, marked in the pane
+  // markup as `<control element id>-dirty-dot` so the control-to-dot mapping
+  // stays mechanical. Missing dots are a no-op (the card-level indicators still
+  // carry the signal).
+  function setFieldDirtyDot(controlId, isDirty) {
+    const dotEl = document.getElementById(controlId + "-dirty-dot");
+    if (!dotEl) return;
+    dotEl.style.display = isDirty ? "inline-block" : "none";
+  }
+
+  function setUnsavedPill(pillEl, isDirty) {
+    if (!pillEl) return;
+    pillEl.style.display = isDirty ? "flex" : "none";
+  }
+
+  // Sticky pill click: open the card if its drawer is collapsed, then bring the
+  // (possibly far off-screen) Apply button into view and flash it so the user
+  // can find the save action without hunting through a long card body.
+  function wireUnsavedPill(pillEl, applyBtn, drawerEl) {
+    if (!pillEl || !applyBtn) return;
+    // Idempotent wiring: a re-run of initZocratesPreferences (retry path or API
+    // consumers) must not stack duplicate click handlers on the same pill.
+    if (pillEl._zcUnsavedPillHandler && typeof pillEl.removeEventListener === "function") {
+      pillEl.removeEventListener("click", pillEl._zcUnsavedPillHandler);
+    }
+    const scrollToApply = () => {
+      const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      applyBtn.scrollIntoView({ block: "center", behavior: prefersReducedMotion ? "auto" : "smooth" });
+      applyBtn.classList.remove("zc-apply-flash");
+      // Force a style flush so consecutive clicks restart the animation.
+      void applyBtn.offsetWidth;
+      applyBtn.classList.add("zc-apply-flash");
+      // Guard the cleanup timer: a second click restarts the flash animation,
+      // and the previous timer must not strip the class mid-animation.
+      if (applyBtn._zcFlashTimer) clearTimeout(applyBtn._zcFlashTimer);
+      applyBtn._zcFlashTimer = setTimeout(() => {
+        applyBtn.classList.remove("zc-apply-flash");
+        applyBtn._zcFlashTimer = null;
+      }, 1900);
+    };
+    const pillClickHandler = () => {
+      const wasCollapsed = drawerEl && !drawerEl.classList.contains("open");
+      if (wasCollapsed) {
+        setDrawerOpen(drawerEl, true);
+        updateExpandCollapseAllLabel();
+        if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          // The drawer's grid-template-rows transition is disabled under
+          // reduced motion, so the layout is already settled — scroll now.
+          scrollToApply();
+        } else {
+          // The drawer body expands via a grid-template-rows transition (0.25s);
+          // scrolling immediately would target the button's mid-collapse
+          // position, so wait for the expansion to settle first.
+          setTimeout(scrollToApply, 300);
+        }
+      } else {
+        scrollToApply();
+      }
+    };
+    pillEl._zcUnsavedPillHandler = pillClickHandler;
+    pillEl.addEventListener("click", pillClickHandler);
+  }
   const datalabKeyGroup = document.getElementById("datalab-key-group");
   const datalabApiKeyInput = document.getElementById("datalab-api-key-input");
   const toggleDatalabKeyBtn = document.getElementById("toggle-datalab-key-btn");
@@ -19,6 +102,8 @@ function initZocratesPreferences() {
   const datalabFallbackDocling = document.getElementById("datalab-fallback-docling");
   const datalabMergeCrossPageContainer = document.getElementById("datalab-merge-cross-page-container");
   const datalabMergeCrossPageCheckbox = document.getElementById("datalab-merge-cross-page-checkbox");
+  const datalabProcessingModeContainer = document.getElementById("datalab-processing-mode-container");
+  const datalabProcessingModeSelect = document.getElementById("datalab-processing-mode-select");
   const enableVlmCheckbox = document.getElementById("enable-vlm-captioning-checkbox");
   const vlmSettingsContainer = document.getElementById("vlm-captioning-settings-container");
   const vlmProviderOpenRouter = document.getElementById("vlm-provider-openrouter");
@@ -155,11 +240,17 @@ function initZocratesPreferences() {
   let savedLlmModel = "";
   let savedEmbeddingMode = "local";
   let savedEmbeddingModel = "jinaai/jina-embeddings-v5-text-nano";
+  // The user's last cloud-mode embedding selection (possibly unapplied). The local
+  // branch of updateEmbeddingUiVisibility overwrites the select with the local
+  // placeholder, which would otherwise "stick" and surface as a spurious dirty
+  // state when switching back to cloud mode.
+  let lastCloudEmbeddingModel = null;
   let savedConverterMode = "local";
   let savedConverterId = "markitdown";
   let savedDatalabApiKey = "";
   let savedDatalabFallback = "markitdown";
   let savedDatalabMergeCrossPage = false;
+  let savedDatalabProcessingMode = "balanced";
   let savedVlmEnable = true;
   let savedVlmProvider = "openrouter";
   let savedVlmCloudModel = "openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free";
@@ -176,6 +267,17 @@ function initZocratesPreferences() {
 
   function getEffectiveDatalabFallback() {
     return (datalabFallbackDocling && datalabFallbackDocling.checked) ? "docling_local" : "markitdown";
+  }
+
+  function getEffectiveDatalabProcessingMode() {
+    return (datalabProcessingModeSelect && datalabProcessingModeSelect.value) || "balanced";
+  }
+
+  function setDatalabProcessingMode(val) {
+    savedDatalabProcessingMode = val || "balanced";
+    if (datalabProcessingModeSelect) {
+      datalabProcessingModeSelect.value = savedDatalabProcessingMode;
+    }
   }
 
   function setDatalabFallback(val) {
@@ -332,6 +434,14 @@ function initZocratesPreferences() {
 
     const isDirty = !providerMatches || !modelMatches || !baseUrlMatches;
 
+    setFieldDirtyDot("llm-provider-select", !providerMatches);
+    setFieldDirtyDot("llm-model-select", !modelMatches);
+    // baseUrlMatches is already true for providers that ignore the base URL, so
+    // the dot never appears on the hidden input.
+    setFieldDirtyDot("llm-base-url-input", !baseUrlMatches);
+
+    setDrawerDirtyDot(llmDirtyDot, isDirty);
+    setUnsavedPill(llmUnsavedPill, isDirty);
     if (isDirty) {
       llmApplyBtn.removeAttribute("disabled");
       llmApplyBtn.disabled = false;
@@ -356,6 +466,11 @@ function initZocratesPreferences() {
 
     const isDirty = !modeMatches || !modelMatches;
 
+    setFieldDirtyDot("embedding-mode-select", !modeMatches);
+    setFieldDirtyDot("embedding-model-select", !modelMatches);
+
+    setDrawerDirtyDot(embeddingDirtyDot, isDirty);
+    setUnsavedPill(embeddingUnsavedPill, isDirty);
     if (isDirty) {
       embeddingApplyBtn.removeAttribute("disabled");
       embeddingApplyBtn.disabled = false;
@@ -405,6 +520,14 @@ function initZocratesPreferences() {
 
     const isDirty = !enabledMatches || !providerMatches || !modelMatches || !thresholdMatches || !autoStartMatches;
 
+    setFieldDirtyDot("citation-verification-enabled-toggle", !enabledMatches);
+    setFieldDirtyDot("verification-provider-select", !providerMatches);
+    setFieldDirtyDot("verification-model-select", !modelMatches);
+    setFieldDirtyDot("verification-threshold-input", !thresholdMatches);
+    setFieldDirtyDot("auto-start-laya-toggle", !autoStartMatches);
+
+    setDrawerDirtyDot(verificationDirtyDot, isDirty);
+    setUnsavedPill(verificationUnsavedPill, isDirty);
     if (isDirty) {
       verificationApplyBtn.removeAttribute("disabled");
       verificationApplyBtn.disabled = false;
@@ -441,6 +564,10 @@ function initZocratesPreferences() {
 
     if (datalabMergeCrossPageContainer) {
       datalabMergeCrossPageContainer.style.display = (currentId === "datalab") ? "block" : "none";
+    }
+
+    if (datalabProcessingModeContainer) {
+      datalabProcessingModeContainer.style.display = (currentId === "datalab") ? "block" : "none";
     }
 
     converterInfoMessage.style.display = "block";
@@ -485,6 +612,7 @@ function initZocratesPreferences() {
     const currentKey = datalabApiKeyInput ? datalabApiKeyInput.value.trim() : "";
     const currentFallback = getEffectiveDatalabFallback();
     const currentMergeCrossPage = datalabMergeCrossPageCheckbox ? datalabMergeCrossPageCheckbox.checked : false;
+    const currentProcessingMode = getEffectiveDatalabProcessingMode();
 
     const currentVlmEnable = enableVlmCheckbox ? enableVlmCheckbox.checked : true;
     const currentVlmProvider = getEffectiveVlmProvider();
@@ -493,28 +621,59 @@ function initZocratesPreferences() {
     const currentVlmLocalModel = vlmLocalModelInput ? vlmLocalModelInput.value.trim() : "";
     const currentVlmMaxImages = vlmMaxImagesInput ? (parseInt(vlmMaxImagesInput.value, 10) || 100) : 100;
 
+    const converterMatches = (currentId === savedConverterId);
+    const datalabApiKeyMatches = !datalabApiKeyInput || (currentKey === savedDatalabApiKey);
+    // Datalab-only options are compared only while Datalab is the selected
+    // engine, mirroring the visibility gating of their controls.
+    const datalabFallbackMatches = (currentId !== "datalab") || (currentFallback === savedDatalabFallback);
+    const datalabMergeCrossPageMatches = (currentId !== "datalab") || (currentMergeCrossPage === savedDatalabMergeCrossPage);
+    const datalabProcessingModeMatches = (currentId !== "datalab") || (currentProcessingMode === savedDatalabProcessingMode);
+    const vlmEnableMatches = !enableVlmCheckbox || (currentVlmEnable === savedVlmEnable);
+    const vlmProviderMatches = (currentVlmProvider === savedVlmProvider);
+    const vlmPrimaryModelMatches = (currentVlmPrimaryModel === savedVlmCloudModel);
+    const vlmBackupModelMatches = (currentVlmBackupModel === savedVlmBackupModel);
+    const vlmLocalModelMatches = (currentVlmLocalModel === savedVlmLocalModel);
+    const vlmMaxImagesMatches = (currentVlmMaxImages === savedVlmMaxImages);
+
     const isDirty = (
-      currentId !== savedConverterId ||
-      (datalabApiKeyInput && currentKey !== savedDatalabApiKey) ||
-      (currentId === "datalab" && currentFallback !== savedDatalabFallback) ||
-      (currentId === "datalab" && currentMergeCrossPage !== savedDatalabMergeCrossPage) ||
-      (enableVlmCheckbox && currentVlmEnable !== savedVlmEnable) ||
-      (currentVlmProvider !== savedVlmProvider) ||
-      (currentVlmPrimaryModel !== savedVlmCloudModel) ||
-      (currentVlmBackupModel !== savedVlmBackupModel) ||
-      (currentVlmLocalModel !== savedVlmLocalModel) ||
-      (currentVlmMaxImages !== savedVlmMaxImages)
+      !converterMatches ||
+      !datalabApiKeyMatches ||
+      !datalabFallbackMatches ||
+      !datalabMergeCrossPageMatches ||
+      !datalabProcessingModeMatches ||
+      !vlmEnableMatches ||
+      !vlmProviderMatches ||
+      !vlmPrimaryModelMatches ||
+      !vlmBackupModelMatches ||
+      !vlmLocalModelMatches ||
+      !vlmMaxImagesMatches
     );
+
+    setFieldDirtyDot("document-converter-select", !converterMatches);
+    setFieldDirtyDot("datalab-api-key-input", !datalabApiKeyMatches);
+    setFieldDirtyDot("datalab-fallback", !datalabFallbackMatches);
+    setFieldDirtyDot("datalab-merge-cross-page-checkbox", !datalabMergeCrossPageMatches);
+    setFieldDirtyDot("datalab-processing-mode-select", !datalabProcessingModeMatches);
+    setFieldDirtyDot("enable-vlm-captioning-checkbox", !vlmEnableMatches);
+    setFieldDirtyDot("vlm-provider", !vlmProviderMatches);
+    setFieldDirtyDot("vlm-primary-model-select", !vlmPrimaryModelMatches);
+    setFieldDirtyDot("vlm-backup-model-select", !vlmBackupModelMatches);
+    setFieldDirtyDot("vlm-local-model-input", !vlmLocalModelMatches);
+    setFieldDirtyDot("vlm-max-images-input", !vlmMaxImagesMatches);
 
     if (isDirty) {
       converterApplyBtn.removeAttribute("disabled");
       converterApplyBtn.disabled = false;
       if (converterWarning) converterWarning.style.display = "block";
       if (converterStatusBadge) converterStatusBadge.style.display = "none";
+      setDrawerDirtyDot(converterDirtyDot, true);
+      setUnsavedPill(converterUnsavedPill, true);
     } else {
       converterApplyBtn.setAttribute("disabled", "disabled");
       converterApplyBtn.disabled = true;
       if (converterWarning) converterWarning.style.display = "none";
+      setDrawerDirtyDot(converterDirtyDot, false);
+      setUnsavedPill(converterUnsavedPill, false);
     }
   }
 
@@ -527,6 +686,13 @@ function initZocratesPreferences() {
     setTimeout(initZocratesPreferences, 100);
     return;
   }
+
+  // Wire the sticky pills' click handlers after the retry guard so a retried
+  // initZocratesPreferences can never double-register them.
+  wireUnsavedPill(llmUnsavedPill, llmApplyBtn, document.getElementById("llm-provider-card"));
+  wireUnsavedPill(embeddingUnsavedPill, embeddingApplyBtn, document.getElementById("embeddings-card"));
+  wireUnsavedPill(verificationUnsavedPill, verificationApplyBtn, document.getElementById("citation-verification-card"));
+  wireUnsavedPill(converterUnsavedPill, converterApplyBtn, document.getElementById("document-converter-card"));
 
   function getLoginManager() {
     try {
@@ -794,6 +960,9 @@ function initZocratesPreferences() {
         if (datalabMergeCrossPageCheckbox) {
           datalabMergeCrossPageCheckbox.checked = savedDatalabMergeCrossPage;
         }
+
+        const processingModePref = Zotero.Prefs.get("extensions.zocrates.datalabProcessingMode", true);
+        setDatalabProcessingMode(processingModePref || "balanced");
 
         savedVlmEnable = Zotero.Prefs.get("extensions.zocrates.enableVlmCaptioning", true);
         if (savedVlmEnable === undefined || savedVlmEnable === null) savedVlmEnable = true;
@@ -1103,6 +1272,9 @@ function initZocratesPreferences() {
           datalabMergeCrossPageCheckbox.checked = savedDatalabMergeCrossPage;
         }
       }
+      if (data.datalab_processing_mode) {
+        setDatalabProcessingMode(data.datalab_processing_mode);
+      }
       updateVlmUiVisibility();
       updateConverterDirtyState();
     } catch (err) {
@@ -1233,6 +1405,10 @@ function initZocratesPreferences() {
         }
         updateConverterDirtyState();
       }
+      if (data.datalab_processing_mode) {
+        setDatalabProcessingMode(data.datalab_processing_mode);
+        updateConverterDirtyState();
+      }
 
       updateLlmDirtyState();
       updateEmbeddingDirtyState();
@@ -1276,6 +1452,10 @@ function initZocratesPreferences() {
         if (datalabMergeCrossPageCheckbox) {
           datalabMergeCrossPageCheckbox.checked = savedDatalabMergeCrossPage;
         }
+      }
+
+      if (data.datalab_processing_mode) {
+        setDatalabProcessingMode(data.datalab_processing_mode);
       }
 
       updateConverterInfoMessage();
@@ -1347,10 +1527,19 @@ function initZocratesPreferences() {
       }
       if (embeddingRefreshBtn) embeddingRefreshBtn.style.display = "inline-block";
 
+      // Returning from local mode: the select still holds the sticky local
+      // placeholder, so restore the user's last cloud selection (falling back to
+      // the applied cloud model) instead of letting the placeholder win. When a
+      // real cloud model is already selected (e.g. re-renders while staying in
+      // cloud mode), pass null so renderEmbeddingModels preserves it.
+      const currentVal = embeddingModelSelect ? embeddingModelSelect.value : "";
+      const stickyLocal = !currentVal || currentVal === "jinaai/jina-embeddings-v5-text-nano";
+      const cloudModelToSelect = stickyLocal ? (lastCloudEmbeddingModel || savedEmbeddingModel || null) : null;
+
       if (rawEmbeddingModels && rawEmbeddingModels.length > 0) {
-        renderEmbeddingModels();
+        renderEmbeddingModels(cloudModelToSelect);
       } else {
-        fetchOpenRouterModels("embedding", false);
+        fetchOpenRouterModels("embedding", false, cloudModelToSelect);
       }
     } else {
       if (embeddingKeyMissingNotice) embeddingKeyMissingNotice.style.display = "none";
@@ -1358,6 +1547,13 @@ function initZocratesPreferences() {
       if (embeddingModelMetadataBox) embeddingModelMetadataBox.style.display = "none";
 
       if (embeddingModelSelect) {
+        // Preserve the cloud selection (possibly unapplied) before clobbering the
+        // select with the local placeholder, so returning to cloud mode can
+        // restore it instead of surfacing the placeholder as a dirty state.
+        const currentVal = embeddingModelSelect.value;
+        if (currentVal && currentVal !== "jinaai/jina-embeddings-v5-text-nano") {
+          lastCloudEmbeddingModel = currentVal;
+        }
         embeddingModelSelect.innerHTML = "";
         const opt = document.createElementNS("http://www.w3.org/1999/xhtml", "option");
         opt.value = "jinaai/jina-embeddings-v5-text-nano";
@@ -2492,6 +2688,7 @@ function initZocratesPreferences() {
       const newDatalabKey = datalabApiKeyInput ? datalabApiKeyInput.value.trim() : "";
       const newFallback = getEffectiveDatalabFallback();
       const newMergeCrossPage = datalabMergeCrossPageCheckbox ? datalabMergeCrossPageCheckbox.checked : false;
+      const newProcessingMode = getEffectiveDatalabProcessingMode();
       const currentVlmEnable = enableVlmCheckbox ? enableVlmCheckbox.checked : true;
       const currentVlmProvider = getEffectiveVlmProvider();
       const currentVlmPrimaryModel = (vlmPrimaryModelSelect ? vlmPrimaryModelSelect.value : "") || "openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free";
@@ -2503,6 +2700,7 @@ function initZocratesPreferences() {
       savePreference("documentConverter", newId);
       savePreference("datalabNonPdfFallback", newFallback);
       savePreference("datalabMergeCrossPage", newMergeCrossPage);
+      savePreference("datalabProcessingMode", newProcessingMode);
       savePreference("enableVlmCaptioning", currentVlmEnable);
       savePreference("vlmCaptioningProvider", currentVlmProvider);
       savePreference("vlmCaptioningModel", currentVlmPrimaryModel);
@@ -2521,6 +2719,7 @@ function initZocratesPreferences() {
         datalab_api_key: newDatalabKey || undefined,
         datalab_non_pdf_fallback: newFallback,
         datalab_merge_cross_page: newMergeCrossPage,
+        datalab_processing_mode: newProcessingMode,
         enable_vlm_captioning: currentVlmEnable,
         vlm_captioning_provider: currentVlmProvider,
         vlm_captioning_model: currentVlmPrimaryModel,
@@ -2542,6 +2741,7 @@ function initZocratesPreferences() {
       savedDatalabApiKey = newDatalabKey;
       savedDatalabFallback = newFallback;
       savedDatalabMergeCrossPage = newMergeCrossPage;
+      savedDatalabProcessingMode = newProcessingMode;
       savedVlmEnable = currentVlmEnable;
       savedVlmProvider = currentVlmProvider;
       savedVlmCloudModel = currentVlmPrimaryModel;
@@ -2589,6 +2789,10 @@ function initZocratesPreferences() {
 
   if (datalabMergeCrossPageCheckbox) {
     datalabMergeCrossPageCheckbox.addEventListener("change", updateConverterDirtyState);
+  }
+
+  if (datalabProcessingModeSelect) {
+    datalabProcessingModeSelect.addEventListener("change", updateConverterDirtyState);
   }
 
   if (enableVlmCheckbox) {
@@ -3592,24 +3796,17 @@ function initDrawerAccordion() {
   const drawers = document.querySelectorAll(".zc-drawer");
   const expandCollapseBtn = document.getElementById("expand-collapse-all-btn");
 
-  function updateExpandCollapseLabel() {
-    if (!expandCollapseBtn) return;
-    const allOpen = Array.from(drawers).every((d) => d.classList.contains("open"));
-    expandCollapseBtn.textContent = allOpen ? "Collapse all" : "Expand all";
-  }
-
   drawers.forEach((drawer) => {
     const header = drawer.querySelector(".zc-drawer-header");
     if (!header) return;
     header.addEventListener("click", () => {
       const isNowOpen = !drawer.classList.contains("open");
-      drawer.classList.toggle("open", isNowOpen);
-      header.setAttribute("aria-expanded", isNowOpen ? "true" : "false");
+      setDrawerOpen(drawer, isNowOpen);
       if (isNowOpen) {
         const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
         header.scrollIntoView({ block: "nearest", behavior: prefersReducedMotion ? "auto" : "smooth" });
       }
-      updateExpandCollapseLabel();
+      updateExpandCollapseAllLabel();
     });
   });
 
@@ -3617,18 +3814,30 @@ function initDrawerAccordion() {
     expandCollapseBtn.addEventListener("click", () => {
       const anyClosedDrawer = Array.from(drawers).some((d) => !d.classList.contains("open"));
       drawers.forEach((drawer) => {
-        const header = drawer.querySelector(".zc-drawer-header");
-        if (anyClosedDrawer) {
-          drawer.classList.add("open");
-          if (header) header.setAttribute("aria-expanded", "true");
-        } else {
-          drawer.classList.remove("open");
-          if (header) header.setAttribute("aria-expanded", "false");
-        }
+        setDrawerOpen(drawer, anyClosedDrawer);
       });
       expandCollapseBtn.textContent = anyClosedDrawer ? "Collapse all" : "Expand all";
     });
   }
+}
+
+// Shared drawer-open invariant: class + header aria-expanded. Used by the
+// drawer accordion, the Expand/Collapse-all control, and the sticky unsaved
+// pills so the three can never drift apart.
+function setDrawerOpen(drawer, isOpen) {
+  if (!drawer) return;
+  drawer.classList.toggle("open", isOpen);
+  const header = drawer.querySelector(".zc-drawer-header");
+  if (header) header.setAttribute("aria-expanded", isOpen ? "true" : "false");
+}
+
+// Recomputes the Expand/Collapse-all button label from the drawers' live state.
+function updateExpandCollapseAllLabel() {
+  const expandCollapseBtn = document.getElementById("expand-collapse-all-btn");
+  if (!expandCollapseBtn) return;
+  const drawers = document.querySelectorAll(".zc-drawer");
+  const allOpen = Array.from(drawers).every((d) => d.classList.contains("open"));
+  expandCollapseBtn.textContent = allOpen ? "Collapse all" : "Expand all";
 }
 
 // Execute initialization in browser / Zotero environment
