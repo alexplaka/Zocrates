@@ -2751,6 +2751,56 @@ async function runTests() {
     assert.strictEqual(scrollCalls, 1, "Scroll fires immediately when the drawer is already open");
     assert.strictEqual(verifCard.classList.contains("open"), true, "Pill click must never close an open drawer");
   });
+
+  // Test 47: Embeddings mode round-trip must not leave the local placeholder
+  // model stuck in the select. Switching cloud -> local clobbers the model
+  // select with the local placeholder; switching back to cloud previously kept
+  // that placeholder ("sticky"), surfacing a spurious dirty state against the
+  // saved/applied cloud model.
+  await testAsync("embedding mode round-trip: returning to cloud restores the last cloud model, not the sticky local placeholder", async () => {
+    resetSpies();
+
+    const modeSelect = env.document.getElementById("embedding-mode-select");
+    const embeddingModelSelect = env.document.getElementById("embedding-model-select");
+    assert.ok(modeSelect && embeddingModelSelect, "Embedding mode and model selects must exist");
+
+    // Simulate a cloud selection in progress (any non-placeholder cloud model).
+    modeSelect.value = "cloud";
+    const cloudModel = "openrouter/nvidia/nemotron-3-embed-1b:free";
+    embeddingModelSelect.value = cloudModel;
+
+    // Cloud -> local: the select is clobbered with the local placeholder, and
+    // the cloud selection must be captured for later restoration.
+    modeSelect.value = "local";
+    modeSelect.dispatchEvent("change");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.strictEqual(
+      embeddingModelSelect.value,
+      "jinaai/jina-embeddings-v5-text-nano",
+      "Local mode selects the local placeholder model"
+    );
+
+    // Local -> cloud: the last cloud selection must be restored instead of the
+    // sticky placeholder (regardless of whether the catalog renders from cache
+    // or the fetch materializes the configured model).
+    modeSelect.value = "cloud";
+    modeSelect.dispatchEvent("change");
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.strictEqual(
+      embeddingModelSelect.value,
+      cloudModel,
+      "Returning to cloud mode restores the last cloud selection"
+    );
+
+    // Staying in cloud mode (e.g. unrelated re-renders) must keep the selection.
+    modeSelect.dispatchEvent("change");
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.strictEqual(
+      embeddingModelSelect.value,
+      cloudModel,
+      "A cloud-mode re-render preserves the current selection"
+    );
+  });
   } finally {
     global.fetch = origFetch;
     global.IOUtils = origIOUtils;

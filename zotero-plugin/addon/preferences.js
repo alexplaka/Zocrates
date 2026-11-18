@@ -240,6 +240,11 @@ function initZocratesPreferences() {
   let savedLlmModel = "";
   let savedEmbeddingMode = "local";
   let savedEmbeddingModel = "jinaai/jina-embeddings-v5-text-nano";
+  // The user's last cloud-mode embedding selection (possibly unapplied). The local
+  // branch of updateEmbeddingUiVisibility overwrites the select with the local
+  // placeholder, which would otherwise "stick" and surface as a spurious dirty
+  // state when switching back to cloud mode.
+  let lastCloudEmbeddingModel = null;
   let savedConverterMode = "local";
   let savedConverterId = "markitdown";
   let savedDatalabApiKey = "";
@@ -1522,10 +1527,19 @@ function initZocratesPreferences() {
       }
       if (embeddingRefreshBtn) embeddingRefreshBtn.style.display = "inline-block";
 
+      // Returning from local mode: the select still holds the sticky local
+      // placeholder, so restore the user's last cloud selection (falling back to
+      // the applied cloud model) instead of letting the placeholder win. When a
+      // real cloud model is already selected (e.g. re-renders while staying in
+      // cloud mode), pass null so renderEmbeddingModels preserves it.
+      const currentVal = embeddingModelSelect ? embeddingModelSelect.value : "";
+      const stickyLocal = !currentVal || currentVal === "jinaai/jina-embeddings-v5-text-nano";
+      const cloudModelToSelect = stickyLocal ? (lastCloudEmbeddingModel || savedEmbeddingModel || null) : null;
+
       if (rawEmbeddingModels && rawEmbeddingModels.length > 0) {
-        renderEmbeddingModels();
+        renderEmbeddingModels(cloudModelToSelect);
       } else {
-        fetchOpenRouterModels("embedding", false);
+        fetchOpenRouterModels("embedding", false, cloudModelToSelect);
       }
     } else {
       if (embeddingKeyMissingNotice) embeddingKeyMissingNotice.style.display = "none";
@@ -1533,6 +1547,13 @@ function initZocratesPreferences() {
       if (embeddingModelMetadataBox) embeddingModelMetadataBox.style.display = "none";
 
       if (embeddingModelSelect) {
+        // Preserve the cloud selection (possibly unapplied) before clobbering the
+        // select with the local placeholder, so returning to cloud mode can
+        // restore it instead of surfacing the placeholder as a dirty state.
+        const currentVal = embeddingModelSelect.value;
+        if (currentVal && currentVal !== "jinaai/jina-embeddings-v5-text-nano") {
+          lastCloudEmbeddingModel = currentVal;
+        }
         embeddingModelSelect.innerHTML = "";
         const opt = document.createElementNS("http://www.w3.org/1999/xhtml", "option");
         opt.value = "jinaai/jina-embeddings-v5-text-nano";
