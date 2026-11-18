@@ -10,7 +10,73 @@ function initZocratesPreferences() {
   const converterStatusBadge = document.getElementById("document-converter-status-badge");
   const converterApplyBtn = document.getElementById("document-converter-apply-btn");
   const converterDirtyDot = document.getElementById("document-converter-dirty-dot");
+  // Sticky unsaved-changes pills: one per Apply-gated card, stacked at the
+  // bottom of the settings window. Each card's update*DirtyState toggles its
+  // pill, so unsaved work stays visible regardless of scroll position or
+  // drawer state.
   const converterUnsavedPill = document.getElementById("zc-unsaved-converter-pill");
+  const llmUnsavedPill = document.getElementById("zc-unsaved-llm-pill");
+  const embeddingUnsavedPill = document.getElementById("zc-unsaved-embedding-pill");
+  const verificationUnsavedPill = document.getElementById("zc-unsaved-verification-pill");
+  // Drawer-header unsaved dots for the Apply-gated cards. Each card's
+  // update*DirtyState toggles its dot, so any drawer with Apply-gated options
+  // signals unsaved work even while collapsed or scrolled out of view.
+  const llmDirtyDot = document.getElementById("llm-provider-dirty-dot");
+  const embeddingDirtyDot = document.getElementById("embeddings-dirty-dot");
+  const verificationDirtyDot = document.getElementById("citation-verification-dirty-dot");
+
+  function setDrawerDirtyDot(dotEl, isDirty) {
+    if (!dotEl) return;
+    dotEl.style.display = isDirty ? "inline-block" : "none";
+  }
+
+  function setUnsavedPill(pillEl, isDirty) {
+    if (!pillEl) return;
+    pillEl.style.display = isDirty ? "flex" : "none";
+  }
+
+  // Sticky pill click: open the card if its drawer is collapsed, then bring the
+  // (possibly far off-screen) Apply button into view and flash it so the user
+  // can find the save action without hunting through a long card body.
+  function wireUnsavedPill(pillEl, applyBtn, drawerEl) {
+    if (!pillEl || !applyBtn) return;
+    // Idempotent wiring: a re-run of initZocratesPreferences (retry path or API
+    // consumers) must not stack duplicate click handlers on the same pill.
+    if (pillEl._zcUnsavedPillHandler && typeof pillEl.removeEventListener === "function") {
+      pillEl.removeEventListener("click", pillEl._zcUnsavedPillHandler);
+    }
+    const scrollToApply = () => {
+      const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      applyBtn.scrollIntoView({ block: "center", behavior: prefersReducedMotion ? "auto" : "smooth" });
+      applyBtn.classList.remove("zc-apply-flash");
+      // Force a style flush so consecutive clicks restart the animation.
+      void applyBtn.offsetWidth;
+      applyBtn.classList.add("zc-apply-flash");
+      setTimeout(() => applyBtn.classList.remove("zc-apply-flash"), 1900);
+    };
+    const pillClickHandler = () => {
+      const wasCollapsed = drawerEl && !drawerEl.classList.contains("open");
+      if (wasCollapsed) {
+        drawerEl.classList.add("open");
+        const header = drawerEl.querySelector(".zc-drawer-header");
+        if (header) header.setAttribute("aria-expanded", "true");
+        // Keep the Expand/Collapse-all control label in sync with the new state.
+        const expandCollapseBtn = document.getElementById("expand-collapse-all-btn");
+        if (expandCollapseBtn) {
+          const allOpen = Array.from(document.querySelectorAll(".zc-card.zc-drawer")).every((d) => d.classList.contains("open"));
+          expandCollapseBtn.textContent = allOpen ? "Collapse all" : "Expand all";
+        }
+        // The drawer body expands via a grid-template-rows transition (0.25s);
+        // scrolling immediately would target the button's mid-collapse position,
+        // so wait for the expansion to settle first.
+        setTimeout(scrollToApply, 300);
+      } else {
+        scrollToApply();
+      }
+    };
+    pillEl._zcUnsavedPillHandler = pillClickHandler;
+    pillEl.addEventListener("click", pillClickHandler);
+  }
   const datalabKeyGroup = document.getElementById("datalab-key-group");
   const datalabApiKeyInput = document.getElementById("datalab-api-key-input");
   const toggleDatalabKeyBtn = document.getElementById("toggle-datalab-key-btn");
@@ -348,6 +414,8 @@ function initZocratesPreferences() {
 
     const isDirty = !providerMatches || !modelMatches || !baseUrlMatches;
 
+    setDrawerDirtyDot(llmDirtyDot, isDirty);
+    setUnsavedPill(llmUnsavedPill, isDirty);
     if (isDirty) {
       llmApplyBtn.removeAttribute("disabled");
       llmApplyBtn.disabled = false;
@@ -372,6 +440,8 @@ function initZocratesPreferences() {
 
     const isDirty = !modeMatches || !modelMatches;
 
+    setDrawerDirtyDot(embeddingDirtyDot, isDirty);
+    setUnsavedPill(embeddingUnsavedPill, isDirty);
     if (isDirty) {
       embeddingApplyBtn.removeAttribute("disabled");
       embeddingApplyBtn.disabled = false;
@@ -421,6 +491,8 @@ function initZocratesPreferences() {
 
     const isDirty = !enabledMatches || !providerMatches || !modelMatches || !thresholdMatches || !autoStartMatches;
 
+    setDrawerDirtyDot(verificationDirtyDot, isDirty);
+    setUnsavedPill(verificationUnsavedPill, isDirty);
     if (isDirty) {
       verificationApplyBtn.removeAttribute("disabled");
       verificationApplyBtn.disabled = false;
@@ -534,13 +606,13 @@ function initZocratesPreferences() {
       if (converterWarning) converterWarning.style.display = "block";
       if (converterStatusBadge) converterStatusBadge.style.display = "none";
       if (converterDirtyDot) converterDirtyDot.style.display = "inline-block";
-      if (converterUnsavedPill) converterUnsavedPill.style.display = "flex";
+      setUnsavedPill(converterUnsavedPill, true);
     } else {
       converterApplyBtn.setAttribute("disabled", "disabled");
       converterApplyBtn.disabled = true;
       if (converterWarning) converterWarning.style.display = "none";
       if (converterDirtyDot) converterDirtyDot.style.display = "none";
-      if (converterUnsavedPill) converterUnsavedPill.style.display = "none";
+      setUnsavedPill(converterUnsavedPill, false);
     }
   }
 
@@ -554,20 +626,12 @@ function initZocratesPreferences() {
     return;
   }
 
-  // Sticky pill: bring the (possibly far off-screen) Apply button into view and
-  // flash it so the user can find the save action without hunting through the
-  // long converter card. Attached after the retry guard so a retried init can
-  // never double-register the click handler.
-  if (converterUnsavedPill && converterApplyBtn) {
-    converterUnsavedPill.addEventListener("click", () => {
-      converterApplyBtn.scrollIntoView({ behavior: "smooth", block: "center" });
-      converterApplyBtn.classList.remove("zc-apply-flash");
-      // Force a style flush so consecutive clicks restart the animation.
-      void converterApplyBtn.offsetWidth;
-      converterApplyBtn.classList.add("zc-apply-flash");
-      setTimeout(() => converterApplyBtn.classList.remove("zc-apply-flash"), 1900);
-    });
-  }
+  // Wire the sticky pills' click handlers after the retry guard so a retried
+  // initZocratesPreferences can never double-register them.
+  wireUnsavedPill(llmUnsavedPill, llmApplyBtn, document.getElementById("llm-provider-card"));
+  wireUnsavedPill(embeddingUnsavedPill, embeddingApplyBtn, document.getElementById("embeddings-card"));
+  wireUnsavedPill(verificationUnsavedPill, verificationApplyBtn, document.getElementById("citation-verification-card"));
+  wireUnsavedPill(converterUnsavedPill, converterApplyBtn, document.getElementById("document-converter-card"));
 
   function getLoginManager() {
     try {

@@ -2646,6 +2646,77 @@ async function runTests() {
     assert.strictEqual(pill.style.display, "none", "Sticky pill hides when changes are reverted");
     assert.strictEqual(dot.style.display, "none", "Header dot hides when changes are reverted");
   });
+
+  // Test 25: Generalized drawer-header dirty dots. Every Apply-gated card's
+  // update*DirtyState toggles its own dot via setDrawerDirtyDot; the dot must
+  // mirror the card's Apply enablement exactly (visible ⇔ Apply clickable).
+  // Driven through the Citation Verification card (a boolean toggle — no
+  // catalog/model resets), which exercises the shared helper end-to-end.
+  await testAsync("drawer dirty dots: verification header dot mirrors Apply enablement across a toggle round-trip", async () => {
+    resetSpies();
+
+    const verifToggle = env.document.getElementById("citation-verification-enabled-toggle");
+    const verifApplyBtn = env.document.getElementById("verification-apply-btn");
+    const verifDot = env.document.getElementById("citation-verification-dirty-dot");
+    const verifPill = env.document.getElementById("zc-unsaved-verification-pill");
+    const converterPill = env.document.getElementById("zc-unsaved-converter-pill");
+    assert.ok(verifToggle && verifApplyBtn && verifDot, "Verification toggle, Apply button, and dirty dot must exist");
+    assert.ok(verifPill && converterPill, "Verification and converter unsaved pills must exist");
+
+    // Dots render inline-block; pills render flex — both "none" when clean.
+    const dotDisplay = () => (verifApplyBtn.disabled ? "none" : "inline-block");
+    const pillDisplay = () => (verifApplyBtn.disabled ? "none" : "flex");
+
+    // Deterministic clean baseline: earlier tests can leave other verification
+    // fields (provider/model/threshold) mismatched with their saved values, so
+    // persist the current control state via a real Apply first.
+    verifApplyBtn.dispatchEvent("click");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.strictEqual(verifApplyBtn.disabled, true, "Apply persisting current state yields a clean card");
+    const initialDisabled = verifApplyBtn.disabled;
+    assert.strictEqual(verifDot.style.display, dotDisplay(), "Dot mirrors Apply enablement at baseline");
+    assert.strictEqual(verifPill.style.display, pillDisplay(), "Sticky pill mirrors Apply enablement at baseline");
+
+    // Flipping the toggle must change the dirty state in one direction or the
+    // other, and both the dot and the card's sticky pill must track it.
+    verifToggle.checked = !verifToggle.checked;
+    verifToggle.dispatchEvent("change");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.notStrictEqual(verifApplyBtn.disabled, initialDisabled, "Toggle flip must flip the card's dirty state");
+    assert.strictEqual(verifDot.style.display, dotDisplay(), "Dot mirrors Apply enablement after the flip");
+    assert.strictEqual(verifPill.style.display, pillDisplay(), "Sticky pill mirrors Apply enablement after the flip");
+    // Pills are per-card: dirtying verification must not surface the converter pill.
+    assert.strictEqual(converterPill.style.display, "none", "Converter pill stays hidden while only verification is dirty");
+
+    // Flipping back restores the baseline trio exactly.
+    verifToggle.checked = !verifToggle.checked;
+    verifToggle.dispatchEvent("change");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.strictEqual(verifApplyBtn.disabled, initialDisabled, "Round-trip restores Apply enablement");
+    assert.strictEqual(verifDot.style.display, dotDisplay(), "Dot mirrors Apply enablement after the round-trip");
+    assert.strictEqual(verifPill.style.display, pillDisplay(), "Sticky pill mirrors Apply enablement after the round-trip");
+
+    // Clicking a card's pill while its drawer is collapsed must auto-open the
+    // drawer, then scroll to the Apply button only after the 0.25s drawer
+    // expansion settles (scrolling immediately would target the button's
+    // mid-transition position). The mock DOM has no layout, so scrollIntoView
+    // is stubbed and only the drawer state and scroll deferral are asserted.
+    const verifCard = env.document.getElementById("citation-verification-card");
+    verifCard.classList.remove("open");
+    let scrollCalls = 0;
+    verifApplyBtn.scrollIntoView = () => { scrollCalls += 1; };
+    verifPill.dispatchEvent("click");
+    assert.strictEqual(verifCard.classList.contains("open"), true, "Pill click must open a collapsed drawer");
+    assert.strictEqual(scrollCalls, 0, "Scroll must be deferred while the drawer expansion settles");
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    assert.strictEqual(scrollCalls, 1, "Scroll must fire once after the drawer expansion");
+
+    // Clicking again on an already-open drawer scrolls immediately (no deferral).
+    scrollCalls = 0;
+    verifPill.dispatchEvent("click");
+    assert.strictEqual(scrollCalls, 1, "Scroll fires immediately when the drawer is already open");
+    assert.strictEqual(verifCard.classList.contains("open"), true, "Pill click must never close an open drawer");
+  });
   } finally {
     global.fetch = origFetch;
     global.IOUtils = origIOUtils;

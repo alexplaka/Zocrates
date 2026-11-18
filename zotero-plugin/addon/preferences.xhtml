@@ -522,13 +522,22 @@
       box-shadow: 0 0 6px rgba(245, 158, 11, 0.55);
     }
 
-    .zc-unsaved-pill {
-      all: unset;
+    .zc-unsaved-pill-stack {
       position: fixed;
       bottom: 18px;
       left: 50%;
       transform: translateX(-50%);
       z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      pointer-events: none;
+    }
+
+    .zc-unsaved-pill {
+      all: unset;
+      pointer-events: auto;
       box-sizing: border-box;
       display: flex;
       align-items: center;
@@ -698,7 +707,10 @@
           <html:span class="zc-card-title">Citation Verification</html:span>
           <html:span class="zc-card-desc">Probabilistic verification of synthesized claims against supporting source content using fast decision models.</html:span>
         </html:span>
-        <html:span class="zc-drawer-chevron"></html:span>
+        <html:span style="display: flex; align-items: center; gap: 8px;">
+          <html:span id="citation-verification-dirty-dot" class="zc-dirty-dot" style="display: none;"></html:span>
+          <html:span class="zc-drawer-chevron"></html:span>
+        </html:span>
       </html:button>
       <html:div class="zc-card-body-wrap" id="citation-verification-card-body">
         <html:div class="zc-card-body">
@@ -809,7 +821,10 @@
           <html:span class="zc-card-title">LLM Provider and Model</html:span>
           <html:span class="zc-card-desc">Configure remote or local LLMs used by Zocrates.</html:span>
         </html:span>
-        <html:span class="zc-drawer-chevron"></html:span>
+        <html:span style="display: flex; align-items: center; gap: 8px;">
+          <html:span id="llm-provider-dirty-dot" class="zc-dirty-dot" style="display: none;"></html:span>
+          <html:span class="zc-drawer-chevron"></html:span>
+        </html:span>
       </html:button>
       <html:div class="zc-card-body-wrap" id="llm-provider-card-body">
         <html:div class="zc-card-body">
@@ -1081,7 +1096,10 @@
           <html:span class="zc-card-title">Embeddings Provider &amp; Model</html:span>
           <html:span class="zc-card-desc">Configure embeddings mode (local vs cloud provider) and embedding model.</html:span>
         </html:span>
-        <html:span class="zc-drawer-chevron"></html:span>
+        <html:span style="display: flex; align-items: center; gap: 8px;">
+          <html:span id="embeddings-dirty-dot" class="zc-dirty-dot" style="display: none;"></html:span>
+          <html:span class="zc-drawer-chevron"></html:span>
+        </html:span>
       </html:button>
       <html:div class="zc-card-body-wrap" id="embeddings-card-body">
         <html:div class="zc-card-body">
@@ -1252,12 +1270,27 @@
     </html:div>
   </html:div>
 
-  <!-- Sticky unsaved-changes pill (converter card): always visible while the
-       card has dirty options, regardless of scroll position or drawer state.
-       Clicking scrolls to and flashes the card's Apply button. One pill per
-       dirty card today; stacked pills if more cards adopt Apply-gated options. -->
-  <html:button type="button" id="zc-unsaved-converter-pill" class="zc-unsaved-pill" style="display: none;">
-    <html:span class="zc-dirty-dot" style="margin-left: 0;"></html:span>
-    <html:span>Unsaved converter changes — Apply</html:span>
-  </html:button>
+  <!-- Sticky unsaved-changes pills: one per Apply-gated card, stacked at the
+       bottom of the settings window. Each pill is visible while its card has
+       dirty options, regardless of scroll position or drawer state; clicking
+       scrolls to and flashes that card's Apply button. Card-specific labels
+       keep multiple simultaneous dirty cards unambiguous. -->
+  <html:div id="zc-unsaved-pill-stack" class="zc-unsaved-pill-stack">
+    <html:button type="button" id="zc-unsaved-llm-pill" class="zc-unsaved-pill" style="display: none;">
+      <html:span class="zc-dirty-dot" style="margin-left: 0;"></html:span>
+      <html:span>Unsaved LLM changes — Apply</html:span>
+    </html:button>
+    <html:button type="button" id="zc-unsaved-embedding-pill" class="zc-unsaved-pill" style="display: none;">
+      <html:span class="zc-dirty-dot" style="margin-left: 0;"></html:span>
+      <html:span>Unsaved embedding changes — Apply</html:span>
+    </html:button>
+    <html:button type="button" id="zc-unsaved-verification-pill" class="zc-unsaved-pill" style="display: none;">
+      <html:span class="zc-dirty-dot" style="margin-left: 0;"></html:span>
+      <html:span>Unsaved verification changes — Apply</html:span>
+    </html:button>
+    <html:button type="button" id="zc-unsaved-converter-pill" class="zc-unsaved-pill" style="display: none;">
+      <html:span class="zc-dirty-dot" style="margin-left: 0;"></html:span>
+      <html:span>Unsaved converter changes — Apply</html:span>
+    </html:button>
+  </html:div>
 </vbox>
