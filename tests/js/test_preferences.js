@@ -2614,6 +2614,10 @@ async function runTests() {
     const converterSelect = env.document.getElementById("document-converter-select");
     const pill = env.document.getElementById("zc-unsaved-converter-pill");
     const dot = env.document.getElementById("document-converter-dirty-dot");
+    // Per-control dots: the converter select's own dot must track only its own
+    // mismatch, leaving untouched sibling controls' dots hidden.
+    const fieldDot = env.document.getElementById("document-converter-select-dirty-dot");
+    const processingModeDot = env.document.getElementById("datalab-processing-mode-select-dirty-dot");
     assert.ok(pill, "zc-unsaved-converter-pill must exist");
     assert.ok(dot, "document-converter-dirty-dot must exist");
 
@@ -2631,6 +2635,8 @@ async function runTests() {
     await new Promise((resolve) => setTimeout(resolve, 50));
     assert.strictEqual(pill.style.display, "none", "Sticky pill hidden on a clean card");
     assert.strictEqual(dot.style.display, "none", "Header dot hidden on a clean card");
+    assert.strictEqual(fieldDot.style.display, "none", "Converter select's own dot hidden on a clean card");
+    assert.strictEqual(processingModeDot.style.display, "none", "Datalab mode dot hidden on a clean card");
 
     // Dirtying the card shows both indicators.
     converterSelect.value = "datalab";
@@ -2638,6 +2644,12 @@ async function runTests() {
     await new Promise((resolve) => setTimeout(resolve, 10));
     assert.strictEqual(pill.style.display, "flex", "Sticky pill visible while the card is dirty");
     assert.strictEqual(dot.style.display, "inline-block", "Header dot visible while the card is dirty");
+    assert.strictEqual(fieldDot.style.display, "inline-block", "Converter select's own dot shows while it is dirty");
+    assert.strictEqual(
+      processingModeDot.style.display,
+      "none",
+      "Sibling control dots stay hidden while only the converter select differs"
+    );
 
     // Reverting the change hides both again (no stale Apply nag).
     converterSelect.value = "markitdown";
@@ -2645,6 +2657,7 @@ async function runTests() {
     await new Promise((resolve) => setTimeout(resolve, 10));
     assert.strictEqual(pill.style.display, "none", "Sticky pill hides when changes are reverted");
     assert.strictEqual(dot.style.display, "none", "Header dot hides when changes are reverted");
+    assert.strictEqual(fieldDot.style.display, "none", "Converter select's own dot hides when changes are reverted");
   });
 
   // Test 46: Generalized drawer-header dirty dots. Every Apply-gated card's
@@ -2662,6 +2675,9 @@ async function runTests() {
     const converterPill = env.document.getElementById("zc-unsaved-converter-pill");
     assert.ok(verifToggle && verifApplyBtn && verifDot, "Verification toggle, Apply button, and dirty dot must exist");
     assert.ok(verifPill && converterPill, "Verification and converter unsaved pills must exist");
+    // Per-control dots for the toggled field and an untouched sibling field.
+    const enabledFieldDot = env.document.getElementById("citation-verification-enabled-toggle-dirty-dot");
+    const providerFieldDot = env.document.getElementById("verification-provider-select-dirty-dot");
 
     // Dots render inline-block; pills render flex — both "none" when clean.
     const dotDisplay = () => (verifApplyBtn.disabled ? "none" : "inline-block");
@@ -2676,6 +2692,9 @@ async function runTests() {
     const initialDisabled = verifApplyBtn.disabled;
     assert.strictEqual(verifDot.style.display, dotDisplay(), "Dot mirrors Apply enablement at baseline");
     assert.strictEqual(verifPill.style.display, pillDisplay(), "Sticky pill mirrors Apply enablement at baseline");
+    // A freshly persisted card has every per-control dot hidden.
+    assert.strictEqual(enabledFieldDot.style.display, "none", "Toggle's own dot hidden at baseline");
+    assert.strictEqual(providerFieldDot.style.display, "none", "Provider dot hidden at baseline");
 
     // Flipping the toggle must change the dirty state in one direction or the
     // other, and both the dot and the card's sticky pill must track it.
@@ -2688,6 +2707,17 @@ async function runTests() {
     // styles — a deleted setDrawerDirtyDot/setUnsavedPill call fails these.
     assert.strictEqual(verifDot.style.display, "inline-block", "Dot shows its literal visible style after the flip");
     assert.strictEqual(verifPill.style.display, "flex", "Sticky pill shows its literal visible style after the flip");
+    // The toggled field names itself with its own dot, and only its own dot.
+    assert.strictEqual(
+      enabledFieldDot.style.display,
+      "inline-block",
+      "The toggled field's own dot shows its literal visible style after the flip"
+    );
+    assert.strictEqual(
+      providerFieldDot.style.display,
+      "none",
+      "Untouched sibling field keeps its dot hidden while only the toggle differs"
+    );
     // Pills are per-card: dirtying verification must not surface the converter pill.
     assert.strictEqual(converterPill.style.display, "none", "Converter pill stays hidden while only verification is dirty");
 
@@ -2698,6 +2728,7 @@ async function runTests() {
     assert.strictEqual(verifApplyBtn.disabled, initialDisabled, "Round-trip restores Apply enablement");
     assert.strictEqual(verifDot.style.display, dotDisplay(), "Dot mirrors Apply enablement after the round-trip");
     assert.strictEqual(verifPill.style.display, pillDisplay(), "Sticky pill mirrors Apply enablement after the round-trip");
+    assert.strictEqual(enabledFieldDot.style.display, "none", "Toggle's own dot hides again after the round-trip");
 
     // Clicking a card's pill while its drawer is collapsed must auto-open the
     // drawer, then scroll to the Apply button only after the 0.25s drawer

@@ -30,6 +30,16 @@ function initZocratesPreferences() {
     dotEl.style.display = isDirty ? "inline-block" : "none";
   }
 
+  // Per-control unsaved dot: one per Apply-gated option, marked in the pane
+  // markup as `<control element id>-dirty-dot` so the control-to-dot mapping
+  // stays mechanical. Missing dots are a no-op (the card-level indicators still
+  // carry the signal).
+  function setFieldDirtyDot(controlId, isDirty) {
+    const dotEl = document.getElementById(controlId + "-dirty-dot");
+    if (!dotEl) return;
+    dotEl.style.display = isDirty ? "inline-block" : "none";
+  }
+
   function setUnsavedPill(pillEl, isDirty) {
     if (!pillEl) return;
     pillEl.style.display = isDirty ? "flex" : "none";
@@ -419,6 +429,12 @@ function initZocratesPreferences() {
 
     const isDirty = !providerMatches || !modelMatches || !baseUrlMatches;
 
+    setFieldDirtyDot("llm-provider-select", !providerMatches);
+    setFieldDirtyDot("llm-model-select", !modelMatches);
+    // baseUrlMatches is already true for providers that ignore the base URL, so
+    // the dot never appears on the hidden input.
+    setFieldDirtyDot("llm-base-url-input", !baseUrlMatches);
+
     setDrawerDirtyDot(llmDirtyDot, isDirty);
     setUnsavedPill(llmUnsavedPill, isDirty);
     if (isDirty) {
@@ -444,6 +460,9 @@ function initZocratesPreferences() {
     const modelMatches = modelsMatch(currentModel, savedEmbeddingModel);
 
     const isDirty = !modeMatches || !modelMatches;
+
+    setFieldDirtyDot("embedding-mode-select", !modeMatches);
+    setFieldDirtyDot("embedding-model-select", !modelMatches);
 
     setDrawerDirtyDot(embeddingDirtyDot, isDirty);
     setUnsavedPill(embeddingUnsavedPill, isDirty);
@@ -495,6 +514,12 @@ function initZocratesPreferences() {
     const autoStartMatches = (currentAutoStart === savedVerificationAutoStart);
 
     const isDirty = !enabledMatches || !providerMatches || !modelMatches || !thresholdMatches || !autoStartMatches;
+
+    setFieldDirtyDot("citation-verification-enabled-toggle", !enabledMatches);
+    setFieldDirtyDot("verification-provider-select", !providerMatches);
+    setFieldDirtyDot("verification-model-select", !modelMatches);
+    setFieldDirtyDot("verification-threshold-input", !thresholdMatches);
+    setFieldDirtyDot("auto-start-laya-toggle", !autoStartMatches);
 
     setDrawerDirtyDot(verificationDirtyDot, isDirty);
     setUnsavedPill(verificationUnsavedPill, isDirty);
@@ -591,19 +616,45 @@ function initZocratesPreferences() {
     const currentVlmLocalModel = vlmLocalModelInput ? vlmLocalModelInput.value.trim() : "";
     const currentVlmMaxImages = vlmMaxImagesInput ? (parseInt(vlmMaxImagesInput.value, 10) || 100) : 100;
 
+    const converterMatches = (currentId === savedConverterId);
+    const datalabApiKeyMatches = !datalabApiKeyInput || (currentKey === savedDatalabApiKey);
+    // Datalab-only options are compared only while Datalab is the selected
+    // engine, mirroring the visibility gating of their controls.
+    const datalabFallbackMatches = (currentId !== "datalab") || (currentFallback === savedDatalabFallback);
+    const datalabMergeCrossPageMatches = (currentId !== "datalab") || (currentMergeCrossPage === savedDatalabMergeCrossPage);
+    const datalabProcessingModeMatches = (currentId !== "datalab") || (currentProcessingMode === savedDatalabProcessingMode);
+    const vlmEnableMatches = !enableVlmCheckbox || (currentVlmEnable === savedVlmEnable);
+    const vlmProviderMatches = (currentVlmProvider === savedVlmProvider);
+    const vlmPrimaryModelMatches = (currentVlmPrimaryModel === savedVlmCloudModel);
+    const vlmBackupModelMatches = (currentVlmBackupModel === savedVlmBackupModel);
+    const vlmLocalModelMatches = (currentVlmLocalModel === savedVlmLocalModel);
+    const vlmMaxImagesMatches = (currentVlmMaxImages === savedVlmMaxImages);
+
     const isDirty = (
-      currentId !== savedConverterId ||
-      (datalabApiKeyInput && currentKey !== savedDatalabApiKey) ||
-      (currentId === "datalab" && currentFallback !== savedDatalabFallback) ||
-      (currentId === "datalab" && currentMergeCrossPage !== savedDatalabMergeCrossPage) ||
-      (currentId === "datalab" && currentProcessingMode !== savedDatalabProcessingMode) ||
-      (enableVlmCheckbox && currentVlmEnable !== savedVlmEnable) ||
-      (currentVlmProvider !== savedVlmProvider) ||
-      (currentVlmPrimaryModel !== savedVlmCloudModel) ||
-      (currentVlmBackupModel !== savedVlmBackupModel) ||
-      (currentVlmLocalModel !== savedVlmLocalModel) ||
-      (currentVlmMaxImages !== savedVlmMaxImages)
+      !converterMatches ||
+      !datalabApiKeyMatches ||
+      !datalabFallbackMatches ||
+      !datalabMergeCrossPageMatches ||
+      !datalabProcessingModeMatches ||
+      !vlmEnableMatches ||
+      !vlmProviderMatches ||
+      !vlmPrimaryModelMatches ||
+      !vlmBackupModelMatches ||
+      !vlmLocalModelMatches ||
+      !vlmMaxImagesMatches
     );
+
+    setFieldDirtyDot("document-converter-select", !converterMatches);
+    setFieldDirtyDot("datalab-api-key-input", !datalabApiKeyMatches);
+    setFieldDirtyDot("datalab-fallback", !datalabFallbackMatches);
+    setFieldDirtyDot("datalab-merge-cross-page-checkbox", !datalabMergeCrossPageMatches);
+    setFieldDirtyDot("datalab-processing-mode-select", !datalabProcessingModeMatches);
+    setFieldDirtyDot("enable-vlm-captioning-checkbox", !vlmEnableMatches);
+    setFieldDirtyDot("vlm-provider", !vlmProviderMatches);
+    setFieldDirtyDot("vlm-primary-model-select", !vlmPrimaryModelMatches);
+    setFieldDirtyDot("vlm-backup-model-select", !vlmBackupModelMatches);
+    setFieldDirtyDot("vlm-local-model-input", !vlmLocalModelMatches);
+    setFieldDirtyDot("vlm-max-images-input", !vlmMaxImagesMatches);
 
     if (isDirty) {
       converterApplyBtn.removeAttribute("disabled");
