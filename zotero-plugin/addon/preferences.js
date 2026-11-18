@@ -9,6 +9,8 @@ function initZocratesPreferences() {
   const converterWarning = document.getElementById("document-converter-warning");
   const converterStatusBadge = document.getElementById("document-converter-status-badge");
   const converterApplyBtn = document.getElementById("document-converter-apply-btn");
+  const converterDirtyDot = document.getElementById("document-converter-dirty-dot");
+  const converterUnsavedPill = document.getElementById("zc-unsaved-converter-pill");
   const datalabKeyGroup = document.getElementById("datalab-key-group");
   const datalabApiKeyInput = document.getElementById("datalab-api-key-input");
   const toggleDatalabKeyBtn = document.getElementById("toggle-datalab-key-btn");
@@ -531,10 +533,14 @@ function initZocratesPreferences() {
       converterApplyBtn.disabled = false;
       if (converterWarning) converterWarning.style.display = "block";
       if (converterStatusBadge) converterStatusBadge.style.display = "none";
+      if (converterDirtyDot) converterDirtyDot.style.display = "inline-block";
+      if (converterUnsavedPill) converterUnsavedPill.style.display = "flex";
     } else {
       converterApplyBtn.setAttribute("disabled", "disabled");
       converterApplyBtn.disabled = true;
       if (converterWarning) converterWarning.style.display = "none";
+      if (converterDirtyDot) converterDirtyDot.style.display = "none";
+      if (converterUnsavedPill) converterUnsavedPill.style.display = "none";
     }
   }
 
@@ -546,6 +552,21 @@ function initZocratesPreferences() {
     Zotero.debug("Zocrates: Preference DOM elements not found yet, retrying...");
     setTimeout(initZocratesPreferences, 100);
     return;
+  }
+
+  // Sticky pill: bring the (possibly far off-screen) Apply button into view and
+  // flash it so the user can find the save action without hunting through the
+  // long converter card. Attached after the retry guard so a retried init can
+  // never double-register the click handler.
+  if (converterUnsavedPill && converterApplyBtn) {
+    converterUnsavedPill.addEventListener("click", () => {
+      converterApplyBtn.scrollIntoView({ behavior: "smooth", block: "center" });
+      converterApplyBtn.classList.remove("zc-apply-flash");
+      // Force a style flush so consecutive clicks restart the animation.
+      void converterApplyBtn.offsetWidth;
+      converterApplyBtn.classList.add("zc-apply-flash");
+      setTimeout(() => converterApplyBtn.classList.remove("zc-apply-flash"), 1900);
+    });
   }
 
   function getLoginManager() {

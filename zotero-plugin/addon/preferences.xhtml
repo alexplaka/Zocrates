@@ -508,6 +508,55 @@
         transition: none !important;
       }
     }
+    /* Unsaved-change indicators (A+C): per-card header dot + sticky bottom pill.
+       Driven by the existing dirty-state comparison — settings that save
+       immediately never enter a dirty state, so they never trigger these. */
+    .zc-dirty-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #f59e0b;
+      flex-shrink: 0;
+      margin-left: 8px;
+      box-shadow: 0 0 6px rgba(245, 158, 11, 0.55);
+    }
+
+    .zc-unsaved-pill {
+      all: unset;
+      position: fixed;
+      bottom: 18px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 1000;
+      box-sizing: border-box;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      border-radius: 999px;
+      background: #1e293b;
+      border: 1px solid rgba(245, 158, 11, 0.45);
+      color: #fbbf24;
+      font-size: 12.5px;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+    }
+
+    .zc-unsaved-pill:hover {
+      border-color: #f59e0b;
+      background: #24334a;
+    }
+
+    @keyframes zcApplyFlash {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+      40% { box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.45); }
+    }
+
+    .zc-apply-flash {
+      animation: zcApplyFlash 0.9s ease-in-out 2;
+    }
   </html:style>
 
   <html:div class="zc-container">
@@ -859,7 +908,10 @@
           <html:span class="zc-card-title">Document Converter</html:span>
           <html:span class="zc-card-desc">Select the document conversion engine used for processing attachments.</html:span>
         </html:span>
-        <html:span class="zc-drawer-chevron"></html:span>
+        <html:span style="display: flex; align-items: center; gap: 8px;">
+          <html:span id="document-converter-dirty-dot" class="zc-dirty-dot" style="display: none;"></html:span>
+          <html:span class="zc-drawer-chevron"></html:span>
+        </html:span>
       </html:button>
       <html:div class="zc-card-body-wrap" id="document-converter-card-body">
         <html:div class="zc-card-body">
@@ -1199,4 +1251,13 @@
       </html:div>
     </html:div>
   </html:div>
+
+  <!-- Sticky unsaved-changes pill (converter card): always visible while the
+       card has dirty options, regardless of scroll position or drawer state.
+       Clicking scrolls to and flashes the card's Apply button. One pill per
+       dirty card today; stacked pills if more cards adopt Apply-gated options. -->
+  <html:button type="button" id="zc-unsaved-converter-pill" class="zc-unsaved-pill" style="display: none;">
+    <html:span class="zc-dirty-dot" style="margin-left: 0;"></html:span>
+    <html:span>Unsaved converter changes — Apply</html:span>
+  </html:button>
 </vbox>

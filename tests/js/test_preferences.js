@@ -2604,6 +2604,48 @@ async function runTests() {
     api.updateCatalogMissingNotices();
     assert.strictEqual(notices.vlm.style.display, "none", "Restoring a catalog VLM model clears the notice");
   });
+
+  // Test 24: Converter unsaved-change indicators (sticky pill + drawer-header dot).
+  // Both are driven purely by updateConverterDirtyState, so they must appear while
+  // the card has Apply-gated unsaved options and hide again once state is clean.
+  await testAsync("converter unsaved indicators: sticky pill and header dot toggle with dirty state", async () => {
+    resetSpies();
+
+    const converterSelect = env.document.getElementById("document-converter-select");
+    const pill = env.document.getElementById("zc-unsaved-converter-pill");
+    const dot = env.document.getElementById("document-converter-dirty-dot");
+    assert.ok(pill, "zc-unsaved-converter-pill must exist");
+    assert.ok(dot, "document-converter-dirty-dot must exist");
+
+    // Deterministic clean baseline: earlier tests leave savedConverterId at
+    // "datalab", so persist the current control state via a real Apply first.
+    // Also align the VLM checkbox with its saved pref (the mock checkbox
+    // defaults to unchecked while the saved value falls back to true — a
+    // mock-env artifact, not a real-world dirty state).
+    const enableVlmCheckbox = env.document.getElementById("enable-vlm-captioning-checkbox");
+    if (enableVlmCheckbox) enableVlmCheckbox.checked = true;
+    const applyBtn = env.document.getElementById("document-converter-apply-btn");
+    converterSelect.value = "markitdown";
+    converterSelect.dispatchEvent("change");
+    applyBtn.dispatchEvent("click");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.strictEqual(pill.style.display, "none", "Sticky pill hidden on a clean card");
+    assert.strictEqual(dot.style.display, "none", "Header dot hidden on a clean card");
+
+    // Dirtying the card shows both indicators.
+    converterSelect.value = "datalab";
+    converterSelect.dispatchEvent("change");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.strictEqual(pill.style.display, "flex", "Sticky pill visible while the card is dirty");
+    assert.strictEqual(dot.style.display, "inline-block", "Header dot visible while the card is dirty");
+
+    // Reverting the change hides both again (no stale Apply nag).
+    converterSelect.value = "markitdown";
+    converterSelect.dispatchEvent("change");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.strictEqual(pill.style.display, "none", "Sticky pill hides when changes are reverted");
+    assert.strictEqual(dot.style.display, "none", "Header dot hides when changes are reverted");
+  });
   } finally {
     global.fetch = origFetch;
     global.IOUtils = origIOUtils;
