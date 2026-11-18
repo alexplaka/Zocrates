@@ -2605,7 +2605,7 @@ async function runTests() {
     assert.strictEqual(notices.vlm.style.display, "none", "Restoring a catalog VLM model clears the notice");
   });
 
-  // Test 24: Converter unsaved-change indicators (sticky pill + drawer-header dot).
+  // Test 45: Converter unsaved-change indicators (sticky pill + drawer-header dot).
   // Both are driven purely by updateConverterDirtyState, so they must appear while
   // the card has Apply-gated unsaved options and hide again once state is clean.
   await testAsync("converter unsaved indicators: sticky pill and header dot toggle with dirty state", async () => {
@@ -2647,7 +2647,7 @@ async function runTests() {
     assert.strictEqual(dot.style.display, "none", "Header dot hides when changes are reverted");
   });
 
-  // Test 25: Generalized drawer-header dirty dots. Every Apply-gated card's
+  // Test 46: Generalized drawer-header dirty dots. Every Apply-gated card's
   // update*DirtyState toggles its own dot via setDrawerDirtyDot; the dot must
   // mirror the card's Apply enablement exactly (visible ⇔ Apply clickable).
   // Driven through the Citation Verification card (a boolean toggle — no
@@ -2683,8 +2683,11 @@ async function runTests() {
     verifToggle.dispatchEvent("change");
     await new Promise((resolve) => setTimeout(resolve, 10));
     assert.notStrictEqual(verifApplyBtn.disabled, initialDisabled, "Toggle flip must flip the card's dirty state");
-    assert.strictEqual(verifDot.style.display, dotDisplay(), "Dot mirrors Apply enablement after the flip");
-    assert.strictEqual(verifPill.style.display, pillDisplay(), "Sticky pill mirrors Apply enablement after the flip");
+    // Literal display values after the flip: the card is provably dirty here
+    // (Apply state changed), so the indicators must show their concrete visible
+    // styles — a deleted setDrawerDirtyDot/setUnsavedPill call fails these.
+    assert.strictEqual(verifDot.style.display, "inline-block", "Dot shows its literal visible style after the flip");
+    assert.strictEqual(verifPill.style.display, "flex", "Sticky pill shows its literal visible style after the flip");
     // Pills are per-card: dirtying verification must not surface the converter pill.
     assert.strictEqual(converterPill.style.display, "none", "Converter pill stays hidden while only verification is dirty");
 

@@ -507,6 +507,10 @@
       .zc-drawer-chevron {
         transition: none !important;
       }
+
+      .zc-apply-flash {
+        animation: none;
+      }
     }
     /* Unsaved-change indicators (A+C): per-card header dot + sticky bottom pill.
        Driven by the existing dirty-state comparison — settings that save
@@ -544,9 +548,12 @@
       gap: 8px;
       padding: 8px 16px;
       border-radius: 999px;
-      background: #1e293b;
+      /* Theme-token background/text so the pill adapts to light mode; the
+         amber border + dot carry the unsaved-changes signal in both modes. */
+      background: var(--zc-card-bg);
       border: 1px solid rgba(245, 158, 11, 0.45);
-      color: #fbbf24;
+      color: var(--zc-text-main);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       font-size: 12.5px;
       font-weight: 600;
       cursor: pointer;
@@ -555,7 +562,13 @@
 
     .zc-unsaved-pill:hover {
       border-color: #f59e0b;
-      background: #24334a;
+    }
+
+    /* all:unset zeroes the focus outline on this real <button>; keep keyboard
+       focus visible (same pattern as .zc-drawer-header). */
+    .zc-unsaved-pill:focus-visible {
+      outline: 2px solid var(--zc-accent);
+      outline-offset: 2px;
     }
 
     @keyframes zcApplyFlash {

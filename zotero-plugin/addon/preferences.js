@@ -52,24 +52,29 @@ function initZocratesPreferences() {
       // Force a style flush so consecutive clicks restart the animation.
       void applyBtn.offsetWidth;
       applyBtn.classList.add("zc-apply-flash");
-      setTimeout(() => applyBtn.classList.remove("zc-apply-flash"), 1900);
+      // Guard the cleanup timer: a second click restarts the flash animation,
+      // and the previous timer must not strip the class mid-animation.
+      if (applyBtn._zcFlashTimer) clearTimeout(applyBtn._zcFlashTimer);
+      applyBtn._zcFlashTimer = setTimeout(() => {
+        applyBtn.classList.remove("zc-apply-flash");
+        applyBtn._zcFlashTimer = null;
+      }, 1900);
     };
     const pillClickHandler = () => {
       const wasCollapsed = drawerEl && !drawerEl.classList.contains("open");
       if (wasCollapsed) {
-        drawerEl.classList.add("open");
-        const header = drawerEl.querySelector(".zc-drawer-header");
-        if (header) header.setAttribute("aria-expanded", "true");
-        // Keep the Expand/Collapse-all control label in sync with the new state.
-        const expandCollapseBtn = document.getElementById("expand-collapse-all-btn");
-        if (expandCollapseBtn) {
-          const allOpen = Array.from(document.querySelectorAll(".zc-card.zc-drawer")).every((d) => d.classList.contains("open"));
-          expandCollapseBtn.textContent = allOpen ? "Collapse all" : "Expand all";
+        setDrawerOpen(drawerEl, true);
+        updateExpandCollapseAllLabel();
+        if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          // The drawer's grid-template-rows transition is disabled under
+          // reduced motion, so the layout is already settled — scroll now.
+          scrollToApply();
+        } else {
+          // The drawer body expands via a grid-template-rows transition (0.25s);
+          // scrolling immediately would target the button's mid-collapse
+          // position, so wait for the expansion to settle first.
+          setTimeout(scrollToApply, 300);
         }
-        // The drawer body expands via a grid-template-rows transition (0.25s);
-        // scrolling immediately would target the button's mid-collapse position,
-        // so wait for the expansion to settle first.
-        setTimeout(scrollToApply, 300);
       } else {
         scrollToApply();
       }
@@ -605,13 +610,13 @@ function initZocratesPreferences() {
       converterApplyBtn.disabled = false;
       if (converterWarning) converterWarning.style.display = "block";
       if (converterStatusBadge) converterStatusBadge.style.display = "none";
-      if (converterDirtyDot) converterDirtyDot.style.display = "inline-block";
+      setDrawerDirtyDot(converterDirtyDot, true);
       setUnsavedPill(converterUnsavedPill, true);
     } else {
       converterApplyBtn.setAttribute("disabled", "disabled");
       converterApplyBtn.disabled = true;
       if (converterWarning) converterWarning.style.display = "none";
-      if (converterDirtyDot) converterDirtyDot.style.display = "none";
+      setDrawerDirtyDot(converterDirtyDot, false);
       setUnsavedPill(converterUnsavedPill, false);
     }
   }
@@ -3719,24 +3724,17 @@ function initDrawerAccordion() {
   const drawers = document.querySelectorAll(".zc-drawer");
   const expandCollapseBtn = document.getElementById("expand-collapse-all-btn");
 
-  function updateExpandCollapseLabel() {
-    if (!expandCollapseBtn) return;
-    const allOpen = Array.from(drawers).every((d) => d.classList.contains("open"));
-    expandCollapseBtn.textContent = allOpen ? "Collapse all" : "Expand all";
-  }
-
   drawers.forEach((drawer) => {
     const header = drawer.querySelector(".zc-drawer-header");
     if (!header) return;
     header.addEventListener("click", () => {
       const isNowOpen = !drawer.classList.contains("open");
-      drawer.classList.toggle("open", isNowOpen);
-      header.setAttribute("aria-expanded", isNowOpen ? "true" : "false");
+      setDrawerOpen(drawer, isNowOpen);
       if (isNowOpen) {
         const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
         header.scrollIntoView({ block: "nearest", behavior: prefersReducedMotion ? "auto" : "smooth" });
       }
-      updateExpandCollapseLabel();
+      updateExpandCollapseAllLabel();
     });
   });
 
@@ -3744,18 +3742,30 @@ function initDrawerAccordion() {
     expandCollapseBtn.addEventListener("click", () => {
       const anyClosedDrawer = Array.from(drawers).some((d) => !d.classList.contains("open"));
       drawers.forEach((drawer) => {
-        const header = drawer.querySelector(".zc-drawer-header");
-        if (anyClosedDrawer) {
-          drawer.classList.add("open");
-          if (header) header.setAttribute("aria-expanded", "true");
-        } else {
-          drawer.classList.remove("open");
-          if (header) header.setAttribute("aria-expanded", "false");
-        }
+        setDrawerOpen(drawer, anyClosedDrawer);
       });
       expandCollapseBtn.textContent = anyClosedDrawer ? "Collapse all" : "Expand all";
     });
   }
+}
+
+// Shared drawer-open invariant: class + header aria-expanded. Used by the
+// drawer accordion, the Expand/Collapse-all control, and the sticky unsaved
+// pills so the three can never drift apart.
+function setDrawerOpen(drawer, isOpen) {
+  if (!drawer) return;
+  drawer.classList.toggle("open", isOpen);
+  const header = drawer.querySelector(".zc-drawer-header");
+  if (header) header.setAttribute("aria-expanded", isOpen ? "true" : "false");
+}
+
+// Recomputes the Expand/Collapse-all button label from the drawers' live state.
+function updateExpandCollapseAllLabel() {
+  const expandCollapseBtn = document.getElementById("expand-collapse-all-btn");
+  if (!expandCollapseBtn) return;
+  const drawers = document.querySelectorAll(".zc-drawer");
+  const allOpen = Array.from(drawers).every((d) => d.classList.contains("open"));
+  expandCollapseBtn.textContent = allOpen ? "Collapse all" : "Expand all";
 }
 
 // Execute initialization in browser / Zotero environment
