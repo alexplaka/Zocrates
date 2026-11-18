@@ -13838,6 +13838,21 @@ async function loadSessions() {
   return _loadSessionsPromise;
 }
 
+// Cryptographically secure session identifier (avoids Math.random, CWE-338).
+// Preserves the "session_" prefix that marks client-only, not-yet-persisted sessions.
+function generateSecureSessionId() {
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return "session_" + crypto.randomUUID();
+    }
+  } catch (e) {}
+  // Fallback: CSPRNG-derived base36 (getRandomValues is always available in Gecko/Node).
+  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  let suffix = "";
+  for (const b of bytes) suffix += b.toString(36).padStart(2, "0");
+  return "session_" + suffix.slice(0, 12);
+}
+
 async function createNewSession(title = "New Chat") {
   clearGhostSuggestion();
   cleanupOnboardingResources();
@@ -13866,7 +13881,7 @@ async function createNewSession(title = "New Chat") {
   }
 
   if (!newSession) {
-    const id = "session_" + Math.random().toString(36).substring(2, 11);
+    const id = generateSecureSessionId();
     const nowIso = new Date().toISOString();
     newSession = {
       id: id,
