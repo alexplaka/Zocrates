@@ -1958,6 +1958,7 @@ async def cost_estimate(
     already_converted = []
     eligible_attachments = []
     non_pdf_already_converted = 0
+    non_pdf_target_count = 0
     datalab_fallback_id: str | None = None
     if converter_id == "datalab":
         datalab_fallback_id = syncer.processor.datalab_non_pdf_fallback or "markitdown"
@@ -1969,6 +1970,7 @@ async def cost_estimate(
         is_datalab_fallback = converter_id == "datalab" and not is_pdf
         if is_datalab_fallback:
             effective_id = datalab_fallback_id or "markitdown"
+            non_pdf_target_count += 1
         else:
             effective_id = converter_id
 
@@ -2051,6 +2053,7 @@ async def cost_estimate(
         "target_documents": len(attachments),
         "already_converted_count": len(already_converted),
         "non_pdf_already_converted_count": non_pdf_already_converted,
+        "non_pdf_target_count": non_pdf_target_count,
         "datalab_fallback_id": datalab_fallback_id,
         "eligible_documents": len(eligible_attachments),
         "total_pages": total_pages,

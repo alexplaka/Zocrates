@@ -828,6 +828,7 @@ async function runTests() {
         total_pages: 0,
         estimated_cost_usd: 0,
         non_pdf_already_converted_count: 2,
+        non_pdf_target_count: 2,
         datalab_fallback_id: "markitdown",
       })),
       async () => {
@@ -854,6 +855,68 @@ async function runTests() {
           text.includes("Estimated Base Conversion Cost"),
           false,
           "No paid cost line should be shown for a zero-PDF-page Datalab selection"
+        );
+        // Mode UI is meaningless when Datalab can process none of the selection.
+        assert.strictEqual(
+          modalNode("zocrates-datalab-mode-select") === null ||
+            modalNode("zocrates-datalab-mode-select").parentElement === null ||
+            modalNode("zocrates-datalab-mode-select").parentElement.style.display === "none",
+          true,
+          "The processing-mode dropdown must be hidden for a non-PDF-only selection"
+        );
+        assert.strictEqual(
+          text.includes("already converted at"),
+          false,
+          "Mode-aware zero-eligible wording must not appear for a non-PDF-only selection"
+        );
+
+        clickNode(modalNode("zocrates-datalab-cancel-btn"));
+        await run;
+      }
+    );
+  });
+
+  await testAsync("renderDatalabModeModal: all-non-PDF selection already converted by the fallback shows the corrected message and keeps Proceed disabled", async () => {
+    await withStubs(
+      (url) => estimateOk(datalabEstimate({
+        datalab_mode: estimateModeOf(url) ?? "balanced",
+        target_documents: 1,
+        eligible_documents: 0,
+        already_converted_count: 1,
+        total_pages: 0,
+        estimated_cost_usd: 0,
+        non_pdf_already_converted_count: 1,
+        non_pdf_target_count: 1,
+        datalab_fallback_id: "markitdown",
+      })),
+      async () => {
+        const run = BatchConverter.startBatchConvert(["K1"], "datalab", {
+          skipConfirm: false,
+          window: { document: env.document },
+        });
+        await flushAsync();
+
+        const text = modalText();
+        // The snapshot was converted by the local fallback, NOT by Datalab at the
+        // selected mode — "already converted at <mode>" would be wrong here.
+        assert.ok(
+          text.includes("already converted with the local fallback (Datalab converts PDFs only)"),
+          `Corrected zero-eligible message expected. Got: ${text}`
+        );
+        assert.strictEqual(
+          text.includes("already converted at balanced"),
+          false,
+          "The misleading mode-attributed message must not appear"
+        );
+        assert.strictEqual(
+          modalNode("zocrates-datalab-proceed-btn").disabled,
+          true,
+          "Proceed must stay disabled — switching modes cannot rescue a non-PDF selection"
+        );
+        assert.ok(
+          !modalNode("zocrates-datalab-mode-select") ||
+            modalNode("zocrates-datalab-mode-select").parentElement.style.display === "none",
+          "The dropdown must be hidden — there is no mode to pick"
         );
 
         clickNode(modalNode("zocrates-datalab-cancel-btn"));

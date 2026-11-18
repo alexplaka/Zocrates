@@ -811,7 +811,44 @@ class TestCostEstimateEndpoint:
             assert data["estimated_cost_usd"] == 0.0
             # Unconverted non-PDF docs are eligible (routed to fallback at conversion time)
             assert data["non_pdf_already_converted_count"] == 0
+            assert data["non_pdf_target_count"] == 1
             assert data["datalab_fallback_id"] == "markitdown"
+
+    def test_cost_estimate_datalab_mixed_pdf_and_snapshot_target_counts(self, client, tmp_path) -> None:
+        """non_pdf_target_count distinguishes a snapshot-only selection from mixed."""
+        mock_syncer = MagicMock()
+        dummy_pdf = tmp_path / "paper.pdf"
+        dummy_pdf.write_text("pdf content", encoding="utf-8")
+        dummy_html = tmp_path / "snapshot.html"
+        dummy_html.write_text("<html>body</html>", encoding="utf-8")
+
+        def att_for(key: str, ctype: str, path):
+            m = MagicMock()
+            m.item_key = key
+            m.content_type = ctype
+            m.path = path
+            return m
+
+        attachments = [
+            att_for("PDF_KEY", "application/pdf", dummy_pdf),
+            att_for("HTML_KEY", "text/html", dummy_html),
+        ]
+
+        def attachment_side(key):
+            return attachments[0] if key == "PDF_KEY" else attachments[1]
+
+        mock_syncer.db.get_attachment_by_key.side_effect = attachment_side
+        mock_syncer.processor.get_metadata.return_value = None
+        mock_syncer.processor.datalab_non_pdf_fallback = "markitdown"
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            res = client.get("/cost-estimate?converter_id=datalab&item_keys=PDF_KEY,HTML_KEY")
+            assert res.status_code == 200
+            data = res.json()
+            assert data["target_documents"] == 2
+            assert data["non_pdf_target_count"] == 1
+            assert data["eligible_documents"] == 2
+            assert data["total_pages"] > 0
 
     def test_cost_estimate_incremental_skips_already_converted(self, client, tmp_path) -> None:
         mock_syncer = MagicMock()

@@ -785,6 +785,18 @@ var BatchConverter = {
 
   // Per-page Datalab rate for a mode, tolerating version skew between independently
   // rotating XPI and backend builds (older backends ship no per-mode map).
+  // True when EVERY targeted attachment is non-PDF, so Datalab can never process
+  // any of them directly — the processing-mode dropdown and mode-dependent
+  // messaging are meaningless for such a selection (everything routes to the
+  // local fallback). Falls back to false (legacy behavior) when the estimate
+  // predates the non_pdf_target_count field (older backend).
+  _datalabSelectionAllNonPdf(estimate, keys) {
+    let data = estimate || {};
+    let nonPdfTargets = data.non_pdf_target_count;
+    let targetDocs = data.target_documents != null ? data.target_documents : keys.length;
+    return Number.isInteger(nonPdfTargets) && nonPdfTargets > 0 && nonPdfTargets === targetDocs;
+  },
+
   _datalabCostPerPageForMode(estimate, mode, totalPages) {
     let map = estimate ? estimate.datalab_cost_per_page_usd : null;
     if (map && typeof map[mode] === "number") {
@@ -1070,6 +1082,11 @@ var BatchConverter = {
           ? data.eligible_documents
           : Math.max(targetDocs - alreadyConverted, 0);
         let totalPages = data.total_pages || 0;
+        let allNonPdf = this._datalabSelectionAllNonPdf(data, keys);
+        // A non-PDF-only selection can never be processed by Datalab itself, so the
+        // processing-mode dropdown (and its per-mode cost/retry lines) are hidden —
+        // everything is routed to the local fallback regardless of mode.
+        selectBox.style.display = allNonPdf ? "none" : "flex";
 
         appendSelectedItemsLine();
         if (alreadyConverted > 0) {
@@ -1097,14 +1114,24 @@ var BatchConverter = {
         }
 
         if (eligibleCount === 0) {
-          // Non-terminal early exit (plan §3.5): the mode dropdown is exactly what can
-          // rescue an all-already-converted selection, so the dialog stays open.
           let alreadyAtMode = alreadyConverted > 0 ? alreadyConverted : targetDocs;
-          appendLine(
-            infoBox,
-            `${alreadyAtMode} item(s) already converted at ${mode} — pick a different mode to re-convert them, or Cancel`,
-            "color: #f59e0b; font-weight: 500;"
-          );
+          if (allNonPdf) {
+            // Non-PDF-only selection: the items were converted by the local fallback,
+            // NOT by Datalab at the selected mode — switching modes cannot rescue them.
+            appendLine(
+              infoBox,
+              `${alreadyAtMode} item(s) already converted with the local fallback (Datalab converts PDFs only) — use a different converter to re-convert, or Cancel`,
+              "color: #f59e0b; font-weight: 500;"
+            );
+          } else {
+            // Non-terminal early exit (plan §3.5): the mode dropdown is exactly what can
+            // rescue an all-already-converted selection, so the dialog stays open.
+            appendLine(
+              infoBox,
+              `${alreadyAtMode} item(s) already converted at ${mode} — pick a different mode to re-convert them, or Cancel`,
+              "color: #f59e0b; font-weight: 500;"
+            );
+          }
         }
 
         if (eligibleCount > 0 && totalPages > 0) {
