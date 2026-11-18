@@ -592,6 +592,15 @@ function isSafeUrl(url) {
 }
 
 /**
+ * Canonical sanitization boundary for rendered message content: converts HTML to
+ * XHTML (namespace fixing for KaTeX/SVG) and then applies the allowlist HTML
+ * sanitizer. A named sanitization boundary (see codeql/zocrates-queries).
+ */
+function sanitizeHTMLForRendering(html) {
+  return sanitizeHTML(htmlToXhtml(html));
+}
+
+/**
  * Robust, allowlist-based DOM sanitization using DOMParser in an inert text/html document.
  * Discards dangerous tags (script, iframe, form, etc.) with children.
  * Unwraps safe children of non-allowed tags.
@@ -6088,7 +6097,7 @@ function formatMarkdown(text, citationPlaceholders = []) {
   }
 
   // 6. Sanitize and convert to valid XHTML
-  return sanitizeHTML(htmlToXhtml(html));
+  return sanitizeHTMLForRendering(html);
 }
 
 function formatMessageContent(text, metadata = null, isUser = false) {
@@ -6968,7 +6977,7 @@ function formatMarkdownForNote(text) {
     html = html.replace(item.placeholder, () => noteMathHtml);
   }
 
-  return sanitizeHTML(htmlToXhtml(html));
+  return sanitizeHTMLForRendering(html);
 }
 
 /**
@@ -15862,6 +15871,8 @@ if (typeof module !== "undefined" && module.exports) {
     selectItemInLibrary,
     buildHighlightedPassage,
     sanitizeHTML,
+    sanitizeHTMLForRendering,
+    htmlToXhtml,
     isSafeUrl,
     isSafeLinkUrl,
     sanitizeMermaidSvg,

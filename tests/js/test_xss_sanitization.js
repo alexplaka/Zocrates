@@ -262,6 +262,26 @@ async function runTests() {
     assert.ok(cleanSvg.includes("Input Node"), "Must preserve node text content");
     assert.ok(cleanSvg.includes("viewBox=\"0 0 100 100\""), "Must preserve viewBox");
   });
+
+  // 5. Sanitization boundary parity (sanitizeHTMLForRendering)
+  test("sanitizeHTMLForRendering: produces identical output to sanitizeHTML(htmlToXhtml(html)) composition", () => {
+    const samples = [
+      "<p>Hello <strong>world</strong></p>",
+      "<script>alert(1)</script><p>safe</p>",
+      "<a href=\"javascript:alert(1)\">bad link</a>",
+      "<img src=\"https://example.com/f.png\" onerror=\"alert(1)\">",
+      "<p>Text with <b>bold</b> and <code>code</code> below</p>",
+      ""
+    ];
+    for (const html of samples) {
+      const expected = sidebar.sanitizeHTML(sidebar.htmlToXhtml(html));
+      const actual = sidebar.sanitizeHTMLForRendering(html);
+      assert.strictEqual(actual, expected, "sanitizeHTMLForRendering must match the raw composition");
+    }
+    // Non-string inputs stay in parity with the raw composition too
+    assert.strictEqual(sidebar.sanitizeHTMLForRendering(null), sidebar.sanitizeHTML(sidebar.htmlToXhtml(null)));
+    assert.strictEqual(sidebar.sanitizeHTMLForRendering(undefined), sidebar.sanitizeHTML(sidebar.htmlToXhtml(undefined)));
+  });
 }
 
 module.exports = runTests;

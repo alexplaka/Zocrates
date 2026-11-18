@@ -1,0 +1,16 @@
+# Zocrates CodeQL configuration.
+#
+# Merged with code scanning default setup via the `github-codeql-config-file`
+# repository property. Adds the sanitizer-aware DOM XSS query pack stored in
+# this repository and excludes the stock query it replaces (preventing
+# duplicate alerts).
+
+name: "zocrates-codeql-config"
+
+queries:
+  - name: "Zocrates sanitizer-aware DOM XSS"
+    uses: ./codeql/zocrates-queries
+
+query-filters:
+  - exclude:
+      id: js/xss-through-dom
