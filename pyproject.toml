@@ -21,7 +21,6 @@ dependencies = [
     "transformers>=4.57.0",
     "torch>=2.0.0",
     "torchvision>=0.20.0",
-    "peft>=0.15.2",
     "platformdirs>=4.0.0",
     "filelock>=3.0.0",
     "pypdf",

@@ -10,10 +10,9 @@ from zocrates.rag.embeddings import LocalEmbedder, OpenRouterEmbedder, OpenRoute
 from zocrates.rag.hardware import _detect_best_device
 
 
-@patch("zocrates.rag.hardware.validate_model_compatibility")
 @patch("transformers.AutoModel.from_pretrained")
 @patch("torch.device")
-def test_local_embedder_mock(mock_device, mock_from_pretrained, mock_validate):
+def test_local_embedder_mock(mock_device, mock_from_pretrained):
     """Verify LocalEmbedder loads the Jina model and returns correctly shaped vectors.
 
     Mocks transformers and torch to avoid downloading real model weights.
@@ -23,7 +22,6 @@ def test_local_embedder_mock(mock_device, mock_from_pretrained, mock_validate):
     import zocrates.rag.embeddings as emb_module
     emb_module._SHARED_LOCAL_MODEL = None
 
-    mock_validate.return_value = (True, "Success")
     # Setup mock model
     mock_model = MagicMock()
     mock_model.config.hidden_size = 768
