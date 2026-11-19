@@ -19,7 +19,29 @@ Evidence for the bump safety: the resolver upgraded exactly these four packages 
 
 The `sentence-transformers` dev dependency was removed outright (its only consumers were untracked experiment scripts); this also eliminated a version-conflict anchor against its own critical advisory (GHSA-jhr6-gm9c-rqjv).
 
-## 2. Accepted with mitigation — chromadb (2 findings, pending upstream fix)
+## 2. High-severity wave disposition
+
+Of 84 high-severity findings: 36 were already resolved by the pillow/anyio/pyjwt/authlib bumps above, and 30 more by a dedicated bump of the two low-risk direct dependencies — **pypdf 6.15.0 → 6.21.4** (18 findings, all DoS-class parser issues; constrained `<7` to stay within the 6.x line; our usage surface is `PdfReader` / `reader.pages` / `page.images` only) and **aiohttp 3.14.1 → 3.14.5** (+ `yarl` as its pinned transport requirement; 12 findings covering WebSocket-queue bypass, unbounded buffering, multipart size bypass, event-loop stalls, C-parser OOB read). Resolver-verified: exactly those three packages moved.
+
+The remainder is dispositioned as follows:
+
+### 2a. Deferred by decision — transitive-only packages (12 findings)
+
+`cryptography` (Bleichenbacher PKCS#7 oracle), `oauthlib` ×2, `pyasn1` ×4, `urllib3` ×2, `soupsieve` ×2, `joserfc` — all are **transitive dependencies with zero direct imports** in our code, so an upgrade would churn the lock purely to silence alerts whose vulnerable paths we do not exercise directly. Per maintainers' preference, transitive pins are left alone and revisited opportunistically (when a direct parent dependency is bumped anyway, or when one of these appears in a critical advisory).
+
+### 2b. Accepted with mitigation pending upstream readiness — transformers (4 findings)
+
+Findings #3/#4/#12 (patched 5.3.0/5.5.0/5.10.0) and #41 (**no patched version**). Dry-run upgrade analysis (transformers 4.57.6 → 5.10.0) established:
+
+- **No dynamic-code exposure matching any of the four advisories.** #12 is not applicable (zero `save_pretrained` / chat-template usage); #41's attack path (custom generation code downloaded before trust consent) requires `pipeline()` / generation-config loading — never used. The one `trust_remote_code=True` call (`zocrates/rag/embeddings.py::LocalEmbedder`) targets a **hardcoded, non-configurable** model id, so no user-controlled value can steer the loaded repository — an upstream supply-chain trust decision, not an input-driven vulnerability.
+- **A drop-in upgrade is blocked downstream of our code**: the Jina model's locally cached remote code imports transformers-5.0-removed internals; a safe upgrade requires verifying upstream Jina 5.x readiness and a live model-load smoke test after cache purge. Deferred until that upstream compatibility is confirmed; then upgrade directly to ≥5.10.0 in one step.
+- Hygiene noted (not actioned): `hardware.py::validate_model_compatibility` is dead code containing an unreachable `trust_remote_code` sink; `peft` is an unused direct dependency.
+
+### 2c. Deferred by decision — litellm (1) and filelock (1)
+
+Both are direct dependencies whose fixes require major/minor-range jumps (`litellm` 1.85.7 → 1.95.0 spans ten minor releases of a wide-surface API; `filelock` 3 → 4 is a major bump of the library underpinning the config file-locking layer). Deferred pending a dedicated compat-verification pass with the full suite.
+
+## 3. Accepted with mitigation — chromadb (2 findings, pending upstream fix)
 
 **Findings**: GHSA-f4j7-r4q5-qw2c (CVE-2026-45829, pre-authentication code injection) and GHSA-36p7-vc44-83pf (code injection). Installed version 1.5.9 is the **latest release on PyPI — no patched version exists**, so no manifest change can close these alerts.
 
@@ -32,3 +54,16 @@ The `sentence-transformers` dev dependency was removed outright (its only consum
 - Even in the hypothetical worst case, exploitation would require local process access — at which point the attacker already has the user's full privileges.
 
 **Revisit when**: chromadb releases a version that patches both advisories — then run `uv lock --upgrade-package chromadb` and let Dependabot's rescan close both alerts. If Zocrates ever adopts chroma's server mode (`HttpClient` / `chroma run`), the pre-auth HTTP surface becomes real and the upgrade becomes mandatory, not optional.
+
+---
+
+## 4. Summary ledger
+
+| Disposition | Findings |
+|---|---|
+| Remediated via dependency bumps | 9 critical + 30 high (pypdf, aiohttp) + 36 high auto-resolved by the critical-wave bumps |
+| Removed outright | sentence-transformers (dev dependency, unused consumers) |
+| Accepted with mitigation, pending upstream fix | chromadb ×2 (critical) — embedded-only deployment |
+| Accepted with mitigation, pending upstream 5.x readiness | transformers ×4 (high) — hardcoded model id, no matching exposure |
+| Deferred by decision (transitive-only, no direct usage) | cryptography, oauthlib ×2, pyasn1 ×4, urllib3 ×2, soupsieve ×2, joserfc (12 high) |
+| Deferred by decision (compat-verification pass needed) | litellm, filelock (2 high) |
