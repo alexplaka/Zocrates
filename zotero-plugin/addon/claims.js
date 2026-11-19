@@ -1311,9 +1311,12 @@
 
     items.forEach(it => {
       const idx = `#${it._originalIndex}`;
-      const claim = String(it.claim || "").replace(/\|/g, "\\|").replace(/\n/g, " ").trim();
-      const source = formatSourceAuthorYear(it).replace(/\|/g, "\\|");
-      const section = String(it.section || "").replace(/\|/g, "\\|");
+      // Escape backslashes FIRST: a literal "\\" in the input would otherwise be
+      // indistinguishable from the escape we add for "|" (e.g. a claim ending in
+      // "\\" before a pipe would corrupt the exported Markdown table cell).
+      const claim = String(it.claim || "").replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/\n/g, " ").trim();
+      const source = formatSourceAuthorYear(it).replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
+      const section = String(it.section || "").replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
       const prob = typeof it.support_probability === "number" ? it.support_probability.toFixed(3) : "N/A";
       const status = it.verdict === "KEPT" ? "✅ Verified" : (it.verdict === "DEMOTED" ? "❌ Rejected" : "⚠️ Unverified");
       lines.push(`| ${idx} | ${claim} | ${source} | ${section} | ${prob} | ${status} |`);

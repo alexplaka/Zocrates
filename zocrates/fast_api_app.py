@@ -984,6 +984,9 @@ async def register(request: RegisterRequest) -> dict:
     Returns:
         Dict with keys ``status``, ``message``, and ``data_directory``.
     """
+    # Accepting a user-chosen Zotero data directory IS this endpoint's feature;
+    # the py/path-injection alert here is reviewed and intentionally left open:
+    # docs/architecture/codeql-accepted-findings.md §2a.
     path = Path(request.zotero_data_dir).expanduser().resolve()
     if not path.exists():
         raise HTTPException(
@@ -1202,6 +1205,10 @@ async def test_converter_connection(request: ConverterTestRequest) -> dict:
                     "message": f"Datalab SDK initialized with provided key (network probe notice: {err_str})",
                 }
         except Exception as e:
+            # Exact error text is deliberate diagnostics UX for the user testing
+            # their own key; the py/stack-trace-exposure alerts on this handler are
+            # reviewed and intentionally left open:
+            # docs/architecture/codeql-accepted-findings.md §3.
             err_str = str(e)
             err_lower = err_str.lower()
             if (
@@ -4461,6 +4468,8 @@ async def test_openrouter_key(request: OpenRouterKeyTestRequest | None = None) -
                     "message": f"OpenRouter API check failed: HTTP {resp.status_code} - {resp.text[:200]}",
                 }
     except Exception as exc:
+        # Reviewed-and-accepted py/stack-trace-exposure finding (diagnostics UX):
+        # docs/architecture/codeql-accepted-findings.md §3.
         return {
             "status": "error",
             "message": f"Failed to connect to OpenRouter: {exc}",
@@ -5911,6 +5920,10 @@ def mcp_search(request: MCPSearchRequest) -> dict[str, Any]:
         exclude_chunk_ids=request.exclude_chunk_ids,
     )
     if res.get("status") == "error":
+        # Forwarded toolkit error messages (incl. exception-derived ones) feed
+        # agent recovery and MCP clients; the py/stack-trace-exposure alerts here
+        # are reviewed and intentionally left open:
+        # docs/architecture/codeql-accepted-findings.md §3.
         msg = res.get("message", "Search failed.")
         if "invalid" in msg.lower():
             raise HTTPException(status_code=400, detail=msg)
@@ -5932,6 +5945,10 @@ def mcp_get_toc(item_key: str) -> dict[str, Any]:
 
     res = get_document_toc_core(item_key=item_key)
     if res.get("status") == "error":
+        # Forwarded toolkit error messages (incl. exception-derived ones) feed
+        # agent recovery and MCP clients; the py/stack-trace-exposure alerts here
+        # are reviewed and intentionally left open:
+        # docs/architecture/codeql-accepted-findings.md §3.
         msg = res.get("message", "Failed to retrieve table of contents.")
         lower_msg = msg.lower()
         if "invalid" in lower_msg:
@@ -5964,6 +5981,10 @@ def mcp_read_document(
 
     res = read_document_core(item_key=item_key, asset_id=req.asset_id, page=req.page)
     if res.get("status") == "error":
+        # Forwarded toolkit error messages (incl. exception-derived ones) feed
+        # agent recovery and MCP clients; the py/stack-trace-exposure alerts here
+        # are reviewed and intentionally left open:
+        # docs/architecture/codeql-accepted-findings.md §3.
         msg = res.get("message", "")
         if not msg and res.get("unresolved_asset_ids"):
             msg = f"Asset IDs {res.get('unresolved_asset_ids')} not found in document {item_key}."
@@ -6004,6 +6025,10 @@ def mcp_get_relations(
     clamped_ceiling = min(max(1, ceiling), 50)
     res = get_related_items_core(item_key=item_key, ceiling=clamped_ceiling)
     if res.get("status") == "error":
+        # Forwarded toolkit error messages (incl. exception-derived ones) feed
+        # agent recovery and MCP clients; the py/stack-trace-exposure alerts here
+        # are reviewed and intentionally left open:
+        # docs/architecture/codeql-accepted-findings.md §3.
         msg = res.get("message", "Failed to retrieve related items.")
         lower_msg = msg.lower()
         if "invalid" in lower_msg:
@@ -6190,6 +6215,10 @@ async def discover_prepare_batch(req: DiscoverPrepareBatchRequest) -> dict[str, 
 def discover_cleanup_batch(req: DiscoverCleanupBatchRequest) -> dict[str, str]:
     """Clean up temporary staging directory for a completed or aborted discovery import batch."""
     token = req.batch_token.strip() if req.batch_token else ""
+    # The allowlist regex is the primary traversal defense (it excludes "/", "\"
+    # and ".", so ".." can never match); the containment check below is redundant
+    # defense. The py/path-injection alerts here are reviewed and intentionally
+    # left open: docs/architecture/codeql-accepted-findings.md §2b.
     if not token or not re.match(r"^[a-zA-Z0-9_\-]+$", token):
         raise HTTPException(status_code=400, detail="Invalid batch token format")
 
@@ -6250,6 +6279,8 @@ async def test_openalex(request: OpenAlexTestRequest | None = None) -> dict[str,
                     "message": f"OpenAlex API check failed: HTTP {resp.status_code} - {resp.text[:200]}",
                 }
     except Exception as exc:
+        # Reviewed-and-accepted py/stack-trace-exposure finding (diagnostics UX):
+        # docs/architecture/codeql-accepted-findings.md §3.
         return {
             "status": "error",
             "message": f"Connection error: {exc}",

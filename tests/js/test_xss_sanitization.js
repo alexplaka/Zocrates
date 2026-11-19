@@ -67,7 +67,7 @@ async function runTests() {
     const clean = sidebar.sanitizeHTML(input);
     assert.ok(!clean.includes("<script"), "Must not contain <script");
     assert.ok(!clean.includes("alert(1)"), "Must not contain script body");
-    assert.ok(!clean.includes("evil.com"), "Must not contain script src");
+    assert.ok(!/src\s*=/i.test(clean), "Must not contain script src");
     assert.ok(clean.includes("Safe text"), "Must preserve safe sibling text");
   });
 

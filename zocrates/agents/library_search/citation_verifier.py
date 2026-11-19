@@ -87,6 +87,17 @@ _ABBREVIATION_RE = re.compile(
 )
 
 # Author-only fragment regex to detect mid-sentence author citations needing forward extension
+# NOTE: This pattern is intentionally kept in its original form. The
+# separator alternation shares whitespace runs between adjacent separators
+# (e.g. ", " + " et al" vs "," + " et al"), so the match set depends on
+# partial backtracking that atomic/possessive rewrites provably change —
+# differential testing showed realistic inputs like "Smith, et al" flipping
+# from match to no-match. The four CodeQL py/redos alerts on this pattern
+# are intentionally left open as reviewed formal-only findings: no
+# measurable super-linear behavior on any supported CPython under the
+# detector's own pumping inputs, and the span passed to .match() is bounded
+# by MAX_CLAIM_CHARS in _find_backward_claim_boundary(). Revisit before
+# reusing this pattern on unbounded input.
 _AUTHOR_ONLY_RE = re.compile(
     r"^(?:according to|as (?:shown|noted|described|stated|reported) by|in)?\s*"
     r"(?:[A-Z][a-zA-Z\-\']+(?:,\s*|\s+and\s+|\s*&\s*|\s+et\s+al\.?\s*)*)"

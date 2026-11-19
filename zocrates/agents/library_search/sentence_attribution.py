@@ -27,10 +27,19 @@ SENTENCE_ATTRIBUTION_LOCAL_TIMEOUT_SEC = 90.0
 
 _TABLE_ROW_RE = re.compile(r"^\s*\|.*\|\s*$")
 _TABLE_SEP_RE = re.compile(r"^\s*\|(?:\s*:?-+:?\s*\|)+\s*$")
-_HEADING_RE = re.compile(r"^\s*#{1,6}\s+.*$")
+# Possessive \s++: giving back whitespace can never let ".*$" succeed where
+# the greedy run failed (".*" cannot match "\n" and "$" anchoring is
+# unchanged), so matches are identical but the \s+/.* space-run partition
+# ambiguity is gone — no polynomial backtracking on long headings (CWE-1333).
+_HEADING_RE = re.compile(r"^\s*#{1,6}\s++.*$")
 _DISPLAY_MATH_RE = re.compile(r"\$\$[\s\S]+?\$\$")
 _CODE_BLOCK_RE = re.compile(r"```[\s\S]*?```")
-_SENTENCE_BOUNDARY_RE = re.compile(r'([.?!]+)(\s+)(?=[A-Z0-9"\'\(\[])')
+# Possessive quantifiers: punctuation is disjoint from whitespace and the
+# lookahead set is disjoint from whitespace, so giving back either run can
+# never change the match. Group indices (1 = punctuation, 2 = whitespace)
+# and match extents are preserved; the quadratic rescan on long punctuation
+# runs (e.g. "!!!!!") is eliminated (CWE-1333).
+_SENTENCE_BOUNDARY_RE = re.compile(r'([.?!]++)(\s++)(?=[A-Z0-9"\'\(\[])')
 
 ATTRIBUTION_SYSTEM_PROMPT = """You are an expert academic fact-checker. Your task is to identify which numbered sentence(s), table row(s), or equation(s) in a source passage directly support an extracted scientific claim.
 
