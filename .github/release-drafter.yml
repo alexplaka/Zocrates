@@ -25,6 +25,7 @@ categories:
       - 'ci'
       - 'maintenance'
       - 'dependencies'
+      - 'security'
 
 version-resolver:
   major:
