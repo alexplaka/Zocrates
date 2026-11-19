@@ -1000,7 +1000,8 @@ async def test_verify_citations_support_telemetry_schema_and_verdicts(sample_ran
     assert telemetry.get("schema_version") == 1
     assert telemetry.get("provider") == "openrouter"
     assert telemetry.get("model") == "typesafe/jev-1.13"
-    assert "https://openrouter.ai" in telemetry.get("endpoint", "")
+    # Exact endpoint: openrouter provider always uses the decisions endpoint.
+    assert telemetry.get("endpoint") == "https://openrouter.ai/api/alpha/decisions"
     assert telemetry.get("threshold") == 0.60
     assert telemetry.get("execution_mode") == "thread_pool"
     assert telemetry.get("turn_budget_sec") == 15.0
