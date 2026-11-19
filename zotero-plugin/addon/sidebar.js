@@ -592,6 +592,15 @@ function isSafeUrl(url) {
 }
 
 /**
+ * Canonical sanitization boundary for rendered message content: converts HTML to
+ * XHTML (namespace fixing for KaTeX/SVG) and then applies the allowlist HTML
+ * sanitizer. A named sanitization boundary (see codeql/zocrates-queries).
+ */
+function sanitizeHTMLForRendering(html) {
+  return sanitizeHTML(htmlToXhtml(html));
+}
+
+/**
  * Robust, allowlist-based DOM sanitization using DOMParser in an inert text/html document.
  * Discards dangerous tags (script, iframe, form, etc.) with children.
  * Unwraps safe children of non-allowed tags.
@@ -6088,7 +6097,7 @@ function formatMarkdown(text, citationPlaceholders = []) {
   }
 
   // 6. Sanitize and convert to valid XHTML
-  return sanitizeHTML(htmlToXhtml(html));
+  return sanitizeHTMLForRendering(html);
 }
 
 function formatMessageContent(text, metadata = null, isUser = false) {
@@ -6968,7 +6977,7 @@ function formatMarkdownForNote(text) {
     html = html.replace(item.placeholder, () => noteMathHtml);
   }
 
-  return sanitizeHTML(htmlToXhtml(html));
+  return sanitizeHTMLForRendering(html);
 }
 
 /**
@@ -13838,6 +13847,21 @@ async function loadSessions() {
   return _loadSessionsPromise;
 }
 
+// Cryptographically secure session identifier (avoids Math.random, CWE-338).
+// Preserves the "session_" prefix that marks client-only, not-yet-persisted sessions.
+function generateSecureSessionId() {
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return "session_" + crypto.randomUUID();
+    }
+  } catch (e) {}
+  // Fallback: CSPRNG-derived base36 (getRandomValues is always available in Gecko/Node).
+  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  let suffix = "";
+  for (const b of bytes) suffix += b.toString(36).padStart(2, "0");
+  return "session_" + suffix.slice(0, 12);
+}
+
 async function createNewSession(title = "New Chat") {
   clearGhostSuggestion();
   cleanupOnboardingResources();
@@ -13866,7 +13890,7 @@ async function createNewSession(title = "New Chat") {
   }
 
   if (!newSession) {
-    const id = "session_" + Math.random().toString(36).substring(2, 11);
+    const id = generateSecureSessionId();
     const nowIso = new Date().toISOString();
     newSession = {
       id: id,
@@ -15847,6 +15871,8 @@ if (typeof module !== "undefined" && module.exports) {
     selectItemInLibrary,
     buildHighlightedPassage,
     sanitizeHTML,
+    sanitizeHTMLForRendering,
+    htmlToXhtml,
     isSafeUrl,
     isSafeLinkUrl,
     sanitizeMermaidSvg,
