@@ -4419,6 +4419,10 @@ function mapItemToChipData(item) {
     if (item.isNote && item.isNote()) {
       type = "note";
       const rawNote = item.getNote?.() || item.getField?.('note') || "";
+      // Tag-stripped note text feeds only text-safe DOM sinks (textContent / .title
+      // attribute); the js/incomplete-multi-character-sanitization alert here is
+      // reviewed and intentionally left open:
+      // docs/architecture/codeql-accepted-findings.md §4.
       const cleanText = rawNote.replace(/<[^>]*>/g, "").trim();
       if (cleanText) {
         title = cleanText.split("\n")[0].substring(0, 50);

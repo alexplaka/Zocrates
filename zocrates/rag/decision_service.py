@@ -411,6 +411,10 @@ def install_laya_tool() -> dict[str, Any]:
             timeout=300.0,
         )
         if proc.returncode != 0:
+            # Surfacing install/stderr detail is deliberate diagnostics UX for the
+            # user fixing their own install; the py/stack-trace-exposure alerts on
+            # this path are reviewed and intentionally left open:
+            # docs/architecture/codeql-accepted-findings.md §3.
             err_msg = proc.stderr.strip() or proc.stdout.strip() or f"Process exited with code {proc.returncode}"
             logger.error("Failed to install Laya uv tool: %s", err_msg)
             return {
