@@ -43,7 +43,6 @@ dev = [
     "pytest-asyncio>=1.0.0,<2.0.0",
     "pytest-cov>=7.1.0,<8.0.0",
     "nest-asyncio>=1.6.0,<2.0.0",
-    "sentence-transformers>=3.0.0,<4.0.0",
     "diff-cover>=9.0.0,<10.0.0",
 ]
 docs = [
