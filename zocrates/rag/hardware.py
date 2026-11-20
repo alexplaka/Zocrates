@@ -577,66 +577,6 @@ def get_docling_hardware_assessment() -> dict[str, Any]:
     }
 
 
-def validate_model_compatibility(model_name: str, timeout_seconds: int = 100) -> tuple[bool, str]:
-    """
-    Run an isolated subprocess test to load and encode a test string with the model.
-
-    Spawns a fresh Python process to avoid polluting the caller's GPU memory
-    state and to enforce a wall-clock timeout.
-
-    Args:
-        model_name: Hugging Face model identifier (e.g.
-            ``"jinaai/jina-embeddings-v5-text-nano"``).
-        timeout_seconds: Maximum seconds to wait for the subprocess.
-
-    Returns:
-        A 2-tuple of ``(success, error_message)``. On success,
-        ``error_message`` is ``"Success"``.
-    """
-    cmd = [
-        sys.executable,
-        "-c",
-        f"""
-import sys
-try:
-    from transformers import AutoModel
-    import torch
-    model = AutoModel.from_pretrained("{model_name}", trust_remote_code=True)
-    if hasattr(model, "encode"):
-        try:
-            emb = model.encode(["test"], task="retrieval")
-        except TypeError:
-            emb = model.encode(["test"])
-    else:
-        from transformers import AutoTokenizer
-        tok = AutoTokenizer.from_pretrained("{model_name}", trust_remote_code=True)
-        inp = tok("test", return_tensors="pt")
-        with torch.no_grad():
-            out = model(**inp)
-    sys.exit(0)
-except Exception as e:
-    print(str(e))
-    sys.exit(1)
-""",
-    ]
-
-    try:
-        res = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout_seconds,
-        )
-        if res.returncode == 0:
-            return True, "Success"
-        err = res.stdout.strip() or res.stderr.strip() or "Unknown loading failure"
-        return False, err
-    except subprocess.TimeoutExpired:
-        return False, f"Model loading timed out after {timeout_seconds}s"
-    except Exception as exc:
-        return False, str(exc)
-
-
 def _is_cuda_functional() -> bool:
     """Check in an isolated subprocess whether CUDA hardware execution works on this system.
 

@@ -21,7 +21,6 @@ dependencies = [
     "transformers>=4.57.0",
     "torch>=2.0.0",
     "torchvision>=0.20.0",
-    "peft>=0.15.2",
     "platformdirs>=4.0.0",
     "filelock>=3.0.0",
     "pypdf",
@@ -43,7 +42,6 @@ dev = [
     "pytest-asyncio>=1.0.0,<2.0.0",
     "pytest-cov>=7.1.0,<8.0.0",
     "nest-asyncio>=1.6.0,<2.0.0",
-    "sentence-transformers>=3.0.0,<4.0.0",
     "diff-cover>=9.0.0,<10.0.0",
 ]
 docs = [
