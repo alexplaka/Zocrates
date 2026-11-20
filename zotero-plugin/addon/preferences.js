@@ -238,6 +238,16 @@ function initZocratesPreferences() {
   let savedLlmProvider = "openrouter_llm";
   let savedLlmBaseUrl = "";
   let savedLlmModel = "";
+  // Base URLs the backend substitutes when llm_base_url is empty (see the
+  // `raw_url or ...` resolution in zocrates/fast_api_app.py and
+  // zocrates/llm.py). An empty saved value therefore means "use the provider
+  // default", so an input displaying exactly that default is equivalent to the
+  // saved value. Only the exact string is equivalent: no URL normalization.
+  const PROVIDER_DEFAULT_BASE_URLS = {
+    ollama: "http://localhost:11434",
+    vllm: "http://localhost:8000/v1",
+    openai_compatible: "http://localhost:8000/v1",
+  };
   let savedEmbeddingMode = "local";
   let savedEmbeddingModel = "jinaai/jina-embeddings-v5-text-nano";
   // The user's last cloud-mode embedding selection (possibly unapplied). The local
@@ -430,14 +440,18 @@ function initZocratesPreferences() {
 
     const providerMatches = (currentProvider === savedLlmProvider);
     const modelMatches = modelsMatch(currentModel, savedLlmModel);
-    const baseUrlMatches = !requiresBaseUrl || (currentBaseUrl === savedLlmBaseUrl);
+    const baseUrlMatches = !requiresBaseUrl
+      || (currentBaseUrl === savedLlmBaseUrl)
+      || (!savedLlmBaseUrl && currentBaseUrl === PROVIDER_DEFAULT_BASE_URLS[currentProvider]);
 
     const isDirty = !providerMatches || !modelMatches || !baseUrlMatches;
 
     setFieldDirtyDot("llm-provider-select", !providerMatches);
     setFieldDirtyDot("llm-model-select", !modelMatches);
     // baseUrlMatches is already true for providers that ignore the base URL, so
-    // the dot never appears on the hidden input.
+    // the dot never appears on the hidden input. It is also true when the saved
+    // value is empty ("provider default") and the input displays exactly that
+    // default, which is what updateLlmUiVisibility auto-fills.
     setFieldDirtyDot("llm-base-url-input", !baseUrlMatches);
 
     setDrawerDirtyDot(llmDirtyDot, isDirty);
