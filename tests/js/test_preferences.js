@@ -2801,6 +2801,56 @@ async function runTests() {
       "A cloud-mode re-render preserves the current selection"
     );
   });
+
+  // Test 48: the synchronous load path must materialize the pref-saved cloud
+  // embedding model into the select. The XHTML ships only the local placeholder
+  // option, so without materialization the initial updateEmbeddingDirtyState
+  // compares the placeholder against the saved model and flashes the card as
+  // dirty until the async backend config arrives (persistent when offline).
+  await test("loadPreferences: pref-saved cloud embedding model is materialized so the card opens clean", () => {
+    resetSpies();
+
+    const previousPrefs = {
+      mode: env.zotero.Prefs.get("extensions.zocrates.embeddingMode", true),
+      model: env.zotero.Prefs.get("extensions.zocrates.embeddingModel", true),
+    };
+    env.zotero.Prefs.set("extensions.zocrates.embeddingMode", "cloud", true);
+    env.zotero.Prefs.set("extensions.zocrates.embeddingModel", "openrouter/baai/bge-m3", true);
+
+    try {
+      api.loadPreferences();
+
+      const embeddingModelSelect = env.document.getElementById("embedding-model-select");
+      const embeddingApplyBtn = env.document.getElementById("embedding-apply-btn");
+      const embeddingWarning = env.document.getElementById("embedding-unsaved-warning");
+      const modelDot = env.document.getElementById("embedding-model-select-dirty-dot");
+
+      assert.strictEqual(
+        embeddingModelSelect.value,
+        "openrouter/baai/bge-m3",
+        "The pref-saved cloud model must appear in the select before the backend responds"
+      );
+      assert.strictEqual(
+        embeddingApplyBtn.disabled,
+        true,
+        "The Embeddings card must not open with Apply enabled (dirty flash)"
+      );
+      assert.strictEqual(
+        embeddingWarning.style.display,
+        "none",
+        "The Embeddings card must not open with the unsaved warning visible"
+      );
+      assert.strictEqual(
+        modelDot.style.display,
+        "none",
+        "The embedding model field dot must be hidden on open"
+      );
+    } finally {
+      env.zotero.Prefs.set("extensions.zocrates.embeddingMode", previousPrefs.mode, true);
+      env.zotero.Prefs.set("extensions.zocrates.embeddingModel", previousPrefs.model, true);
+      api.loadPreferences();
+    }
+  });
   } finally {
     global.fetch = origFetch;
     global.IOUtils = origIOUtils;

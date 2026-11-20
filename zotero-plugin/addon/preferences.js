@@ -932,6 +932,15 @@ function initZocratesPreferences() {
         savedEmbeddingMode = Zotero.Prefs.get("extensions.zocrates.embeddingMode", true) || "local";
         if (modeSelect) modeSelect.value = savedEmbeddingMode;
         savedEmbeddingModel = Zotero.Prefs.get("extensions.zocrates.embeddingModel", true) || "jinaai/jina-embeddings-v5-text-nano";
+        if (savedEmbeddingMode === "cloud" && embeddingModelSelect) {
+          // The cloud model select is populated asynchronously (catalog fetch), and
+          // its XHTML ships only the local placeholder option. Materialize the
+          // pref-saved model here so the initial dirty evaluation compares like
+          // with like; the async catalog fetch later rebuilds the option list and
+          // re-selects the same model (matched, or appended if the catalog does
+          // not list it).
+          materializeConfiguredModelOption("embedding", savedEmbeddingModel);
+        }
 
         let rawConv = Zotero.Prefs.get("extensions.zocrates.documentConverter", true) || "markitdown";
         if (rawConv === "docling") rawConv = "docling_local";
