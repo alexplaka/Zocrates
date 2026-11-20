@@ -41,7 +41,11 @@ Findings #3/#4/#12 (patched 5.3.0/5.5.0/5.10.0) and #41 (**no patched version**)
 
 Both are direct dependencies whose fixes require major/minor-range jumps (`litellm` 1.85.7 → 1.95.0 spans ten minor releases of a wide-surface API; `filelock` 3 → 4 is a major bump of the library underpinning the config file-locking layer). Deferred pending a dedicated compat-verification pass with the full suite.
 
-## 3. Accepted with mitigation — chromadb (2 findings, pending upstream fix)
+## 3. Moderate-severity wave disposition
+
+Of 66 moderate findings, 44 auto-resolve from the bumps already described (pypdf ×10, Pillow ×14, aiohttp ×7, PyJWT ×8, authlib ×4, anyio ×1). The remaining 22 are all covered by the deferrals above and add no new packages except four transitive-only consumers of existing deferred families: `soupsieve` ×2, `oauthlib` ×2, `urllib3`, `joserfc` (transitive-only set), plus `opentelemetry-api` ×2 (via chromadb / google-adk / otel exporters), `mail-parser` ×2 (via docling-slim), `multidict` (via aiohttp/yarl), and `accelerate` (via docling-slim) — all zero-direct-import transitives, left alone per the same decision. `filelock` ×6, `transformers`, and `litellm` moderates fall under their existing deferral dispositions.
+
+## 4. Accepted with mitigation — chromadb (2 findings, pending upstream fix)
 
 **Findings**: GHSA-f4j7-r4q5-qw2c (CVE-2026-45829, pre-authentication code injection) and GHSA-36p7-vc44-83pf (code injection). Installed version 1.5.9 is the **latest release on PyPI — no patched version exists**, so no manifest change can close these alerts.
 
@@ -57,13 +61,13 @@ Both are direct dependencies whose fixes require major/minor-range jumps (`litel
 
 ---
 
-## 4. Summary ledger
+## 5. Summary ledger
 
 | Disposition | Findings |
 |---|---|
-| Remediated via dependency bumps | 9 critical + 30 high (pypdf, aiohttp) + 36 high auto-resolved by the critical-wave bumps |
+| Remediated via dependency bumps | 9 critical + 30 high + 66 moderate (pypdf, aiohttp) + 36 high + 44 moderate auto-resolved by the same bumps |
 | Removed outright | sentence-transformers (dev dependency, unused consumers) |
 | Accepted with mitigation, pending upstream fix | chromadb ×2 (critical) — embedded-only deployment |
 | Accepted with mitigation, pending upstream 5.x readiness | transformers ×4 (high) — hardcoded model id, no matching exposure |
-| Deferred by decision (transitive-only, no direct usage) | cryptography, oauthlib ×2, pyasn1 ×4, urllib3 ×2, soupsieve ×2, joserfc (12 high) |
-| Deferred by decision (compat-verification pass needed) | litellm, filelock (2 high) |
+| Deferred by decision (transitive-only, no direct usage) | cryptography, oauthlib ×2, pyasn1 ×4, urllib3 ×2, soupsieve ×2, joserfc (12 high) + soupsieve/oauthlib/urllib3/joserfc/opentelemetry-api ×2/mail-parser ×2/multidict/accelerate (18 moderate) |
+| Deferred by decision (compat-verification pass needed) | litellm, filelock (2 high + 7 moderate) |
