@@ -2801,6 +2801,250 @@ async function runTests() {
       "A cloud-mode re-render preserves the current selection"
     );
   });
+
+  // Test 48: the synchronous load path must materialize the pref-saved cloud
+  // embedding model into the select. The XHTML ships only the local placeholder
+  // option, so without materialization the initial updateEmbeddingDirtyState
+  // compares the placeholder against the saved model and flashes the card as
+  // dirty until the async backend config arrives (persistent when offline).
+  await test("loadPreferences: pref-saved cloud embedding model is materialized so the card opens clean", () => {
+    resetSpies();
+
+    const previousPrefs = {
+      mode: env.zotero.Prefs.get("extensions.zocrates.embeddingMode", true),
+      model: env.zotero.Prefs.get("extensions.zocrates.embeddingModel", true),
+    };
+    env.zotero.Prefs.set("extensions.zocrates.embeddingMode", "cloud", true);
+    env.zotero.Prefs.set("extensions.zocrates.embeddingModel", "openrouter/baai/bge-m3", true);
+
+    try {
+      api.loadPreferences();
+
+      const embeddingModelSelect = env.document.getElementById("embedding-model-select");
+      const embeddingApplyBtn = env.document.getElementById("embedding-apply-btn");
+      const embeddingWarning = env.document.getElementById("embedding-unsaved-warning");
+      const modelDot = env.document.getElementById("embedding-model-select-dirty-dot");
+
+      assert.strictEqual(
+        embeddingModelSelect.value,
+        "openrouter/baai/bge-m3",
+        "The pref-saved cloud model must appear in the select before the backend responds"
+      );
+      assert.strictEqual(
+        embeddingApplyBtn.disabled,
+        true,
+        "The Embeddings card must not open with Apply enabled (dirty flash)"
+      );
+      assert.strictEqual(
+        embeddingWarning.style.display,
+        "none",
+        "The Embeddings card must not open with the unsaved warning visible"
+      );
+      assert.strictEqual(
+        modelDot.style.display,
+        "none",
+        "The embedding model field dot must be hidden on open"
+      );
+    } finally {
+      env.zotero.Prefs.set("extensions.zocrates.embeddingMode", previousPrefs.mode, true);
+      env.zotero.Prefs.set("extensions.zocrates.embeddingModel", previousPrefs.model, true);
+      api.loadPreferences();
+    }
+  });
+  // Tests 16 and 17 each construct their own initZocratesPreferences() instance,
+  // and every instance registers its own listeners on the same mock elements, so a
+  // dispatched event runs all of them in registration order. A fresh instance owns
+  // the last listener and therefore the state the assertions below observe; its
+  // initial fetches run against the default fetchHandler (status "ok"), which
+  // fetchLlmConfig ignores, so no saved LLM state is touched before priming.
+  const llmApi = initZocratesPreferences();
+
+  // Seeds the LLM card's saved snapshot through the real backend round trip
+  // (fetchLlmConfig -> GET /config), which is what fills savedLlmProvider /
+  // savedLlmBaseUrl / savedLlmModel when the settings pane opens.
+  async function primeLlmSavedState(config) {
+    fetchHandler = async (url) => {
+      if (String(url).includes("/config")) {
+        return { ok: true, status: 200, json: async () => ({ status: "success", ...config }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ status: "ok" }) };
+    };
+    await llmApi.fetchLlmConfig();
+  }
+
+  // Forces every LLM-card dirty indicator into its "dirty" look so that a
+  // subsequent clean assertion proves updateLlmDirtyState actually re-evaluated
+  // rather than the indicators never having been touched.
+  function forceLlmCardDirty() {
+    const indicators = {
+      applyBtn: env.document.getElementById("llm-apply-btn"),
+      warning: env.document.getElementById("llm-unsaved-warning"),
+      baseUrlDot: env.document.getElementById("llm-base-url-input-dirty-dot"),
+      cardDot: env.document.getElementById("llm-provider-dirty-dot"),
+    };
+    indicators.applyBtn.disabled = false;
+    indicators.applyBtn.removeAttribute("disabled");
+    indicators.warning.style.display = "block";
+    indicators.baseUrlDot.style.display = "inline-block";
+    indicators.cardDot.style.display = "inline-block";
+    return indicators;
+  }
+
+  function assertLlmCardClean(indicators, context) {
+    assert.strictEqual(indicators.applyBtn.disabled, true, `${context}: LLM Apply must be disabled`);
+    assert.strictEqual(indicators.warning.style.display, "none", `${context}: the unsaved warning must be hidden`);
+    assert.strictEqual(indicators.baseUrlDot.style.display, "none", `${context}: the base-URL field dot must be hidden`);
+    assert.strictEqual(indicators.cardDot.style.display, "none", `${context}: the LLM card dot must be hidden`);
+  }
+
+  // Test 49: An empty saved llm_base_url means "use the provider default", so the
+  // default that updateLlmUiVisibility auto-fills into the empty input is
+  // equivalent to it. This is the Ollama-only release install: the backend holds
+  // llm_base_url: "" and resolves http://localhost:11434 (or :8000/v1 for vLLM)
+  // itself, so the card must open clean instead of permanently dirty.
+  await testAsync("updateLlmDirtyState: auto-filled provider default base URL equals an empty saved base URL", async () => {
+    resetSpies();
+
+    const providerSelect = env.document.getElementById("llm-provider-select");
+    const baseUrlInput = env.document.getElementById("llm-base-url-input");
+
+    // Ollama: the empty input is auto-filled with http://localhost:11434.
+    baseUrlInput.value = "";
+    await primeLlmSavedState({ llm_provider: "ollama", llm_base_url: "", llm_model: "llama3.2" });
+    assert.strictEqual(providerSelect.value, "ollama", "The provider select must reflect the saved provider");
+    assert.strictEqual(
+      baseUrlInput.value,
+      "http://localhost:11434",
+      "updateLlmUiVisibility must auto-fill the ollama default into the empty base-URL input"
+    );
+
+    const indicators = forceLlmCardDirty();
+    providerSelect.dispatchEvent("change");
+    assertLlmCardClean(indicators, "ollama with the default base URL auto-filled");
+
+    // vLLM: same equivalence against its own default (http://localhost:8000/v1).
+    baseUrlInput.value = "";
+    await primeLlmSavedState({ llm_provider: "vllm", llm_base_url: "", llm_model: "qwen3:8b" });
+    assert.strictEqual(
+      baseUrlInput.value,
+      "http://localhost:8000/v1",
+      "updateLlmUiVisibility must auto-fill the vllm default into the empty base-URL input"
+    );
+
+    const vllmIndicators = forceLlmCardDirty();
+    providerSelect.dispatchEvent("change");
+    assertLlmCardClean(vllmIndicators, "vllm with the default base URL auto-filled");
+  });
+
+  // Test 50: The provider-default equivalence is exact, not a blanket "any value
+  // matches an empty saved URL". A typed non-default host stays dirty, and
+  // clearing the text is equivalent to the saved empty value again.
+  await testAsync("updateLlmDirtyState: a typed non-default base URL stays dirty against an empty saved value", async () => {
+    resetSpies();
+
+    const providerSelect = env.document.getElementById("llm-provider-select");
+    const baseUrlInput = env.document.getElementById("llm-base-url-input");
+
+    baseUrlInput.value = "";
+    await primeLlmSavedState({ llm_provider: "ollama", llm_base_url: "", llm_model: "llama3.2" });
+    assert.strictEqual(env.document.getElementById("llm-apply-btn").disabled, true, "Baseline must be clean");
+
+    baseUrlInput.value = "http://192.168.1.50:11434";
+    baseUrlInput.dispatchEvent("change");
+
+    const applyBtn = env.document.getElementById("llm-apply-btn");
+    const warning = env.document.getElementById("llm-unsaved-warning");
+    const baseUrlDot = env.document.getElementById("llm-base-url-input-dirty-dot");
+    const cardDot = env.document.getElementById("llm-provider-dirty-dot");
+    assert.strictEqual(applyBtn.disabled, false, "A non-default base URL must enable Apply");
+    assert.strictEqual(warning.style.display, "block", "A non-default base URL must show the unsaved warning");
+    assert.strictEqual(baseUrlDot.style.display, "inline-block", "A non-default base URL must show the field dot");
+    assert.strictEqual(cardDot.style.display, "inline-block", "A non-default base URL must show the card dot");
+
+    // Deleting the text returns to the saved "provider default" state.
+    baseUrlInput.value = "";
+    baseUrlInput.dispatchEvent("change");
+    assertLlmCardClean({ applyBtn, warning, baseUrlDot, cardDot }, "emptied base URL input");
+  });
+
+  // Test 51: The settings-open round trip itself must land clean. The backend
+  // reports llm_base_url: "" for a local-provider install; fetchLlmConfig
+  // auto-fills the effective default through updateLlmUiVisibility and ends with
+  // updateLlmDirtyState, which must not flag the auto-filled default.
+  await testAsync("fetchLlmConfig: empty backend llm_base_url with an Ollama provider opens the LLM card clean", async () => {
+    resetSpies();
+
+    const providerSelect = env.document.getElementById("llm-provider-select");
+    const baseUrlInput = env.document.getElementById("llm-base-url-input");
+
+    // Pre-fix end state: the pane arrived dirty on the LLM card.
+    providerSelect.value = "ollama";
+    baseUrlInput.value = "";
+    const indicators = forceLlmCardDirty();
+
+    await primeLlmSavedState({ llm_provider: "ollama", llm_base_url: "", llm_model: "llama3.2" });
+
+    assert.strictEqual(providerSelect.value, "ollama", "fetchLlmConfig must apply the saved provider");
+    assert.strictEqual(
+      baseUrlInput.value,
+      "http://localhost:11434",
+      "fetchLlmConfig must leave the auto-filled effective default visible to the user"
+    );
+    assert.strictEqual(env.document.getElementById("llm-model-custom-input").value, "llama3.2");
+    assertLlmCardClean(indicators, "after the /config round trip with an empty saved base URL");
+  });
+
+  // Test 52: A non-empty saved base URL keeps the plain equality check. Only the
+  // exact provider-default string is equivalent to an empty saved value, and no
+  // normalization is applied (the backend rstrips its URL; this comparison does
+  // not), so a trailing slash the user can see in the input is a genuine change.
+  await testAsync("updateLlmDirtyState: a non-empty saved base URL matches exactly, with no normalization", async () => {
+    resetSpies();
+
+    const providerSelect = env.document.getElementById("llm-provider-select");
+    const baseUrlInput = env.document.getElementById("llm-base-url-input");
+
+    baseUrlInput.value = "";
+    await primeLlmSavedState({ llm_provider: "ollama", llm_base_url: "http://localhost:11434", llm_model: "llama3.2" });
+    assert.strictEqual(
+      baseUrlInput.value,
+      "http://localhost:11434",
+      "fetchLlmConfig must display the saved non-empty base URL"
+    );
+
+    const indicators = forceLlmCardDirty();
+    providerSelect.dispatchEvent("change");
+    assertLlmCardClean(indicators, "input equal to the non-empty saved base URL");
+
+    // Trailing slash: not normalized away, so it is a visible, real change.
+    baseUrlInput.value = "http://localhost:11434/";
+    baseUrlInput.dispatchEvent("change");
+    assert.strictEqual(indicators.applyBtn.disabled, false, "A trailing slash must enable Apply (no normalization)");
+    assert.strictEqual(indicators.warning.style.display, "block", "A trailing slash must show the unsaved warning");
+    assert.strictEqual(indicators.baseUrlDot.style.display, "inline-block", "A trailing slash must show the field dot");
+
+    // Restoring the exact saved string is clean again.
+    baseUrlInput.value = "http://localhost:11434";
+    baseUrlInput.dispatchEvent("change");
+    assertLlmCardClean(indicators, "input restored to the exact saved base URL");
+
+    // The equivalence clause requires an empty saved value: with a non-empty saved
+    // URL, displaying the provider default is a real difference.
+    baseUrlInput.value = "";
+    await primeLlmSavedState({ llm_provider: "ollama", llm_base_url: "http://192.168.1.50:11434", llm_model: "llama3.2" });
+    baseUrlInput.value = "http://localhost:11434";
+    baseUrlInput.dispatchEvent("change");
+    assert.strictEqual(
+      indicators.applyBtn.disabled,
+      false,
+      "The provider default must not match a different non-empty saved base URL"
+    );
+    assert.strictEqual(
+      indicators.baseUrlDot.style.display,
+      "inline-block",
+      "The base-URL field dot must show for the default against a different saved URL"
+    );
+  });
   } finally {
     global.fetch = origFetch;
     global.IOUtils = origIOUtils;
