@@ -49,7 +49,7 @@ Of 66 moderate findings, 44 auto-resolve from the bumps already described (pypdf
 
 Of 5 low findings, 4 auto-resolve from the existing bumps (aiohttp, pypdf, authlib) and one falls under an existing deferral (filelock ×2). One new transitive-only item: `setuptools` ×1 (Windows-only path escape via `namespace_packages.txt` during legacy wheel installs — `zocrates` never invokes setuptools directly; it enters via the build toolchain). Left alone per the transitive-only decision.
 
-## 5. Accepted with mitigation — chromadb (2 findings, pending upstream fix)
+## 5. Accepted with mitigation — chromadb (4 findings: 2 critical + 2 high, pending upstream fix)
 
 **Findings**: GHSA-f4j7-r4q5-qw2c (CVE-2026-45829, pre-authentication code injection) and GHSA-36p7-vc44-83pf (code injection). Installed version 1.5.9 is the **latest release on PyPI — no patched version exists**, so no manifest change can close these alerts.
 
@@ -61,7 +61,7 @@ Of 5 low findings, 4 auto-resolve from the existing bumps (aiohttp, pypdf, authl
 - The vulnerable path additionally requires the process to download a model repository (`trust_remote_code`); the embedded usage never fetches models.
 - Even in the hypothetical worst case, exploitation would require local process access — at which point the attacker already has the user's full privileges.
 
-**Revisit when**: chromadb releases a version that patches both advisories — then run `uv lock --upgrade-package chromadb` and let Dependabot's rescan close both alerts. If Zocrates ever adopts chroma's server mode (`HttpClient` / `chroma run`), the pre-auth HTTP surface becomes real and the upgrade becomes mandatory, not optional.
+**Revisit when**: chromadb releases a version that patches all four advisories — then run `uv lock --upgrade-package chromadb` and let Dependabot's rescan close all four alerts. If Zocrates ever adopts chroma's server mode (`HttpClient` / `chroma run`), the pre-auth HTTP surface becomes real and the upgrade becomes mandatory, not optional.
 
 ---
 
@@ -71,7 +71,7 @@ Of 5 low findings, 4 auto-resolve from the existing bumps (aiohttp, pypdf, authl
 |---|---|
 | Remediated via dependency bumps | 9 critical + 30 high + 66 moderate (pypdf, aiohttp) + 36 high + 44 moderate + 4 low auto-resolved by the same bumps |
 | Removed outright | sentence-transformers (dev dependency, unused consumers) |
-| Accepted with mitigation, pending upstream fix | chromadb ×2 (critical) — embedded-only deployment |
+| Accepted with mitigation, pending upstream fix | chromadb ×4 (2 critical + 2 high) — embedded-only deployment |
 | Accepted with mitigation, pending upstream 5.x readiness | transformers ×4 (high) — hardcoded model id, no matching exposure |
 | Deferred by decision (transitive-only, no direct usage) | cryptography, oauthlib ×2, pyasn1 ×4, urllib3 ×2, soupsieve ×2, joserfc (12 high) + soupsieve/oauthlib/urllib3/joserfc/opentelemetry-api ×2/mail-parser ×2/multidict/accelerate (18 moderate) + setuptools (1 low) |
 | Deferred by decision (compat-verification pass needed) | litellm, filelock (2 high + 7 moderate) |
