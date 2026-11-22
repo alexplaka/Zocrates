@@ -16,34 +16,17 @@
 
 For researchers, an academic library represents years of careful curation: hundreds or thousands of papers, annotations, snapshots, and personal notes. Interacting with this repository has traditionally been manual—scrolling through folder trees, keyword searching metadata, and manually cross-referencing passages across PDFs.
 
-> **Why "Zocrates"?**  
-> The name **Zocrates** is a portmanteau of **Zotero** and **Socrates**, honoring the classical philosopher renowned for dialectical inquiry and intellectual honesty. Rather than acting as an ungrounded oracle, Zocrates embodies the Socratic method by actively questioning literature, probing research gaps, and demanding verifiable evidence for every claim. It transforms your personal Zotero collection from a passive repository into an inquisitive, rigorous dialogue partner.
-
 **Zocrates transforms your personal Zotero library into an active, verifiable, and deeply integrated research partner.** Operating on your local machine, Zocrates pairs state-of-the-art agentic AI with academic rigor—providing grounded synthesis, instant PDF excerpts, visual chart understanding, literature relationship visualizers, and online discovery.
 
-```
-       Personal Zotero Library
-    (PDFs, Notes, Metadata, Tags)
-                  │
-                  ▼
-         ┌─────────────────┐
-         │    Zocrates     │
-         └────────┬────────┘
-                  │
-   ┌──────────────┼──────────────┐
-   ▼              ▼              ▼
- Mode 1         Mode 2         Mode 3
- Native      Open Markdown   Local MCP
- Zotero        Knowledge      Server for
-Companion       Bundles     Coding Agents
-```
+> **Why "Zocrates"?**  
+> The name **Zocrates** is a portmanteau of **Zotero** and **Socrates**, honoring the classical philosopher renowned for dialectical inquiry and intellectual honesty. Rather than acting as an ungrounded oracle, Zocrates embodies the Socratic method by actively questioning literature, probing research gaps, and demanding verifiable evidence for every claim. It transforms your personal Zotero collection from a passive repository into an inquisitive, rigorous dialogue partner.
 
 ### Core Pillars
 
 * **🔒 Local-First Privacy & Defense-in-Depth Security**: Your search indices, converted documents, strictly local deterministic relation graphs, and chat history remain 100% on your machine. Fortified with 256-bit cryptographic loopback token authentication, strict CORS isolation, DOM allowlist sanitization protecting Gecko `SystemPrincipal` privileges, path traversal containment, and encrypted credential storage via Mozilla's Login Manager (`Services.passwords`).
-* **🎯 Beyond Naive RAG (Combined Semantic & Structural Vectorless Reading)**: Replaces crude, fixed-token "chunk salad" with a flexible dual-channel engine. When indexing and performing library-wide search, Zocrates uses **structure-aware chunking** that splits along Markdown headers, respects natural paragraph and sentence boundaries, and masks code blocks and figures to minimize abrupt cut-offs. For targeted investigations, the ReAct agent switches immediately to surgical, vectorless Table of Contents reading (`read_document(asset_id='sX')`), ingesting complete, unfragmented sections to preserve complex derivations, experimental context, and tables with optimal token efficiency.
+* **🎯 Beyond Naive RAG (Combined Semantic & Structural Vectorless Reading)**: Replaces crude, fixed-token "chunk salad" with a flexible dual-channel engine. When indexing and performing library-wide search, Zocrates uses **structure-aware chunking** that splits along Markdown headers, respects natural paragraph and sentence boundaries, and masks code blocks and figures to minimize abrupt cut-offs. For targeted investigations, the search agent switches immediately to surgical, vectorless Table of Contents reading (`read_document(asset_id='sX')`), ingesting complete, unfragmented sections to preserve complex derivations, experimental context, and tables with optimal token efficiency.
 * **⚖️ Epistemic Honesty & Verifiable Attribution**: Automated per-occurrence claim verification using fast AI decision models, strict Two-Tier Source reporting (`# Cited Sources` and `## Other Considered Sources` so no evaluated literature is silently dropped), and interactive Evidence Peek popovers showing verbatim quotes and section breadcrumbs.
-* **🤖 Autonomous Multi-Agent Dynamic Orchestration**: Powered by Google ADK dynamic workflows (`@node`), featuring a conversational Coordinator agent, an autonomous ReAct retrieval agent with tool budget enforcement, pre-rerank substantive chunk filtering, cross-encoder rerankers, and specialized academic synthesizers.
+* **🤖 Autonomous Multi-Agent Dynamic Orchestration**: Powered by Google ADK dynamic workflows (`@node`), featuring a conversational Coordinator agent, an autonomous ReAct retrieval agent with tool budget enforcement, pre-rerank substantive chunk filtering, cross-encoder rerankers, and specialized academic synthesizer agents.
 * **🖥️ Deep Native Desktop Integration**: In-Zotero split-pane sidebar, two-way Zotero PDF reader text and bounding-box area cropping, offline Canvas 2D paper relations visualizer with physics clustering, user-curated long-term memory via native Zotero notes, predictive ghost text input, and one-click online paper discovery and import.
 * **💾 100% Copy-Paste Cross-Device Portability**: Move your entire research setup between machines (Linux, macOS, Windows) by simply copying the `zocrates-data` directory into your Zotero data folder. Engineered with fully portable relative paths (never hardcoding machine-specific file paths) and stable Zotero item keys, guaranteeing zero re-indexing, zero re-conversion, and full chat session continuity across devices.
 
@@ -57,7 +40,7 @@ Zocrates operates as a coordinated desktop ecosystem: a native frontend extensio
 graph TD
     subgraph "Zotero Desktop Application (Frontend)"
         A[Zotero Main Window] -- Hosts --> B[Sidebar Panel & Chat UI<br/><code>sidebar.html / sidebar.js</code>]
-        C[Zotero 10 PDF Reader] -- Right-Click Snippets / Crops --> B
+        C[Zotero PDF Reader] -- Right-Click Snippets / Crops --> B
         D[Canvas 2D Visualizer] -- Graph Inspection --> B
         B -- One-Click Import --> E[Scholar Import Engine<br/><code>scholarImport.js</code>]
         E -- Direct Item & PDF Ingestion --> A
@@ -90,6 +73,23 @@ graph TD
 
 Researchers have different technical setups and workflows. Zocrates adapts to you by offering three primary modes of operation:
 
+```
+       Personal Zotero Library
+    (PDFs, Notes, Metadata, Tags)
+                  │
+                  ▼
+         ┌─────────────────┐
+         │    Zocrates     │
+         └────────┬────────┘
+                  │
+   ┌──────────────┼──────────────┐
+   ▼              ▼              ▼
+ Mode 1         Mode 2         Mode 3
+ Native      Open Markdown   Local MCP
+ Zotero        Knowledge      Server for
+Companion       Bundles     Coding Agents
+```
+
 | Dimension | Mode 1: Native Zotero Companion | Mode 2: Open Markdown Bundles | Mode 3: Local MCP Server Bridge |
 | :--- | :--- | :--- | :--- |
 | **Interface** | Embedded split-pane sidebar inside Zotero | Direct file tree in IDE or terminal | External agent (Claude Desktop, Cursor, Zed, Pi) |
@@ -105,7 +105,8 @@ For researchers who want an integrated desktop experience directly inside Zotero
 * **Embedded Workspace**: Operates inside Zotero's main window as a split-pane sidebar that automatically matches your chosen theme (Zotero Auto/Light/Dark, Slate, AMOLED, Sepia).
 * **PDF Reader Context Excerpts & Area Crops**: Right-click highlighted text or draw an area box around a figure or table in Zotero's PDF Reader to add it instantly to your chat context. Visual crops are passed directly to multimodal vision models.
 * **Predictive Ghost Text Engine**: Anticipates your next research question following literature search turns and renders translucent ghost text in the textarea with instant `[Tab ⇥]` acceptance.
-* **Two-Tier Sources & Evidence Peeks**: Every claim is verified with occurrence-level probabilities. Clickable citation pills (`Watson & Crick, 1953`, `Vaswani *et al.*, 2017`) open popovers displaying verbatim quotes, section breadcrumbs, and direct reader jump links.
+* **Two-Tier Sources & Evidence Peeks**: Every claim is verified with occurrence-level probabilities. Clickable citation pills (`Watson & Crick, 1953`, `Vaswani et al., 2017`) open popovers displaying verbatim supporting passages, section breadcrumbs, and direct reader jump links.
+* **Sentence-level Attribution**: Optionally, determine the sentences within the cited passage that directly support each claim. 
 * **Online Discovery & One-Click Import**: When your queries extend beyond your library, Zocrates searches OpenAlex, Unpaywall, and Crossref, filters out duplicates, and stages Open Access PDFs for 1-click import into your collections.
 * **Human-In-The-Loop Deep Research**: Pauses complex literature surveys with structured checkpoint cards summarizing findings and gaps, allowing you to guide the next search phase.
 
@@ -127,7 +128,7 @@ For researchers who prefer plain files, Unix philosophy, or local scripting:
       └── tables/            # Clean structured data tables
   ```
 * **Copy-Paste Portability**: Built entirely with self-contained relative paths (`storage/<key>/<file>`), ensuring document bundles remain fully portable across folders, operating systems, and machines without breaking links.
-* **Direct Agent Exploration (As-Is)**: The root of the `corpus/` directory contains an auto-generated `AGENTS.md` navigation guide and a root `index.md` catalog, allowing coding agents (Cursor, Claude Code, Pi, Aider) to explore the converted library **as is**, right out of the box without requiring external bridges or services.
+* **Direct Agent Exploration (As-Is)**: The root of the `corpus/` directory contains an auto-generated `AGENTS.md` navigation guide and a root `index.md` catalog, allowing coding agents (Cursor, Claude Code, Pi, etc.) to explore the converted library **as is**, right out of the box without requiring external bridges or services.
 * **Optimal for Small Libraries**: Mode 2 is ideal for small to mid-sized libraries containing **hundreds of papers**, where direct file-system exploration and agent context windows are optimal. For larger libraries with **thousands of papers**, use [Mode 3 (Local MCP Server Bridge)](#mode-3-local-model-context-protocol-mcp-server) for scalable hybrid vector and full-text retrieval.
 
 ---
@@ -152,8 +153,8 @@ For researchers who want external coding assistants and desktop agents to access
 Unlike generic search plugins, Zocrates uses a specialized multi-agent retrieval pipeline:
 * **Tool Budget & Safety Circuit Breakers**: Bounded 10-call tool budget with soft warnings on call 9 and a tool-level 7,500 cumulative word ceiling.
 * **Substantive Chunk Filtering**: Filters out Chunk 0 frontmatter, metadata slices, and in-document tables of contents before scoring, ensuring top-k cross-encoder slots are reserved for substantive claims.
-* **Shared Cross-Encoder Reranking**: Dynamically scores retrieved passages using local cross-encoders with empty-evidence fallback guards.
-* **Three-Pillar Table of Contents Continuity**: Dual-key ToC caching (`cached_tocs`), section level-folding for dense monographs (>15 sections), and complete-range asset summarization (>8 figures / >6 tables).
+* **Cross-Encoder Reranking**: Dynamically scores retrieved passages using a cross-encoder with empty-evidence fallback guards.
+* **Table of Contents Continuity**: Subsequent turns with the same selected papers as context get cached information so the agent can avoid unnecessary tool calls. ToC caching (`cached_tocs`), section level-folding for dense monographs (>15 sections), and complete-range asset summarization (>8 figures / >6 tables).
 
 ### 2. Two-Tier Attribution: Passage Grounding by Default & Sentence Micro-Attribution on Demand
 Zocrates treats academic attribution and epistemic honesty as an absolute priority, offering a two-tier verification depth:
@@ -163,23 +164,23 @@ Zocrates treats academic attribution and epistemic honesty as an absolute priori
 * **Two-Tier Sources (100% Recall)**:
   - `# Cited Sources`: Documents providing direct claim support ($p \ge \tau$).
   - `## Other Considered Sources`: Documents evaluated during retrieval but not cited, guaranteeing zero silently dropped literature.
-* **Interactive Evidence Popovers**: Clicking any in-text citation pill displays exact section breadcrumbs (`§ Methodology`), calibrated attribution confidence badges (`High`, `Moderate`, `Low`), full verbatim source passages, and 1-click buttons to jump to the section in Zotero's reader or select the item in your library.
-* **Standalone Claim Verification Inspector**: Click `'🛡️ Claim Verification Inspector'` on any assistant response to launch an interactive audit window detailing every claim sentence, source paper, evaluated passage, calibrated probability score ($p$), and status badge (`VERIFIED` / `REJECTED`).
+* **Interactive Evidence Popovers**: Clicking any in-text citation pill displays exact section breadcrumbs (e.g., `§ Methodology`), calibrated attribution confidence badges (`High`, `Moderate`, `Low`), full verbatim source passages, and 1-click buttons to inspect the claim, jump to the section in Zotero's reader or select the item in your library.
+* **Standalone Claim Verification Inspector**: Click `'🛡️ Claim Verification Inspector'` on any assistant response to launch an interactive audit window detailing every claim sentence, source paper, evaluated passage, calibrated support probability score ($p$), and status badge (`VERIFIED` / `REJECTED`).
 * **Opt-In Sentence-Level Micro-Attribution**: For granular factual audit, click `[🔍 Obtain Sentence-Level Attribution]` on any claim. An atomic span engine partitions the source passage into numbered spans (preserving headings, tables, and math) and highlights the exact supporting sentences in-place (`.sentence-attr-highlight`) and supporting table rows (`tr.sentence-attr-highlight`), alongside natural scholarly missing-fact notes without index jargon.
 * **Dynamic Coordinator Model Inheritance**: Sentence attribution dynamically uses your active coordinator model by default, or an optional dedicated `sentence_attribution_model` configured in `zocrates_config.json`.
 * **Citation Visibility Toggle & Clean Manuscript Export**: Click `Citations: Visible` $\leftrightarrow$ `Citations: Hidden` to switch between interactive pills and clean distraction-free prose. Copying with citations visible generates APA-formatted parenthetical references and bibliographies; copying with citations hidden produces clean prose with bracket tokens removed while preserving code and punctuation.
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  Evidence Peek: Vaswani et al. (2017)                       │
-│  Section: § 3.2 Multi-Head Attention                        │
-│  Support: [ High Confidence: 0.94 ]                         │
-├─────────────────────────────────────────────────────────────┤
-│  "Multi-head attention allows the model to jointly attend   │
-│   to information from different representation subspaces..."│
-├─────────────────────────────────────────────────────────────┤
-│  [ 📖 Open in Reader ]             [ 📁 Select in Library ] │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│  Evidence Peek: Vaswani et al. (2017)                               │
+│  Section: § 3.2 Multi-Head Attention                                │
+│  Support: [ High Confidence: 0.94 ]                                 │
+├─────────────────────────────────────────────────────────────────────┤
+│  "Multi-head attention allows the model to jointly attend           │
+│   to information from different representation subspaces..."        │
+├─────────────────────────────────────────────────────────────────────┤
+│[ 🛡️ Inspect Claim]  [ 📖 Open in Reader ]  [ 📁 Select in Library ] │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ### 3. PDF Reader Integration (Excerpts & Area Crops)
@@ -226,7 +227,7 @@ Zocrates operates as an extension inside Zotero and inherits the platform baseli
 
 #### 1. Inherited Baseline (Zotero 10 / Mozilla Gecko 140 Engine)
 * **Operating System**:
-  * **Windows**: Windows 10 (version 1809+) or Windows 11 (64-bit). *(Windows 7, 8, and 8.1 are strictly unsupported by Mozilla and Python 3.12+)*. Requires the [Microsoft Visual C++ 2015–2022 Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe) for native document conversion and ONNX runtime dependencies (setup automatically detects and installs it if missing).
+  * **Windows**: Windows 10 (version 1809+) or Windows 11 (64-bit). *(Windows 7, 8, and 8.1 are strictly unsupported by Mozilla and Python 3.12+)*. 
   * **macOS**: macOS 10.15 (Catalina) or later *(macOS 12.0+ Monterey recommended)*. Apple Silicon (native M-series) or Intel 64-bit.
   * **Linux**: Modern 64-bit distribution with **glibc $\ge$ 2.28** (e.g., Ubuntu 20.04+, Debian 10+, Fedora 29+, Arch Linux, etc.). Standard archiving utilities (`tar`) must be present in `$PATH`.
 * **Hardware Baseline**:
@@ -293,9 +294,8 @@ Zocrates provides transparent, file-locked configuration via `zocrates_config.js
 
 1. Open Zotero → **Preferences** (or **Settings** on macOS) → **Zocrates** tab.
 2. Configure your desired LLM providers:
-   * **OpenRouter (Recommended)**: Enter your OpenRouter API key. Gives access to frontier reasoning models (Gemini, Claude Sonnet, GPT-6, DeepSeek Flash, Qwen) with endpoints supporting Zero Data Retention (ZDR) where offered.
+   * **OpenRouter (Recommended)**: Enter your OpenRouter API key. Gives access to frontier reasoning models from their providers (Gemini, Claude, GPT, DeepSeek, Qwen, etc.) with endpoints supporting Zero Data Retention (ZDR) where offered.
    * **Local Models (Ollama / vLLM)**: Enter your local inference endpoint (e.g., `http://localhost:11434`) and local model identifiers for fully offline, air-gapped workflows.
-   * **Google Gemini**: Direct Google AI Studio Gemini API key.
    * **Scholar Polite Email**: Enter your academic email to access polite rate-limit tiers on OpenAlex and Unpaywall.
 3. **Encrypted Storage**: Sensitive API keys are never stored in plaintext configuration files; they are encrypted inside Mozilla's Login Manager (`Services.passwords`).
 
@@ -304,13 +304,13 @@ Zocrates provides transparent, file-locked configuration via `zocrates_config.js
 Zocrates does not force you into an all-cloud or all-local trade-off. You can mix and match models and providers across different layers of the system to optimize for privacy, speed, and cost:
 
 * **Per-Agent Multi-Model Pinning (`override_agent_models`)**: In `zocrates_config.json`, you can assign different models and providers to individual subagent roles:
-  - **Coordinator (`coordinator`)**: Fast local model (e.g. `ollama/llama3`, `ollama/mistral`) for snappy conversational turns.
-  - **Retrieval Subagent (`search`)**: Fast local model (Ollama or vLLM) executing the autonomous ReAct retrieval loop, querying local vector and keyword indices without sending raw library search queries over the network.
-  - **Synthesizer Subagent (`synthesizer`)**: Frontier cloud reasoning model (e.g. `anthropic/claude-sonnet`, `deepseek/deepseek-flash`, `google/gemini-pro` via OpenRouter) for deep inductive synthesis, cross-paper comparison, and rigorous attribution.
+  - **Coordinator (`coordinator`)**: Fast local model (e.g. `ollama/gemma4`) for snappy conversational turns.
+  - **Retrieval Subagent (`search`)**: Fast local (Ollama or vLLM) models executing the autonomous ReAct retrieval loop, querying local vector and keyword indices without sending raw library search queries over the network. Remote models (through OpenRouter) provide lower latency and higher intelligence.
+  - **Synthesizer Subagent (`synthesizer`)**: Frontier cloud reasoning model (e.g., `anthropic/claude-sonnet` or `-opus`, `google/gemini-neon` or `-carbon` via OpenRouter) for deep inductive synthesis, cross-paper comparison, and rigorous attribution.
   - **Discovery Subagents (`online_search` & `online_synthesizer`)**: Local or remote models for autonomous external literature discovery and candidate staging.
 * **Component-Level Decoupling**:
   - **Embeddings**: Keep dense vectors 100% offline via hardware-accelerated Jina v5 (`jina-embeddings-v5-text-nano`, running in-process via PyTorch on CPU/GPU with zero cloud costs and zero VRAM clash) while freely using cloud reasoning models for conversation.
-  - **Citation Verification**: Run fast per-occurrence attribution checks via local Laya (`http://127.0.0.1:8005`) or remote Mercury Decide independently of your main chat LLM.
+  - **Citation Verification**: Run fast per-occurrence attribution checks via local Laya (`http://127.0.0.1:8005`) or remote decision models (e.g., Jev) independently of your main chat LLM.
 * **Dynamic Inheritance by Default**: All 5 agent roles default to `model: null`, naturally inheriting the globally configured model (whether OpenRouter, Ollama, or vLLM) with zero manual configuration, while allowing power users to surgically pin any individual subagent.
 
 ---
