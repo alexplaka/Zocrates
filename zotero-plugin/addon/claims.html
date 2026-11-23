@@ -489,7 +489,14 @@
       border-collapse: collapse;
       text-align: left;
       font-size: 12px;
-      min-width: 600px;
+      /* 740px floor so every column's initial calc() width stays at or above
+         the JS drag-clamp minimums (MIN_COL_WIDTHS) at all reachable widths:
+         190px + 130px / 0.24 (smallest proportional share) ~= 732px. */
+      min-width: 740px;
+      /* Fixed layout so dragged / declared widths are honored exactly and the
+         table can never exceed the container (auto layout re-resolves
+         over-constrained percentage widths and squeezes / hides columns). */
+      table-layout: fixed;
     }
 
     table.claims-table thead {
@@ -634,8 +641,12 @@
     }
 
     /* 2. Claim Column */
+    /* Proportional columns split the flexible space left after the two fixed
+       columns (#: 50px, Probability & Status: 140px => 190px), so all widths sum
+       to exactly 100% of the table width on every window size.
+       Order (widest first): Supporting Text (0.40) > Claim (0.36) > Source (0.24). */
     .col-claim {
-      width: 32%;
+      width: calc((100% - 190px) * 0.36);
       min-width: 140px;
     }
 
@@ -678,7 +689,7 @@
 
     /* 3. Source & Section Column */
     .col-source {
-      width: 22%;
+      width: calc((100% - 190px) * 0.24);
       min-width: 130px;
     }
 
@@ -740,7 +751,7 @@
 
     /* 4. Supporting Text Column */
     .col-passage {
-      width: 32%;
+      width: calc((100% - 190px) * 0.40);
       min-width: 160px;
     }
 
