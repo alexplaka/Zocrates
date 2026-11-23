@@ -1374,13 +1374,13 @@
         e.preventDefault();
         e.stopPropagation();
         if (ths.length >= 5) {
-          // Must mirror the calc() defaults in claims.html so the sum stays
-          // exactly 100% of the table width (190px = 50px # + 140px Probability).
-          ths[0].style.width = "50px";
-          ths[1].style.width = "calc((100% - 190px) * 0.36)";
-          ths[2].style.width = "calc((100% - 190px) * 0.24)";
-          ths[3].style.width = "calc((100% - 190px) * 0.40)";
-          ths[4].style.width = "140px";
+          // Must mirror the plain-percentage defaults in claims.html so the sum
+          // stays exactly 100% of the table width (5 + 30 + 18 + 37 + 10).
+          ths[0].style.width = "5%";
+          ths[1].style.width = "30%";
+          ths[2].style.width = "18%";
+          ths[3].style.width = "37%";
+          ths[4].style.width = "10%";
         }
         table.style.tableLayout = "";
       });
