@@ -2950,6 +2950,7 @@ const ONBOARDING_PRESETS = {
       },
       reranker_model: "qwen/qwen3-reranker-8b",
       citation_verification_provider: "openrouter",
+      citation_verification_enabled: true,
       citation_verification_model: "~typesafe/jev-latest",
       enable_predictive_ghost_input: true,
       predictive_prompt_model: "openrouter/~deepseek/deepseek-flash-latest",

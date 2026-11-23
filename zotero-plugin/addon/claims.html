@@ -489,7 +489,14 @@
       border-collapse: collapse;
       text-align: left;
       font-size: 12px;
-      min-width: 600px;
+      /* 740px floor keeps the percentage columns near the JS drag-clamp
+         minimums (MIN_COL_WIDTHS) and prevents cramped unreadable columns on
+         very narrow dialogs. */
+      min-width: 740px;
+      /* Fixed layout so dragged / declared widths are honored exactly and the
+         table can never exceed the container (auto layout re-resolves
+         over-constrained percentage widths and squeezes / hides columns). */
+      table-layout: fixed;
     }
 
     table.claims-table thead {
@@ -614,9 +621,15 @@
     }
 
     /* Column Specific Styles */
+    /* All five columns use plain percentages of the table width summing to
+       exactly 100%: # 4% | Claim 30% | Source & Section 18% | Supporting Text
+       38% | Probability & Status 10%. calc() expressions mixing % and px are
+       treated as "auto" on table cells by Gecko (Bugzilla 957915), which under
+       fixed layout renders every such column with an EQUAL share — so plain
+       percentages are the only reliable scheme. */
     /* 1. # Column */
     .col-idx {
-      width: 50px;
+      width: 4%;
       min-width: 50px;
       text-align: center;
     }
@@ -635,7 +648,7 @@
 
     /* 2. Claim Column */
     .col-claim {
-      width: 32%;
+      width: 30%;
       min-width: 140px;
     }
 
@@ -678,7 +691,7 @@
 
     /* 3. Source & Section Column */
     .col-source {
-      width: 22%;
+      width: 18%;
       min-width: 130px;
     }
 
@@ -740,7 +753,7 @@
 
     /* 4. Supporting Text Column */
     .col-passage {
-      width: 32%;
+      width: 38%;
       min-width: 160px;
     }
 
@@ -960,7 +973,7 @@
 
     /* 5. Probability & Status Column */
     .col-prob {
-      width: 140px;
+      width: 10%;
       min-width: 120px;
     }
 
