@@ -130,11 +130,11 @@ async function runTests() {
     assert.strictEqual(prevented, true, "dblclick must call preventDefault()");
     assert.strictEqual(stopped, true, "dblclick must call stopPropagation()");
     // Must mirror the plain-percentage defaults in claims.html
-    // (sum = 100% of table width: 5 + 30 + 18 + 37 + 10).
-    assert.strictEqual(ths[0].style.width, "5%");
+    // (sum = 100% of table width: 4 + 30 + 18 + 38 + 10).
+    assert.strictEqual(ths[0].style.width, "4%");
     assert.strictEqual(ths[1].style.width, "30%");
     assert.strictEqual(ths[2].style.width, "18%");
-    assert.strictEqual(ths[3].style.width, "37%");
+    assert.strictEqual(ths[3].style.width, "38%");
     assert.strictEqual(ths[4].style.width, "10%");
     assert.strictEqual(table.style.tableLayout, "");
   });

@@ -1375,11 +1375,11 @@
         e.stopPropagation();
         if (ths.length >= 5) {
           // Must mirror the plain-percentage defaults in claims.html so the sum
-          // stays exactly 100% of the table width (5 + 30 + 18 + 37 + 10).
-          ths[0].style.width = "5%";
+          // stays exactly 100% of the table width (4 + 30 + 18 + 38 + 10).
+          ths[0].style.width = "4%";
           ths[1].style.width = "30%";
           ths[2].style.width = "18%";
-          ths[3].style.width = "37%";
+          ths[3].style.width = "38%";
           ths[4].style.width = "10%";
         }
         table.style.tableLayout = "";

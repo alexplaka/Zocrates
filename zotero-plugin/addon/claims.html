@@ -622,14 +622,14 @@
 
     /* Column Specific Styles */
     /* All five columns use plain percentages of the table width summing to
-       exactly 100%: # 5% | Claim 30% | Source & Section 18% | Supporting Text
-       37% | Probability & Status 10%. calc() expressions mixing % and px are
+       exactly 100%: # 4% | Claim 30% | Source & Section 18% | Supporting Text
+       38% | Probability & Status 10%. calc() expressions mixing % and px are
        treated as "auto" on table cells by Gecko (Bugzilla 957915), which under
        fixed layout renders every such column with an EQUAL share — so plain
        percentages are the only reliable scheme. */
     /* 1. # Column */
     .col-idx {
-      width: 5%;
+      width: 4%;
       min-width: 50px;
       text-align: center;
     }
@@ -753,7 +753,7 @@
 
     /* 4. Supporting Text Column */
     .col-passage {
-      width: 37%;
+      width: 38%;
       min-width: 160px;
     }
 
