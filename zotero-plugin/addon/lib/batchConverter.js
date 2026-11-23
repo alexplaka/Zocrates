@@ -535,7 +535,7 @@ var BatchConverter = {
 
       pendingIndexItems.forEach(u => {
         let itemRow = targetDoc.createElementNS(XHTMLNS, "div");
-        itemRow.style.cssText = "font-size: 12px; line-height: 1.35; padding: 3px 6px; border-radius: 3px; background: var(--chip-bg, rgba(255, 255, 255, 0.03)); display: flex; align-items: baseline; gap: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;";
+        itemRow.style.cssText = "flex-shrink: 0; font-size: 12px; line-height: 1.35; padding: 3px 6px; border-radius: 3px; background: var(--chip-bg, rgba(255, 255, 255, 0.03)); display: flex; align-items: baseline; gap: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;";
 
         let iconSpan = targetDoc.createElementNS(XHTMLNS, "span");
         let isPdf = u.content_type === "application/pdf" || (u.filename && u.filename.toLowerCase().endsWith(".pdf"));
@@ -600,7 +600,7 @@ var BatchConverter = {
 
         filtered.forEach(u => {
           let itemRow = targetDoc.createElementNS(XHTMLNS, "div");
-          itemRow.style.cssText = "font-size: 12px; line-height: 1.35; padding: 3px 6px; border-radius: 3px; background: var(--chip-bg, rgba(255, 255, 255, 0.03)); display: flex; align-items: baseline; gap: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;";
+          itemRow.style.cssText = "flex-shrink: 0; font-size: 12px; line-height: 1.35; padding: 3px 6px; border-radius: 3px; background: var(--chip-bg, rgba(255, 255, 255, 0.03)); display: flex; align-items: baseline; gap: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;";
 
           let iconSpan = targetDoc.createElementNS(XHTMLNS, "span");
           let isPdf = u.contentType === "application/pdf" || (u.filename && u.filename.toLowerCase().endsWith(".pdf"));
