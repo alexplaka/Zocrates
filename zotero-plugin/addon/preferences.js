@@ -1088,10 +1088,19 @@ function initZocratesPreferences() {
         savedLlmProvider = Zotero.Prefs.get("zocrates.llm_provider", true) || "openrouter_llm";
         savedLlmModel = Zotero.Prefs.get("zocrates.llm_model", true) || "google/gemini-3.8-flash";
         if (llmProviderSelect) llmProviderSelect.value = savedLlmProvider;
-        // Local/custom providers read the model from this input, so seed it here:
-        // otherwise the first dirty check against the cached pref model reports
-        // the card dirty before fetchLlmConfig() resolves.
-        if (llmModelCustomInput && savedLlmModel) llmModelCustomInput.value = savedLlmModel;
+        // Local/custom providers read the model from this input, so seed it here
+        // — but only when the pane opens on a local provider and the cached pref
+        // model is a local (bare) slug. Seeding unconditionally leaked the
+        // OpenRouter-scoped model (or the hardcoded fallback) into the input,
+        // which then appeared pre-filled the moment the user switched provider.
+        if (
+          llmModelCustomInput
+          && savedLlmModel
+          && savedLlmProvider !== "openrouter_llm"
+          && !savedLlmModel.startsWith("openrouter/")
+        ) {
+          llmModelCustomInput.value = savedLlmModel;
+        }
 
         savedDatalabApiKey = loadSecureApiKey("datalab_api_key", "extensions.zocrates.datalabApiKey");
         if (datalabApiKeyInput) {
@@ -1627,6 +1636,15 @@ function initZocratesPreferences() {
     }
   }
 
+  // Ghost text for the local-provider model input. Examples mirror the
+  // backends' typical naming; the input itself stays blank on provider
+  // switches — an empty model resolves through the backend fallback chain.
+  const LOCAL_MODEL_PLACEHOLDERS = {
+    ollama: "e.g. llama3.1:8b",
+    vllm: "e.g. Qwen/Qwen3-8B",
+    openai_compatible: "e.g. gpt-4o-mini",
+  };
+
   // Update UI control visibility based on selected LLM Provider
   function updateLlmUiVisibility() {
     if (!llmProviderSelect) return;
@@ -1660,7 +1678,7 @@ function initZocratesPreferences() {
       if (llmRefreshBtn) llmRefreshBtn.style.display = "none";
       if (llmModelCustomInput) {
         llmModelCustomInput.style.display = "block";
-        llmModelCustomInput.placeholder = "Enter the model name";
+        llmModelCustomInput.placeholder = LOCAL_MODEL_PLACEHOLDERS[provider] || "Enter the model name";
       }
 
       if (provider === "ollama") {
