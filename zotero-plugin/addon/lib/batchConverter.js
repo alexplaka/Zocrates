@@ -125,15 +125,93 @@ var BatchConverter = {
     }
   },
 
+  /**
+   * Expand the user's selection into Zotero attachment keys for conversion
+   * requests.
+   *
+   * Library-pane selections contain parent items (regular items), whose
+   * convertible content lives in their child attachments, so each regular item
+   * is expanded to its file-backed child attachments. Directly selected
+   * attachments pass through (only when a local file actually exists), and
+   * plain strings pass through untouched (callers like scholarImport pass
+   * attachment keys directly). Notes, annotations, and link-mode attachments
+   * without a local file are skipped. Results are deduplicated so a parent and
+   * its own attachment selected together yield one key per attachment.
+   *
+   * When expansion is impossible or yields nothing (no Zotero.Items available,
+   * exotic wrapper objects, no file-backed children), the item's own key is
+   * passed through as a fallback: the backend resolves parent keys itself and
+   * reports a per-key failure when nothing is convertible, so dropping keys
+   * here would silently hide items from the estimate and the SSE report.
+   */
   getAttachmentKeysFromSelected(items) {
     if (!items || !items.length) return [];
-    let keys = [];
-    for (let item of items) {
+    const keys = [];
+    const seen = new Set();
+    const pushKey = (key) => {
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        keys.push(key);
+      }
+    };
+
+    // A convertible attachment has a local file: linked-URL attachments and
+    // missing files are excluded so the backend never receives keys it can
+    // only report as failed.
+    const isFileBackedAttachment = (item) => {
+      try {
+        if (typeof item.isAttachment !== "function" || !item.isAttachment()) return false;
+        if (typeof item.deleted === "boolean" && item.deleted) return false;
+        if (typeof item.fileExists === "function") return !!item.fileExists();
+        return true;
+      } catch (e) {
+        Zotero.debug("Zocrates: attachment eligibility check failed: " + e);
+        return false;
+      }
+    };
+
+    for (const item of items) {
       if (!item) continue;
       if (typeof item === "string") {
-        keys.push(item);
-      } else if (item.key) {
-        keys.push(item.key);
+        pushKey(item);
+        continue;
+      }
+      try {
+        if (typeof item.isAttachment === "function" && item.isAttachment()) {
+          if (isFileBackedAttachment(item)) pushKey(item.key);
+          continue;
+        }
+        if ((typeof item.isNote === "function" && item.isNote())
+            || (typeof item.isAnnotation === "function" && item.isAnnotation())) {
+          continue;
+        }
+        if (typeof item.getAttachments !== "function") {
+          // Not a Zotero regular item (legacy wrapper with a key); pass through.
+          pushKey(item.key);
+          continue;
+        }
+        const attachmentIDs = item.getAttachments() || [];
+        let children = [];
+        if (attachmentIDs.length && typeof Zotero !== "undefined" && Zotero.Items
+            && typeof Zotero.Items.get === "function") {
+          children = Zotero.Items.get(attachmentIDs) || [];
+        }
+        let expanded = 0;
+        for (const child of children) {
+          if (child && isFileBackedAttachment(child)) {
+            pushKey(child.key);
+            expanded += 1;
+          }
+        }
+        if (expanded === 0 && item.key) {
+          // Nothing convertible found client-side (missing files, filtered
+          // attachments, or no Zotero.Items in this environment): let the
+          // backend resolve the parent key and report the outcome.
+          pushKey(item.key);
+        }
+      } catch (e) {
+        Zotero.debug("Zocrates: selection expansion failed for an item: " + e);
+        if (item.key) pushKey(item.key);
       }
     }
     return keys;
@@ -234,7 +312,7 @@ var BatchConverter = {
       this.renderConversionStatusModal({
         title: "Zocrates: Conversion Status",
         subtitle: "Zocrates converts documents to Markdown for LLM-ingestion.",
-        scopeLabel: `Selected: ${keys.length} item(s) (${total} document attachment(s))`,
+        scopeLabel: `Selected: ${keys.length} document attachment(s)`,
         total,
         cachedCount,
         converterCounts,
@@ -850,7 +928,7 @@ var BatchConverter = {
       let lines = [
         `Convert ${keys.length} document${keys.length === 1 ? "" : "s"} with ${converterLabel}?`,
         "",
-        `• Selected items: ${keys.length}`,
+        `• Selected documents: ${keys.length}`,
       ];
       if (estimate) {
         let alreadyConverted = estimate.already_converted_count || 0;
@@ -1067,7 +1145,7 @@ var BatchConverter = {
       };
 
       let appendSelectedItemsLine = () => {
-        appendLine(infoBox, `• Selected items: ${keys.length}`, "font-weight: 600;");
+        appendLine(infoBox, `• Selected documents: ${keys.length}`, "font-weight: 600;");
       };
 
       let renderAcceptedEstimate = () => {
@@ -1357,7 +1435,7 @@ var BatchConverter = {
           let promptLines = [
             `Convert ${keys.length} document${keys.length === 1 ? "" : "s"} with ${converterLabel}?`,
             "",
-            `• Selected items: ${keys.length}`,
+            `• Selected documents: ${keys.length}`,
           ];
 
           if (alreadyConverted > 0) {
