@@ -1,5 +1,110 @@
 // Zocrates Preference Pane Logic
 
+// Per-agent roles that inherit the main model unless their override entry
+// carries a concrete model. The Coordinator is deliberately absent: its model is
+// the card's own model and its thinking effort is a first-class control next to
+// the model picker.
+const AGENT_ROLLUP_ROLES = [
+  "library_search",
+  "online_search",
+  "library_synthesizer",
+  "online_synthesizer",
+];
+
+const AGENT_ROLLUP_ROLE_LABELS = {
+  library_search: "Library search",
+  online_search: "Online search",
+  library_synthesizer: "Library synthesizer",
+  online_synthesizer: "Online synthesizer",
+};
+
+// Mirror of zocrates/agents/common/config.py::ROLE_DEFAULT_THINKING — kept in
+// sync by tests/unit/test_config_drift_guard.py.
+const ROLE_DEFAULT_THINKING = {
+  coordinator: "medium",
+  library_search: "low",
+  library_synthesizer: "high",
+  online_search: "low",
+  online_synthesizer: "high",
+};
+
+// The thinking-effort values the Coordinator select can hold; a hand-edited
+// config carrying anything else is normalized back to the role default.
+const THINKING_LEVEL_OPTIONS = ["minimal", "low", "medium", "high"];
+
+// Drops the provider routing prefix so the same slug reads identically whether
+// the override was hand-edited as "gemini-3.8-flash" or "openrouter/gemini-3.8-flash".
+function shortAgentModelName(model) {
+  const raw = (model === null || model === undefined) ? "" : String(model).trim();
+  return raw.replace(/^openrouter\//, "").replace(/^ollama_chat\//, "").replace(/^ollama\//, "");
+}
+
+// Resolves one role's effective model and thinking effort for display.
+// A null/empty role `model` means inherit; `thinking_level` overrides apply even
+// when the model is inherited (see zocrates/llm.py::build_agent_llm).
+function resolveAgentModelRow(role, roleCfg, mainModel) {
+  const cfg = (roleCfg && typeof roleCfg === "object") ? roleCfg : {};
+  const overrideModel = (cfg.model === null || cfg.model === undefined) ? "" : String(cfg.model).trim();
+  const isOverride = overrideModel !== "";
+  const configuredThinking = (cfg.thinking_level === null || cfg.thinking_level === undefined)
+    ? ""
+    : String(cfg.thinking_level).trim();
+  const thinking = configuredThinking || ROLE_DEFAULT_THINKING[role];
+  return {
+    model: isOverride ? overrideModel : ((mainModel === null || mainModel === undefined) ? "" : String(mainModel).trim()),
+    isOverride,
+    hasEndpointOverride: Boolean(cfg.provider) || Boolean(cfg.base_url),
+    thinking,
+    isDefaultThinking: thinking === ROLE_DEFAULT_THINKING[role],
+  };
+}
+
+// Header badge: override existence and the affected model slugs must stay
+// readable while the rollup is collapsed.
+function buildAgentRollupBadge(rows) {
+  const overrides = (Array.isArray(rows) ? rows : []).filter((row) => row && row.isOverride);
+  if (overrides.length === 0) {
+    return { text: "No overrides — all agents inherit the main model", hasOverrides: false };
+  }
+  const names = [];
+  for (const row of overrides) {
+    const name = shortAgentModelName(row.model);
+    if (name && names.indexOf(name) === -1) names.push(name);
+  }
+  const detail = names.join(", ");
+  return {
+    text: `${overrides.length} override${overrides.length === 1 ? "" : "s"}${detail ? " · " + detail : ""}`,
+    hasOverrides: true,
+  };
+}
+
+// The coordinator entry Apply writes when the thinking select is dirty.
+// null means "back to the role default", which resolves identically through
+// build_agent_llm's fallback chain — so the entry holds only the UI-managed key
+// and hand-edited coordinator keys survive the per-role merge in save_zocrates_config.
+function buildCoordinatorThinkingPayload(currentValue, savedValue, defaultValue) {
+  const current = (currentValue === null || currentValue === undefined) ? "" : String(currentValue).trim();
+  const saved = (savedValue === null || savedValue === undefined) ? "" : String(savedValue).trim();
+  if (!current || current === saved) return null;
+  const fallback = (defaultValue === null || defaultValue === undefined) ? "" : String(defaultValue).trim();
+  if (current === fallback) return { thinking_level: null };
+  return { thinking_level: current };
+}
+
+// POST /llm/test body for one role: the role's own model plus its provider /
+// base URL when overridden, otherwise the global values.
+function buildAgentTestPayload(role, roleCfg, globalCfg) {
+  const cfg = (roleCfg && typeof roleCfg === "object") ? roleCfg : {};
+  const global = (globalCfg && typeof globalCfg === "object") ? globalCfg : {};
+  const apiKey = global.openrouter_api_key;
+  return {
+    llm_provider: cfg.provider || global.llm_provider || null,
+    llm_model: (cfg.model === null || cfg.model === undefined) ? null : String(cfg.model).trim(),
+    llm_base_url: cfg.base_url || global.llm_base_url || null,
+    openrouter_api_key: (apiKey === null || apiKey === undefined || apiKey === "") ? null : String(apiKey),
+  };
+}
+
 function initZocratesPreferences() {
   Zotero.debug("Zocrates: Preference Pane script initializing...");
 
@@ -184,6 +289,11 @@ function initZocratesPreferences() {
   const llmModelSearchContainer = document.getElementById("llm-model-search-container");
   const llmModelSearchInput = document.getElementById("llm-model-search-input");
   const llmModelSelect = document.getElementById("llm-model-select");
+  const llmThinkingSelect = document.getElementById("llm-thinking-select");
+  const agentRollupHeader = document.getElementById("agent-rollup-header");
+  const agentRollupBadge = document.getElementById("agent-rollup-badge");
+  const agentRollupBody = document.getElementById("agent-rollup-body");
+  const agentRollupRows = document.getElementById("agent-rollup-rows");
   const llmModelMetadataBox = document.getElementById("llm-model-metadata-box");
   const llmModelCustomInput = document.getElementById("llm-model-custom-input");
   const llmModelCountBadge = document.getElementById("llm-model-count-badge");
@@ -238,6 +348,13 @@ function initZocratesPreferences() {
   let savedLlmProvider = "openrouter_llm";
   let savedLlmBaseUrl = "";
   let savedLlmModel = "";
+  // GET /config's complete override_agent_models dict, stored as-is: roles and
+  // keys this increment does not render (temperature, max_tokens, api_key, ...)
+  // must survive untouched through the per-role merge on save.
+  let savedAgentOverrides = null;
+  // Effective coordinator thinking effort: its own override entry, else the role
+  // default. Drives the select prefill and the LLM card's dirty state.
+  let savedCoordinatorThinking = ROLE_DEFAULT_THINKING.coordinator;
   // Base URLs the backend substitutes when llm_base_url is empty (see the
   // `raw_url or ...` resolution in zocrates/fast_api_app.py and
   // zocrates/llm.py). An empty saved value therefore means "use the provider
@@ -443,11 +560,13 @@ function initZocratesPreferences() {
     const baseUrlMatches = !requiresBaseUrl
       || (currentBaseUrl === savedLlmBaseUrl)
       || (!savedLlmBaseUrl && currentBaseUrl === PROVIDER_DEFAULT_BASE_URLS[currentProvider]);
+    const thinkingMatches = !llmThinkingSelect || (llmThinkingSelect.value === savedCoordinatorThinking);
 
-    const isDirty = !providerMatches || !modelMatches || !baseUrlMatches;
+    const isDirty = !providerMatches || !modelMatches || !baseUrlMatches || !thinkingMatches;
 
     setFieldDirtyDot("llm-provider-select", !providerMatches);
     setFieldDirtyDot("llm-model-select", !modelMatches);
+    setFieldDirtyDot("llm-thinking-select", !thinkingMatches);
     // baseUrlMatches is already true for providers that ignore the base URL, so
     // the dot never appears on the hidden input. It is also true when the saved
     // value is empty ("provider default") and the input displays exactly that
@@ -969,6 +1088,10 @@ function initZocratesPreferences() {
         savedLlmProvider = Zotero.Prefs.get("zocrates.llm_provider", true) || "openrouter_llm";
         savedLlmModel = Zotero.Prefs.get("zocrates.llm_model", true) || "google/gemini-3.8-flash";
         if (llmProviderSelect) llmProviderSelect.value = savedLlmProvider;
+        // Local/custom providers read the model from this input, so seed it here:
+        // otherwise the first dirty check against the cached pref model reports
+        // the card dirty before fetchLlmConfig() resolves.
+        if (llmModelCustomInput && savedLlmModel) llmModelCustomInput.value = savedLlmModel;
 
         savedDatalabApiKey = loadSecureApiKey("datalab_api_key", "extensions.zocrates.datalabApiKey");
         if (datalabApiKeyInput) {
@@ -1333,6 +1456,19 @@ function initZocratesPreferences() {
         savedLlmModel = data.llm_model.trim();
       }
 
+      savedAgentOverrides = (data.override_agent_models && typeof data.override_agent_models === "object") ? data.override_agent_models : {};
+      const coordOverride = savedAgentOverrides.coordinator || {};
+      // Only a value the select can actually hold may become the snapshot; a
+      // hand-edited unknown level would otherwise leave the select blank and the
+      // card permanently dirty.
+      const coordThinkingRaw = (coordOverride.thinking_level === null || coordOverride.thinking_level === undefined)
+        ? ""
+        : String(coordOverride.thinking_level).trim().toLowerCase();
+      savedCoordinatorThinking = THINKING_LEVEL_OPTIONS.indexOf(coordThinkingRaw) === -1
+        ? ROLE_DEFAULT_THINKING.coordinator
+        : coordThinkingRaw;
+      if (llmThinkingSelect) llmThinkingSelect.value = savedCoordinatorThinking;
+
       if (data.embedding_provider) {
         savedEmbeddingMode = (data.embedding_provider === "cloud") ? "cloud" : "local";
         if (modeSelect) modeSelect.value = savedEmbeddingMode;
@@ -1433,6 +1569,9 @@ function initZocratesPreferences() {
         updateConverterDirtyState();
       }
 
+      // Rollup render follows the catalog fetches above so paid/free annotations
+      // can use the models already loaded for the main picker.
+      renderAgentModelSummary();
       updateLlmDirtyState();
       updateEmbeddingDirtyState();
       updateVerificationDirtyState();
@@ -1895,6 +2034,149 @@ function initZocratesPreferences() {
     renderModelMetadataBox(metadataBox, modsText, ctxText, priceText);
   }
 
+  // Compact paid/free annotation for an overridden model, reusing the catalog the
+  // main picker already loaded. No catalog (no OpenRouter key yet) means no
+  // annotation — the rollup never triggers a catalog fetch of its own.
+  function describeRollupModelCost(modelId) {
+    const model = findCatalogModel(rawLlmModels, modelId);
+    if (!model) return "";
+    const pricing = model.pricing || {};
+    const promptPrice = parseFloat(pricing.prompt || 0) * 1000000;
+    const completionPrice = parseFloat(pricing.completion || 0) * 1000000;
+    const imagePrice = parseFloat(pricing.image || 0);
+    if (model.is_free || (promptPrice === 0 && completionPrice === 0 && imagePrice === 0)) {
+      return "free";
+    }
+    if (promptPrice > 0) {
+      const promptText = promptPrice < 0.01 ? `$${promptPrice.toFixed(4)}` : `$${promptPrice.toFixed(2)}`;
+      return `${promptText} / 1M prompt`;
+    }
+    return "paid";
+  }
+
+  // preferences.xhtml is XUL-rooted, so an unqualified createElement mints
+  // XUL-namespace nodes: HTML-only CSS (flex/grid) never applies to them and a XUL
+  // button carries no label semantics. Every node the rollup creates is therefore
+  // explicitly XHTML, matching the other dynamic renderers in this file.
+  const XHTML_NS = "http://www.w3.org/1999/xhtml";
+  function createXhtmlElement(tag) {
+    return (typeof document.createElementNS === "function")
+      ? document.createElementNS(XHTML_NS, tag)
+      : document.createElement(tag);
+  }
+
+  function appendRollupChip(container, text, extraClass) {
+    const chip = createXhtmlElement("span");
+    chip.className = extraClass ? `zc-rollup-chip ${extraClass}` : "zc-rollup-chip";
+    chip.textContent = text;
+    container.appendChild(chip);
+  }
+
+  // One read-only rollup row: role label, effective model (+ chips), thinking
+  // effort and — for overridden roles only — a Test action that posts this
+  // role's resolved configuration to the existing connectivity endpoint.
+  function buildAgentRollupRow(row) {
+    const rowEl = createXhtmlElement("div");
+    rowEl.className = "zc-rollup-row";
+
+    const roleEl = createXhtmlElement("span");
+    roleEl.className = "zc-rollup-role";
+    roleEl.textContent = AGENT_ROLLUP_ROLE_LABELS[row.role] || row.role;
+    rowEl.appendChild(roleEl);
+
+    const modelEl = createXhtmlElement("span");
+    modelEl.className = "zc-rollup-model";
+    const slugEl = createXhtmlElement("span");
+    slugEl.className = "zc-rollup-slug";
+    slugEl.textContent = row.isOverride
+      ? shortAgentModelName(row.model)
+      : `inherits main (${shortAgentModelName(row.model)})`;
+    modelEl.appendChild(slugEl);
+    if (row.isOverride) appendRollupChip(modelEl, "override", "zc-rollup-chip-override");
+    if (row.hasEndpointOverride) appendRollupChip(modelEl, "local endpoint");
+    const costText = row.isOverride ? describeRollupModelCost(row.model) : "";
+    if (costText) {
+      const costEl = createXhtmlElement("span");
+      costEl.className = "zc-rollup-cost";
+      costEl.textContent = costText;
+      modelEl.appendChild(costEl);
+    }
+    rowEl.appendChild(modelEl);
+
+    const thinkingEl = createXhtmlElement("span");
+    thinkingEl.className = "zc-rollup-thinking";
+    thinkingEl.textContent = `thinking: ${row.thinking}${row.isDefaultThinking ? " (default)" : ""}`;
+    rowEl.appendChild(thinkingEl);
+
+    // Inherited roles get no Test action: the card's own Test Connection button
+    // already tests exactly that configuration.
+    if (!row.isOverride) return rowEl;
+
+    const testBtn = createXhtmlElement("button");
+    testBtn.type = "button";
+    testBtn.className = "zc-secondary-btn zc-rollup-test-btn";
+    testBtn.textContent = "Test";
+    rowEl.appendChild(testBtn);
+
+    const statusEl = createXhtmlElement("span");
+    statusEl.className = "zc-rollup-status";
+    statusEl.style.display = "none";
+    rowEl.appendChild(statusEl);
+
+    testBtn.addEventListener("click", async () => {
+      testBtn.disabled = true;
+      statusEl.style.display = "inline";
+      statusEl.textContent = "⏳ Testing...";
+      statusEl.className = "zc-status-text zc-rollup-status zc-text-warning";
+      try {
+        const res = await fetch(`${getBackendUrl()}/llm/test`, {
+          method: "POST",
+          headers: getAuthHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify(buildAgentTestPayload(row.role, row.cfg, {
+            llm_provider: savedLlmProvider,
+            llm_base_url: savedLlmBaseUrl,
+            openrouter_api_key: openRouterApiKeyInput ? openRouterApiKeyInput.value.trim() : null,
+          })),
+        });
+        const data = await res.json();
+        if (res.ok && data.status === "ok") {
+          statusEl.textContent = `✓ ${data.message || "Connected!"}`;
+          statusEl.className = "zc-status-text zc-rollup-status zc-text-success";
+        } else {
+          statusEl.textContent = `✗ Error: ${data.detail || data.message || "Connection failed"}`;
+          statusEl.className = "zc-status-text zc-rollup-status zc-text-error";
+        }
+      } catch (err) {
+        statusEl.textContent = "✗ Network Error";
+        statusEl.className = "zc-status-text zc-rollup-status zc-text-error";
+      } finally {
+        testBtn.disabled = false;
+      }
+    });
+
+    return rowEl;
+  }
+
+  // Read-only per-agent summary built purely from the GET /config snapshot, so it
+  // never participates in dirty state and never triggers a network call.
+  function renderAgentModelSummary() {
+    if (!agentRollupRows) return;
+    const overrides = (savedAgentOverrides && typeof savedAgentOverrides === "object") ? savedAgentOverrides : {};
+    const rows = AGENT_ROLLUP_ROLES.map((role) => {
+      const cfg = (overrides[role] && typeof overrides[role] === "object") ? overrides[role] : {};
+      return Object.assign({ role, cfg }, resolveAgentModelRow(role, cfg, savedLlmModel));
+    });
+
+    const badge = buildAgentRollupBadge(rows);
+    if (agentRollupBadge) {
+      agentRollupBadge.textContent = badge.text;
+      agentRollupBadge.classList.toggle("zc-rollup-badge-overrides", badge.hasOverrides);
+    }
+
+    agentRollupRows.textContent = "";
+    rows.forEach((row) => agentRollupRows.appendChild(buildAgentRollupRow(row)));
+  }
+
   function updateChipStyles() {
     const chipBtns = document.querySelectorAll("#llm-filter-chips .zc-chip-btn");
     chipBtns.forEach((btn) => {
@@ -2314,6 +2596,14 @@ function initZocratesPreferences() {
       openrouter_api_key: openrouterKey,
     };
 
+    // The coordinator entry carries only the UI-managed field: save_zocrates_config
+    // merges per role, so hand-edited coordinator keys (temperature, max_tokens,
+    // extra_options, api_key, even a hand-set model) survive the write.
+    if (llmThinkingSelect && llmThinkingSelect.value !== savedCoordinatorThinking) {
+      const thinkingPayload = buildCoordinatorThinkingPayload(llmThinkingSelect.value, savedCoordinatorThinking, ROLE_DEFAULT_THINKING.coordinator);
+      if (thinkingPayload) payload.override_agent_models = { coordinator: thinkingPayload };
+    }
+
     if (enableCitationsCheckbox) {
       payload.citations_enabled = enableCitationsCheckbox.checked;
     }
@@ -2345,6 +2635,10 @@ function initZocratesPreferences() {
     try {
       const res = await postLlmConfig(payload);
       if (res && res.ok) {
+        // Every caller commits the same payload, so a thinking change is on disk as
+        // soon as any of them succeeds — advance the snapshot here rather than only
+        // in the Apply handler, which would leave the field dot stuck for the others.
+        savedCoordinatorThinking = llmThinkingSelect ? llmThinkingSelect.value : savedCoordinatorThinking;
         if (typeof Zotero !== "undefined" && Zotero.Prefs) {
           try {
             Zotero.Prefs.set("zocrates.llm_provider", provider);
@@ -2372,8 +2666,10 @@ function initZocratesPreferences() {
         } catch (e) {}
         await fetchStatus();
       }
+      return Boolean(res && res.ok);
     } catch (err) {
       Zotero.debug("Zocrates: Error saving LLM config: " + err);
+      return false;
     }
   }
 
@@ -2535,6 +2831,21 @@ function initZocratesPreferences() {
     llmBaseUrlInput.addEventListener("change", updateLlmDirtyState);
   }
 
+  if (llmThinkingSelect) {
+    llmThinkingSelect.addEventListener("change", updateLlmDirtyState);
+  }
+
+  // Rollup toggle: closed by default, only the body collapses — the header badge
+  // keeps override existence visible either way. aria-expanded is the state of
+  // record, so the chevron, body and AT stay on one source.
+  if (agentRollupHeader && agentRollupBody) {
+    agentRollupHeader.addEventListener("click", () => {
+      const isOpen = agentRollupHeader.getAttribute("aria-expanded") === "true";
+      agentRollupBody.style.display = isOpen ? "none" : "block";
+      agentRollupHeader.setAttribute("aria-expanded", isOpen ? "false" : "true");
+    });
+  }
+
   if (llmApplyBtn) {
     llmApplyBtn.addEventListener("click", async () => {
       if (llmApplyBtn.hasAttribute("disabled")) return;
@@ -2543,7 +2854,10 @@ function initZocratesPreferences() {
         const val = openRouterApiKeyInput.value.trim();
         saveSecureApiKey("openrouter_api_key", val);
       }
-      await saveLlmConfig();
+      // Nothing below may run on a failed write: refreshing the saved* snapshots
+      // would mark the card clean while the backend still holds the old config.
+      const saveOk = await saveLlmConfig();
+      if (!saveOk) return;
       if (llmProviderSelect && llmProviderSelect.value === "openrouter_llm") {
         await fetchOpenRouterModels("llm", true);
       }
@@ -2551,6 +2865,8 @@ function initZocratesPreferences() {
       savedLlmProvider = llmProviderSelect ? llmProviderSelect.value : "openrouter_llm";
       savedLlmBaseUrl = llmBaseUrlInput ? llmBaseUrlInput.value.trim() : "";
       savedLlmModel = getEffectiveLlmModel();
+      savedCoordinatorThinking = llmThinkingSelect ? llmThinkingSelect.value : savedCoordinatorThinking;
+      renderAgentModelSummary();
       updateLlmDirtyState();
 
       if (llmTestStatusBadge) {
@@ -3877,5 +4193,12 @@ if (typeof module !== "undefined" && module.exports) {
     initZocratesPreferences,
     initDrawerAccordion,
     copyTextToClipboard,
+    ROLE_DEFAULT_THINKING,
+    AGENT_ROLLUP_ROLES,
+    shortAgentModelName,
+    resolveAgentModelRow,
+    buildAgentRollupBadge,
+    buildCoordinatorThinkingPayload,
+    buildAgentTestPayload,
   };
 }
