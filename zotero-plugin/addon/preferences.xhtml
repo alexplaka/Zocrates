@@ -638,7 +638,7 @@
 
     .zc-rollup-row {
       display: grid;
-      grid-template-columns: 130px minmax(0, 1fr) auto auto auto;
+      grid-template-columns: 130px minmax(0, 1fr) auto auto;
       align-items: center;
       gap: 8px;
       padding: 6px 14px;
@@ -655,13 +655,22 @@
       color: var(--zc-text-main);
     }
 
+    /* Model cell: the effective model line with the role's thinking spec on
+       its own line below, so differing default efforts stay easy to read. */
     .zc-rollup-model {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+      color: var(--zc-text-main);
+    }
+
+    .zc-rollup-model-line {
       display: flex;
       align-items: center;
       gap: 6px;
       flex-wrap: wrap;
       min-width: 0;
-      color: var(--zc-text-main);
     }
 
     .zc-rollup-slug {
@@ -687,7 +696,11 @@
       color: var(--zc-accent);
     }
 
-    .zc-rollup-thinking,
+    .zc-rollup-thinking {
+      color: var(--zc-text-muted);
+      font-size: 11px;
+    }
+
     .zc-rollup-cost {
       color: var(--zc-text-muted);
       font-size: 11.5px;
@@ -699,9 +712,11 @@
       font-size: 11px;
     }
 
+    /* Per-row Test result: spans the full row width on its own line below the
+       role row so appearing text never squeezes the model info. */
     .zc-rollup-status {
+      grid-column: 1 / -1;
       font-size: 11px;
-      max-width: 220px;
       word-break: break-word;
     }
   </html:style>
@@ -957,7 +972,7 @@
       <html:button type="button" class="zc-drawer-header" aria-expanded="false" aria-controls="llm-provider-card-body">
         <html:span class="zc-drawer-header-text">
           <html:span class="zc-card-title">LLM Provider and Model</html:span>
-          <html:span class="zc-card-desc">Main model — used by the Coordinator and by any agent set to inherit it.</html:span>
+          <html:span class="zc-card-desc">Main Provider/Model: used by the Coordinator agent and by any other agent set to inherit it.</html:span>
         </html:span>
         <html:span style="display: flex; align-items: center; gap: 8px;">
           <html:span id="llm-provider-dirty-dot" class="zc-dirty-dot" style="display: none;"></html:span>
@@ -1050,7 +1065,10 @@
         <html:div id="agent-rollup-body" style="display: none;">
           <html:div id="agent-rollup-rows"></html:div>
           <html:div class="zc-help-text" style="margin-top: 8px; font-size: 11.5px; opacity: 0.8;">
-            To change per-agent models, edit <html:code>zocrates_config.json</html:code> — see About &#x2192; Advanced Settings in the Zocrates sidebar.
+            To change per-agent models, edit <html:code>zocrates_config.json</html:code>.
+          </html:div>
+          <html:div class="zc-help-text" style="margin-top: 2px; font-size: 11.5px; opacity: 0.8;">
+            See &#x22EE; &gt; About &gt; Advanced Settings in the Zocrates sidebar.
           </html:div>
         </html:div>
       </html:div>

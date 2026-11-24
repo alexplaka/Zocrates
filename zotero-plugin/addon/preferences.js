@@ -2084,29 +2084,34 @@ function initZocratesPreferences() {
     roleEl.textContent = AGENT_ROLLUP_ROLE_LABELS[row.role] || row.role;
     rowEl.appendChild(roleEl);
 
+    // Model cell: effective model on the first line, the role's thinking spec
+    // on its own line below so per-role default efforts stay easy to read.
     const modelEl = createXhtmlElement("span");
     modelEl.className = "zc-rollup-model";
+    const modelLineEl = createXhtmlElement("span");
+    modelLineEl.className = "zc-rollup-model-line";
     const slugEl = createXhtmlElement("span");
     slugEl.className = "zc-rollup-slug";
     slugEl.textContent = row.isOverride
       ? shortAgentModelName(row.model)
       : `inherits main (${shortAgentModelName(row.model)})`;
-    modelEl.appendChild(slugEl);
-    if (row.isOverride) appendRollupChip(modelEl, "override", "zc-rollup-chip-override");
-    if (row.hasEndpointOverride) appendRollupChip(modelEl, "local endpoint");
+    modelLineEl.appendChild(slugEl);
+    if (row.isOverride) appendRollupChip(modelLineEl, "override", "zc-rollup-chip-override");
+    if (row.hasEndpointOverride) appendRollupChip(modelLineEl, "local endpoint");
     const costText = row.isOverride ? describeRollupModelCost(row.model) : "";
     if (costText) {
       const costEl = createXhtmlElement("span");
       costEl.className = "zc-rollup-cost";
       costEl.textContent = costText;
-      modelEl.appendChild(costEl);
+      modelLineEl.appendChild(costEl);
     }
-    rowEl.appendChild(modelEl);
+    modelEl.appendChild(modelLineEl);
 
     const thinkingEl = createXhtmlElement("span");
     thinkingEl.className = "zc-rollup-thinking";
     thinkingEl.textContent = `thinking: ${row.thinking}${row.isDefaultThinking ? " (default)" : ""}`;
-    rowEl.appendChild(thinkingEl);
+    modelEl.appendChild(thinkingEl);
+    rowEl.appendChild(modelEl);
 
     // Inherited roles get no Test action: the card's own Test Connection button
     // already tests exactly that configuration.
@@ -2125,7 +2130,7 @@ function initZocratesPreferences() {
 
     testBtn.addEventListener("click", async () => {
       testBtn.disabled = true;
-      statusEl.style.display = "inline";
+      statusEl.style.display = "block";
       statusEl.textContent = "⏳ Testing...";
       statusEl.className = "zc-status-text zc-rollup-status zc-text-warning";
       try {
