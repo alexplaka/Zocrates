@@ -161,67 +161,67 @@ var BatchConverter = {
       }
     };
 
-  /**
-   * Convertible-content gate mirroring the backend's ``get_attachments`` MIME
-   * filter (application/pdf, text/html, text/markdown, text/plain), with an
-   * extension fallback. Attachments with neither content type nor filename
-   * resolved pass through so the backend can make the final call.
-   */
-  const hasConvertibleContent = (item) => {
-    const contentType = ((typeof item.attachmentContentType === "string" && item.attachmentContentType) || "").toLowerCase();
-    const filename = (typeof item.getFilename === "function" && item.getFilename()) || "";
-    const ext = filename ? String(filename).split(".").pop().toLowerCase() : "";
-    if (!contentType && !ext) return true;
-    const convertibleTypes = [
-      "application/pdf",
-      "text/html",
-      "application/xhtml+xml",
-      "text/plain",
-      "text/markdown",
-    ];
-    const convertibleExts = ["pdf", "html", "htm", "xhtml", "txt", "md", "markdown"];
-    return convertibleTypes.includes(contentType) || convertibleExts.includes(ext);
-  };
-
-  /**
-   * A convertible attachment is file-backed (not a linked-URL attachment, local
-   * file present) and carries convertible content. Zotero 10's ``fileExists()``
-   * is async (a Promise is always truthy, so it can never gate synchronously);
-   * the synchronous check is ``getFilePath()`` (path string, or ``false`` for
-   * linked-URL attachments and missing files).
-   */
-  const isConvertibleFileAttachment = (item) => {
-    try {
-      if (typeof item.isAttachment !== "function" || !item.isAttachment()) return false;
-      if (typeof item.deleted === "boolean" && item.deleted) return false;
-      const linkedUrlMode =
-        (typeof Zotero !== "undefined" && Zotero.Attachments && Zotero.Attachments.LINK_MODE_LINKED_URL) || 3;
-      if (item.attachmentLinkMode === linkedUrlMode) return false;
-      if (!hasConvertibleContent(item)) return false;
-      if (typeof item.getFilePath === "function") return !!item.getFilePath();
-      if (typeof item.getFile === "function") {
-        const file = item.getFile();
-        return !!(file && (typeof file.exists !== "function" || file.exists()));
+    /**
+     * Convertible-content gate mirroring the backend's ``get_attachments`` MIME
+     * filter (application/pdf, text/html, text/markdown, text/plain), with an
+     * extension fallback. Attachments with neither content type nor filename
+     * resolved pass through so the backend can make the final call.
+     */
+    const hasConvertibleContent = (item) => {
+      const contentType = ((typeof item.attachmentContentType === "string" && item.attachmentContentType) || "").toLowerCase();
+      const filename = (typeof item.getFilename === "function" && item.getFilename()) || "";
+      const ext = filename ? String(filename).split(".").pop().toLowerCase() : "";
+      if (!contentType && !ext) return true;
+      const convertibleTypes = [
+        "application/pdf",
+        "text/html",
+        "application/xhtml+xml",
+        "text/plain",
+        "text/markdown",
+      ];
+      const convertibleExts = ["pdf", "html", "htm", "xhtml", "txt", "md", "markdown"];
+      return convertibleTypes.includes(contentType) || convertibleExts.includes(ext);
+    };
+  
+    /**
+     * A convertible attachment is file-backed (not a linked-URL attachment, local
+     * file present) and carries convertible content. Zotero 10's ``fileExists()``
+     * is async (a Promise is always truthy, so it can never gate synchronously);
+     * the synchronous check is ``getFilePath()`` (path string, or ``false`` for
+     * linked-URL attachments and missing files).
+     */
+    const isConvertibleFileAttachment = (item) => {
+      try {
+        if (typeof item.isAttachment !== "function" || !item.isAttachment()) return false;
+        if (typeof item.deleted === "boolean" && item.deleted) return false;
+        const linkedUrlMode =
+          (typeof Zotero !== "undefined" && Zotero.Attachments && Zotero.Attachments.LINK_MODE_LINKED_URL) || 3;
+        if (item.attachmentLinkMode === linkedUrlMode) return false;
+        if (!hasConvertibleContent(item)) return false;
+        if (typeof item.getFilePath === "function") return !!item.getFilePath();
+        if (typeof item.getFile === "function") {
+          const file = item.getFile();
+          return !!(file && (typeof file.exists !== "function" || file.exists()));
+        }
+        if (typeof item.fileExists === "function") {
+          const result = item.fileExists();
+          // Async API in real Zotero: a Promise cannot be evaluated
+          // synchronously, so fail open and let the backend's own existence
+          // checks decide.
+          if (result && typeof result.then === "function") return true;
+          return !!result;
+        }
+        return true;
+      } catch (e) {
+        debugLog("Zocrates: attachment eligibility check failed: " + e);
+        return false;
       }
-      if (typeof item.fileExists === "function") {
-        const result = item.fileExists();
-        // Async API in real Zotero: a Promise cannot be evaluated
-        // synchronously, so fail open and let the backend's own existence
-        // checks decide.
-        if (result && typeof result.then === "function") return true;
-        return !!result;
-      }
-      return true;
-    } catch (e) {
-      debugLog("Zocrates: attachment eligibility check failed: " + e);
-      return false;
-    }
-  };
-
-    for (const item of items) {
-      if (!item) continue;
-      if (typeof item === "string") {
-        pushKey(item);
+    };
+  
+      for (const item of items) {
+        if (!item) continue;
+        if (typeof item === "string") {
+          pushKey(item);
         continue;
       }
       try {

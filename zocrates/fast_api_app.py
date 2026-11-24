@@ -1522,9 +1522,9 @@ def resolve_conversion_targets(syncer: Any, keys: list[str]) -> list[dict[str, A
 
         if not attachments:
             if clean_key in seen_placeholder_keys:
-                # The same unresolvable key was already reported in this request
-                # (e.g. a parent and its missing attachment co-selected, or a
-                # repeated key); one failure record per key is enough.
+                # The same unresolvable key was already reported in this
+                # request (repeated identical keys, e.g. from an external API
+                # caller); one failure record per key is enough.
                 continue
             seen_placeholder_keys.add(clean_key)
             parent_title = getattr(parent_item, "title", None)
