@@ -2994,6 +2994,122 @@ async function runTests() {
     assertLlmCardClean(indicators, "after the /config round trip with an empty saved base URL");
   });
 
+  // Test 51b: The loadPreferences() local-model seeding guard (b3787cb). The
+  // custom input must never be seeded from an OpenRouter-scoped pref model —
+  // otherwise switching provider later reveals a stale prefill — while a bare
+  // local slug on a local provider must seed (prevents a false dirty flash
+  // before fetchLlmConfig resolves).
+  function llmPrefState(providerPref, modelPref) {
+    env.zotero.Prefs.set("zocrates.llm_provider", providerPref, true);
+    if (modelPref === undefined) {
+      env.zotero.Prefs.clear("zocrates.llm_model", true);
+    } else {
+      env.zotero.Prefs.set("zocrates.llm_model", modelPref, true);
+    }
+    // Simulate a freshly constructed pane: earlier tests may have filled these
+    // fields through the fetchLlmConfig path, which never runs at real startup
+    // before loadPreferences.
+    env.document.getElementById("llm-model-custom-input").value = "";
+    env.document.getElementById("llm-model-select").value = "google/gemini-3.8-flash";
+    resetSpies();
+    api.loadPreferences();
+    const input = env.document.getElementById("llm-model-custom-input");
+    const select = env.document.getElementById("llm-model-select");
+    const indicators = fullLlmCardIndicators();
+    return { input, select, indicators };
+  }
+
+  // All four dirty indicators updateLlmDirtyState toggles, for assertLlmCardClean.
+  function fullLlmCardIndicators() {
+    return {
+      applyBtn: env.document.getElementById("llm-apply-btn"),
+      warning: env.document.getElementById("llm-unsaved-warning"),
+      baseUrlDot: env.document.getElementById("llm-base-url-input-dirty-dot"),
+      cardDot: env.document.getElementById("llm-provider-dirty-dot"),
+    };
+  }
+
+  function restoreLlmPrefs() {
+    env.zotero.Prefs.clear("zocrates.llm_provider", true);
+    env.zotero.Prefs.clear("zocrates.llm_model", true);
+    resetSpies();
+    api.loadPreferences();
+  }
+
+  await testAsync("loadPreferences seeding guard: OpenRouter pane never seeds the custom input and lands clean", async () => {
+    const { input, select, indicators } = llmPrefState("openrouter_llm", "openrouter/anthropic/claude-3.7-sonnet");
+    try {
+      assert.strictEqual(input.value, "", "the OpenRouter-scoped pref model must not leak into the custom input");
+      assert.strictEqual(select.value, "openrouter/anthropic/claude-3.7-sonnet",
+        "the LLM select must be materialized to the pref-saved model for a like-for-like dirty check");
+      assertLlmCardClean(indicators, "immediately after loadPreferences on OpenRouter");
+    } finally {
+      restoreLlmPrefs();
+    }
+  });
+
+  await testAsync("loadPreferences seeding guard: ollama pane with a stale OpenRouter-slug pref model does not seed", async () => {
+    const { input } = llmPrefState("ollama", "openrouter/~z-ai/glm-flash-latest");
+    try {
+      assert.strictEqual(input.value, "", "an OpenRouter slug must not seed the local-provider model input");
+    } finally {
+      restoreLlmPrefs();
+    }
+  });
+
+  await testAsync("loadPreferences seeding guard: ollama pane with a bare local slug seeds the input", async () => {
+    const { input } = llmPrefState("ollama", "llama3.2");
+    try {
+      assert.strictEqual(input.value, "llama3.2", "a bare local slug must seed the custom input");
+    } finally {
+      restoreLlmPrefs();
+    }
+  });
+
+  // Test 51c: Changing the Coordinator thinking select marks the card dirty,
+  // and a successful side-effect save (Refresh Models calls saveLlmConfig)
+  // advances the saved snapshot so the card lands clean again.
+  await testAsync("coordinator thinking select: dirty on change and cleaned by a successful side-effect save", async () => {
+    resetSpies();
+    // Establish a clean OpenRouter baseline (primeLlmSavedState's handler also
+    // serves the refresh click's POST /config with res.ok, advancing the
+    // snapshot); reset the base URL field that earlier tests may have left
+    // holding an auto-filled ollama default.
+    env.document.getElementById("llm-base-url-input").value = "";
+    await primeLlmSavedState({ llm_provider: "openrouter_llm", llm_base_url: "", llm_model: "google/gemini-3.8-flash" });
+    assertLlmCardClean(fullLlmCardIndicators(), "baseline before the thinking change");
+    // Swap to a spying handler for the click (primeLlmSavedState's handler does
+    // not record calls); it keeps serving res.ok so the save advances the snapshot.
+    fetchHandler = async (url, options = {}) => {
+      fetchCalls.push({ url: String(url), options });
+      return { ok: true, status: 200, json: async () => ({ status: "success" }) };
+    };
+
+    const thinkingSelect = env.document.getElementById("llm-thinking-select");
+    const thinkingDot = env.document.getElementById("llm-thinking-select-dirty-dot");
+    const indicators = fullLlmCardIndicators();
+
+    thinkingSelect.value = "low";
+    thinkingSelect.dispatchEvent("change");
+    assert.strictEqual(thinkingDot.style.display, "inline-block", "changing the thinking select must show the field dot");
+    assert.strictEqual(indicators.applyBtn.disabled, false, "changing the thinking select must enable Apply");
+
+    await env.document.getElementById("llm-refresh-btn").dispatchEvent("click");
+    // dispatchEvent fires the async click listeners without awaiting them; let
+    // their POST / write / refresh chain settle before asserting.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const postCall = fetchCalls.find((c) => c.url.includes("/config") && c.options.method === "POST");
+    assert.ok(postCall, "the side-effect save must POST /config");
+    const body = JSON.parse(postCall.options.body);
+    assert.deepStrictEqual(
+      body.override_agent_models,
+      { coordinator: { thinking_level: "low" } },
+      "the thinking write must be a coordinator-only per-role merge payload"
+    );
+    assertLlmCardClean(indicators, "after the successful side-effect save advanced the snapshot");
+    assert.strictEqual(thinkingDot.style.display, "none", "the thinking field dot must clear after the save");
+  });
+
   // Test 52: A non-empty saved base URL keeps the plain equality check. Only the
   // exact provider-default string is equivalent to an empty saved value, and no
   // normalization is applied (the backend rstrips its URL; this comparison does
