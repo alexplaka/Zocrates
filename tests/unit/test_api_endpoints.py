@@ -4046,6 +4046,24 @@ class TestMultiAttachmentConversionParity:
         assert events[1]["data"]["failed_items"][0]["item_key"] == "GHOST_KEY"
         mock_syncer.processor.convert_with.assert_not_called()
 
+    def test_batch_convert_repeated_invalid_key_yields_one_failure(self, client, tmp_path) -> None:
+        mock_syncer, _ = build_multi_attachment_syncer(tmp_path)
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            res = client.post(
+                "/batch-convert",
+                json={"item_keys": ["GHOST_KEY", "GHOST_KEY"], "converter_id": "markitdown"},
+            )
+
+        assert res.status_code == 200
+        events = parse_sse_events(res.text)
+        assert [event["event"] for event in events] == ["progress", "complete"]
+        assert events[0]["data"]["status"] == "failed"
+        assert events[1]["data"]["total"] == 1
+        assert events[1]["data"]["failed"] == 1
+        assert [item["item_key"] for item in events[1]["data"]["failed_items"]] == ["GHOST_KEY"]
+        mock_syncer.processor.convert_with.assert_not_called()
+
     def test_batch_convert_parent_with_no_valid_attachment_file_reports_failure(
         self, client, tmp_path
     ) -> None:

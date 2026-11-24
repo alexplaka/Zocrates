@@ -1494,6 +1494,7 @@ def resolve_conversion_targets(syncer: Any, keys: list[str]) -> list[dict[str, A
     """
     targets: list[dict[str, Any]] = []
     seen_attachment_keys: set[str] = set()
+    seen_placeholder_keys: set[str] = set()
 
     for raw_key in keys:
         clean_key = raw_key.strip() if isinstance(raw_key, str) else ""
@@ -1520,6 +1521,12 @@ def resolve_conversion_targets(syncer: Any, keys: list[str]) -> list[dict[str, A
                 parent_item = _resolve_attachment_parent(syncer, attachment)
 
         if not attachments:
+            if clean_key in seen_placeholder_keys:
+                # The same unresolvable key was already reported in this request
+                # (e.g. a parent and its missing attachment co-selected, or a
+                # repeated key); one failure record per key is enough.
+                continue
+            seen_placeholder_keys.add(clean_key)
             parent_title = getattr(parent_item, "title", None)
             targets.append({
                 "attachment": None,
