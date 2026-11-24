@@ -29,13 +29,14 @@ The remainder is dispositioned as follows:
 
 `cryptography` (Bleichenbacher PKCS#7 oracle), `oauthlib` ×2, `pyasn1` ×4, `urllib3` ×2, `soupsieve` ×2, `joserfc` — all are **transitive dependencies with zero direct imports** in our code, so an upgrade would churn the lock purely to silence alerts whose vulnerable paths we do not exercise directly. Per maintainers' preference, transitive pins are left alone and revisited opportunistically (when a direct parent dependency is bumped anyway, or when one of these appears in a critical advisory).
 
-### 2b. Accepted with mitigation pending upstream readiness — transformers (4 findings)
+### 2b. REMEDIATED (2026-11-24) — transformers upgraded to 5.x (was: 4 findings pending upstream readiness)
 
-Findings #3/#4/#12 (patched 5.3.0/5.5.0/5.10.0) and #41 (**no patched version**). Dry-run upgrade analysis (transformers 4.57.6 → 5.10.0) established:
+Findings #3/#4/#12 (patched 5.3.0/5.5.0/5.10.0) and #41 (**no patched version**). An earlier dry-run analysis (4.57.6 → 5.10.0) had deferred the upgrade because the Jina model's then-cached remote code imported transformers-5.0-removed internals. **Upgraded to transformers 5.24.1 (2026-11-24)** after live verification against the freshly resolved upstream remote code (Jina now ships a `transformers < v5` compatibility shim in its modeling file):
 
-- **No dynamic-code exposure matching any of the four advisories.** #12 is not applicable (zero `save_pretrained` / chat-template usage); #41's attack path (custom generation code downloaded before trust consent) requires `pipeline()` / generation-config loading — never used. The one `trust_remote_code=True` call (`zocrates/rag/embeddings.py::LocalEmbedder`) targets a **hardcoded, non-configurable** model id, so no user-controlled value can steer the loaded repository — an upstream supply-chain trust decision, not an input-driven vulnerability.
-- **A drop-in upgrade is blocked downstream of our code**: the Jina model's locally cached remote code imports transformers-5.0-removed internals; a safe upgrade requires verifying upstream Jina 5.x readiness and a live model-load smoke test after cache purge. Deferred until that upstream compatibility is confirmed; then upgrade directly to ≥5.10.0 in one step.
-- Hygiene noted (not actioned): `hardware.py::validate_model_compatibility` is dead code containing an unreachable `trust_remote_code` sink; `peft` is an unused direct dependency.
+- `#3` / `#4` / `#12`: **remediated** by the 5.24.1 bump.
+- `#41` (no upstream patched version): remains nominally open, but its attack path (custom generation code downloaded before trust consent) requires `pipeline()` / generation-config loading — **never used in Zocrates**. The one `trust_remote_code=True` call (`zocrates/rag/embeddings.py::LocalEmbedder`) targets a **hardcoded, non-configurable** model id, so no user-controlled value can steer the loaded repository — an upstream supply-chain trust decision, not an input-driven vulnerability.
+- Verification performed: Jina v5 embedder end-to-end (768-d vectors, graceful GPU→CPU fallback), docling / docling-ibm-models runtime conversion, resolver matrix check (`docling-ibm-models` permits `transformers<6.0.0`), and targeted unit suite.
+- Corrections to the prior hygiene notes: `peft` is **not** an unused dependency — it is required at runtime by the Jina v5 remote modeling code (`modeling_jina_embeddings_v5.py` unconditionally imports `PeftMixedModel` to load retrieval LoRA adapters), a dependency that is invisible to static analysis because it lives behind `trust_remote_code=True` dynamic loading. It was restored in the same change after the earlier removal was found to silently break local-embedding cold starts (transformers `check_imports` fails at model load, in both 4.57 and 5.x). The dead `hardware.py::validate_model_compatibility` note stands.
 
 ### 2c. Deferred by decision — litellm (1) and filelock (1)
 
@@ -70,8 +71,8 @@ Of 5 low findings, 4 auto-resolve from the existing bumps (aiohttp, pypdf, authl
 | Disposition | Findings |
 |---|---|
 | Remediated via dependency bumps | 9 critical + 30 high + 66 moderate (pypdf, aiohttp) + 36 high + 44 moderate + 4 low auto-resolved by the same bumps |
+| Remediated (2026-11-24) | transformers ×4 (high) — upgraded to 5.24.1 with live verification; #41 remains unpatched upstream but its attack path (pipeline()/generation-config) is never exercised |
 | Removed outright | sentence-transformers (dev dependency, unused consumers) |
 | Accepted with mitigation, pending upstream fix | chromadb ×4 (2 critical + 2 high) — embedded-only deployment |
-| Accepted with mitigation, pending upstream 5.x readiness | transformers ×4 (high) — hardcoded model id, no matching exposure |
 | Deferred by decision (transitive-only, no direct usage) | cryptography, oauthlib ×2, pyasn1 ×4, urllib3 ×2, soupsieve ×2, joserfc (12 high) + soupsieve/oauthlib/urllib3/joserfc/opentelemetry-api ×2/mail-parser ×2/multidict/accelerate (18 moderate) + setuptools (1 low) |
 | Deferred by decision (compat-verification pass needed) | litellm, filelock (2 high + 7 moderate) |
