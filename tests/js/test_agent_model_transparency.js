@@ -24,6 +24,7 @@ const {
   buildAgentRollupBadge,
   buildCoordinatorThinkingPayload,
   buildAgentTestPayload,
+  shouldSeedLocalModelInput,
 } = require("../../zotero-plugin/addon/preferences.js");
 
 const MAIN_MODEL = "openrouter/~z-ai/glm-flash-latest";
@@ -230,6 +231,29 @@ async function runTests() {
   await testAsync("test payload keeps a null model when no override is present", () => {
     const payload = buildAgentTestPayload("library_search", { model: null }, { llm_provider: "openrouter_llm" });
     assert.strictEqual(payload.llm_model, null);
+  });
+
+  // --- shouldSeedLocalModelInput -------------------------------------------
+  await testAsync("seed guard: never seeds while the pane opens on OpenRouter", () => {
+    assert.strictEqual(shouldSeedLocalModelInput("openrouter_llm", "llama3.2"), false);
+    assert.strictEqual(shouldSeedLocalModelInput("openrouter_llm", "openrouter/google/gemini-3.8-flash"), false);
+  });
+
+  await testAsync("seed guard: seeds a bare local slug on a local provider", () => {
+    assert.strictEqual(shouldSeedLocalModelInput("ollama", "llama3.2"), true);
+    assert.strictEqual(shouldSeedLocalModelInput("vllm", "Qwen/Qwen3-8B"), true);
+    assert.strictEqual(shouldSeedLocalModelInput("openai_compatible", "gpt-4o-mini"), true);
+  });
+
+  await testAsync("seed guard: never seeds an OpenRouter-prefixed slug on a local provider", () => {
+    assert.strictEqual(shouldSeedLocalModelInput("ollama", "openrouter/~z-ai/glm-flash-latest"), false);
+  });
+
+  await testAsync("seed guard: empty provider or model never seeds", () => {
+    assert.strictEqual(shouldSeedLocalModelInput("", "llama3.2"), false);
+    assert.strictEqual(shouldSeedLocalModelInput("ollama", ""), false);
+    assert.strictEqual(shouldSeedLocalModelInput("ollama", null), false);
+    assert.strictEqual(shouldSeedLocalModelInput(null, null), false);
   });
 }
 

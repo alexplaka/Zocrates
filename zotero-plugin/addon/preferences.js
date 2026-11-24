@@ -78,6 +78,21 @@ function buildAgentRollupBadge(rows) {
   };
 }
 
+// Should loadPreferences() seed the local-provider model input from the cached
+// Zotero pref? Only when the pane opens on a local provider and the cached
+// model is a bare local slug. While the pane is on OpenRouter the pref mirrors
+// the OpenRouter-scoped global model, so seeding unconditionally leaked an
+// OpenRouter slug (or the hardcoded fallback) into the hidden input, which then
+// appeared pre-filled the moment the user switched provider. Exported for tests.
+function shouldSeedLocalModelInput(provider, savedModel) {
+  return Boolean(
+    provider
+    && provider !== "openrouter_llm"
+    && savedModel
+    && !String(savedModel).startsWith("openrouter/")
+  );
+}
+
 // The coordinator entry Apply writes when the thinking select is dirty.
 // null means "back to the role default", which resolves identically through
 // build_agent_llm's fallback chain — so the entry holds only the UI-managed key
@@ -1093,13 +1108,16 @@ function initZocratesPreferences() {
         // model is a local (bare) slug. Seeding unconditionally leaked the
         // OpenRouter-scoped model (or the hardcoded fallback) into the input,
         // which then appeared pre-filled the moment the user switched provider.
-        if (
-          llmModelCustomInput
-          && savedLlmModel
-          && savedLlmProvider !== "openrouter_llm"
-          && !savedLlmModel.startsWith("openrouter/")
-        ) {
+        if (llmModelCustomInput && shouldSeedLocalModelInput(savedLlmProvider, savedLlmModel)) {
           llmModelCustomInput.value = savedLlmModel;
+        }
+        if (savedLlmProvider === "openrouter_llm") {
+          // Same reasoning as the embedding model above: the LLM select ships a
+          // static placeholder option and the catalog fetch is async, so
+          // materialize the pref-saved model for the initial dirty evaluation
+          // (updateLlmDirtyState at the bottom of this function). The async
+          // catalog fetch later rebuilds the option list and re-selects it.
+          materializeConfiguredModelOption("llm", savedLlmModel);
         }
 
         savedDatalabApiKey = loadSecureApiKey("datalab_api_key", "extensions.zocrates.datalabApiKey");
@@ -2069,6 +2087,10 @@ function initZocratesPreferences() {
       const promptText = promptPrice < 0.01 ? `$${promptPrice.toFixed(4)}` : `$${promptPrice.toFixed(2)}`;
       return `${promptText} / 1M prompt`;
     }
+    if (completionPrice > 0) {
+      const completionText = completionPrice < 0.01 ? `$${completionPrice.toFixed(4)}` : `$${completionPrice.toFixed(2)}`;
+      return `${completionText} / 1M completion`;
+    }
     return "paid";
   }
 
@@ -2589,6 +2611,11 @@ function initZocratesPreferences() {
         rawLlmModels = data.models;
         renderFilteredLlmModels(activeModelToSelect);
         renderVlmModels(savedVlmCloudModel, savedVlmBackupModel);
+        // The catalog arrival can newly resolve override-row cost labels
+        // (describeRollupModelCost consults rawLlmModels), so re-render the
+        // rollup whenever the LLM catalog lands — including late loads after a
+        // provider switch or a manual Refresh Models click.
+        renderAgentModelSummary();
       }
     } catch (err) {
       Zotero.debug(`Zocrates: Error fetching OpenRouter ${targetType} models: ${err}`);
@@ -4223,5 +4250,6 @@ if (typeof module !== "undefined" && module.exports) {
     buildAgentRollupBadge,
     buildCoordinatorThinkingPayload,
     buildAgentTestPayload,
+    shouldSeedLocalModelInput,
   };
 }
