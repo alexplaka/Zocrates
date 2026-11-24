@@ -3993,7 +3993,9 @@ class TestMultiAttachmentConversionParity:
             (MULTI_PDF_B_KEY, "success"),
             (MULTI_HTML_KEY, "success"),
         ]
-        assert "Corrupted PDF structure" in data["attachments"][0]["error"]
+        assert data["attachments"][0]["error"] == (
+            "Conversion failed. See backend logs for details."
+        )
         # The trailing sibling still converted after the first one failed.
         assert mock_syncer.processor.convert_with.call_count == 3
         assert mock_syncer.store.ingest_document.call_count == 2

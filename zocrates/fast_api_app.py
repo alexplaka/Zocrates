@@ -1966,6 +1966,14 @@ async def convert_item(item_key: str, request: ConvertRequest | None = None) -> 
 
     # Several attachments belong to the requested item: convert every sibling in
     # turn and aggregate the outcome so one failure cannot hide the rest.
+    # Client-facing error strings stay generic (exception messages may carry
+    # filesystem paths or internal details); the full exception text is logged
+    # server-side per attachment below.
+    SAFE_HTTP_ERROR_MESSAGES = {
+        400: "Attachment content is not supported by this converter.",
+        404: "Attachment file was not found on disk.",
+        504: "Conversion timed out. Try a local converter or a faster Datalab mode.",
+    }
     attachment_results: list[dict[str, Any]] = []
     total_chars = 0
     total_chunks = 0
@@ -1977,17 +1985,19 @@ async def convert_item(item_key: str, request: ConvertRequest | None = None) -> 
             )
         except HTTPException as exc:
             detail = exc.detail
-            message = detail.get("message") if isinstance(detail, dict) else str(detail)
+            full_message = detail.get("message") if isinstance(detail, dict) else str(detail)
             logger.error(
                 "Conversion failed for attachment %s ('%s'): %s",
                 attachment.item_key,
                 target["title"],
-                message,
+                full_message,
             )
             attachment_results.append({
                 "item_key": attachment.item_key,
                 "status": "failed",
-                "error": message,
+                "error": SAFE_HTTP_ERROR_MESSAGES.get(
+                    exc.status_code, "Conversion failed. See backend logs for details."
+                ),
             })
             continue
         except Exception as exc:
@@ -2000,7 +2010,7 @@ async def convert_item(item_key: str, request: ConvertRequest | None = None) -> 
             attachment_results.append({
                 "item_key": attachment.item_key,
                 "status": "failed",
-                "error": str(exc),
+                "error": "Unexpected conversion failure. See backend logs for details.",
             })
             continue
 
