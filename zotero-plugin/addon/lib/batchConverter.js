@@ -9,6 +9,12 @@ if (typeof ChromeUtils !== "undefined" && typeof ChromeUtils.importGlobalPropert
   } catch (e) {}
 }
 
+function debugLog(message) {
+  if (typeof Zotero !== "undefined" && typeof Zotero.debug === "function") {
+    Zotero.debug(message);
+  }
+}
+
 function _resolveBatchGlobals(win) {
   let targetWin = win || (typeof Zotero !== "undefined" && Zotero.getMainWindow ? Zotero.getMainWindow() : null);
 
@@ -125,15 +131,135 @@ var BatchConverter = {
     }
   },
 
+  /**
+   * Expand the user's selection into Zotero attachment keys for conversion
+   * requests.
+   *
+   * Library-pane selections contain parent items (regular items), whose
+   * convertible content lives in their child attachments, so each regular item
+   * is expanded to its file-backed child attachments. Directly selected
+   * attachments pass through (only when a local file actually exists), and
+   * plain strings pass through untouched (callers like scholarImport pass
+   * attachment keys directly). Notes, annotations, and link-mode attachments
+   * without a local file are skipped. Results are deduplicated so a parent and
+   * its own attachment selected together yield one key per attachment.
+   *
+   * When expansion is impossible or yields nothing (no Zotero.Items available,
+   * exotic wrapper objects, no file-backed children), the item's own key is
+   * passed through as a fallback: the backend resolves parent keys itself and
+   * reports a per-key failure when nothing is convertible, so dropping keys
+   * here would silently hide items from the estimate and the SSE report.
+   */
   getAttachmentKeysFromSelected(items) {
     if (!items || !items.length) return [];
-    let keys = [];
-    for (let item of items) {
-      if (!item) continue;
-      if (typeof item === "string") {
-        keys.push(item);
-      } else if (item.key) {
-        keys.push(item.key);
+    const keys = [];
+    const seen = new Set();
+    const pushKey = (key) => {
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        keys.push(key);
+      }
+    };
+
+    /**
+     * Convertible-content gate mirroring the backend's ``get_attachments`` MIME
+     * filter (application/pdf, text/html, text/markdown, text/plain), with an
+     * extension fallback. Attachments with neither content type nor filename
+     * resolved pass through so the backend can make the final call.
+     */
+    const hasConvertibleContent = (item) => {
+      const contentType = ((typeof item.attachmentContentType === "string" && item.attachmentContentType) || "").toLowerCase();
+      const filename = (typeof item.getFilename === "function" && item.getFilename()) || "";
+      const ext = filename ? String(filename).split(".").pop().toLowerCase() : "";
+      if (!contentType && !ext) return true;
+      const convertibleTypes = [
+        "application/pdf",
+        "text/html",
+        "application/xhtml+xml",
+        "text/plain",
+        "text/markdown",
+      ];
+      const convertibleExts = ["pdf", "html", "htm", "xhtml", "txt", "md", "markdown"];
+      return convertibleTypes.includes(contentType) || convertibleExts.includes(ext);
+    };
+  
+    /**
+     * A convertible attachment is file-backed (not a linked-URL attachment, local
+     * file present) and carries convertible content. Zotero 10's ``fileExists()``
+     * is async (a Promise is always truthy, so it can never gate synchronously);
+     * the synchronous check is ``getFilePath()`` (path string, or ``false`` for
+     * linked-URL attachments and missing files).
+     */
+    const isConvertibleFileAttachment = (item) => {
+      try {
+        if (typeof item.isAttachment !== "function" || !item.isAttachment()) return false;
+        if (typeof item.deleted === "boolean" && item.deleted) return false;
+        const linkedUrlMode =
+          (typeof Zotero !== "undefined" && Zotero.Attachments && Zotero.Attachments.LINK_MODE_LINKED_URL) || 3;
+        if (item.attachmentLinkMode === linkedUrlMode) return false;
+        if (!hasConvertibleContent(item)) return false;
+        if (typeof item.getFilePath === "function") return !!item.getFilePath();
+        if (typeof item.getFile === "function") {
+          const file = item.getFile();
+          return !!(file && (typeof file.exists !== "function" || file.exists()));
+        }
+        if (typeof item.fileExists === "function") {
+          const result = item.fileExists();
+          // Async API in real Zotero: a Promise cannot be evaluated
+          // synchronously, so fail open and let the backend's own existence
+          // checks decide.
+          if (result && typeof result.then === "function") return true;
+          return !!result;
+        }
+        return true;
+      } catch (e) {
+        debugLog("Zocrates: attachment eligibility check failed: " + e);
+        return false;
+      }
+    };
+  
+      for (const item of items) {
+        if (!item) continue;
+        if (typeof item === "string") {
+          pushKey(item);
+        continue;
+      }
+      try {
+        if (typeof item.isAttachment === "function" && item.isAttachment()) {
+          if (isConvertibleFileAttachment(item)) pushKey(item.key);
+          continue;
+        }
+        if ((typeof item.isNote === "function" && item.isNote())
+            || (typeof item.isAnnotation === "function" && item.isAnnotation())) {
+          continue;
+        }
+        if (typeof item.getAttachments !== "function") {
+          // Not a Zotero regular item (legacy wrapper with a key); pass through.
+          pushKey(item.key);
+          continue;
+        }
+        const attachmentIDs = item.getAttachments() || [];
+        let children = [];
+        if (attachmentIDs.length && typeof Zotero !== "undefined" && Zotero.Items
+            && typeof Zotero.Items.get === "function") {
+          children = Zotero.Items.get(attachmentIDs) || [];
+        }
+        let expanded = 0;
+        for (const child of children) {
+          if (child && isConvertibleFileAttachment(child)) {
+            pushKey(child.key);
+            expanded += 1;
+          }
+        }
+        if (expanded === 0 && item.key) {
+          // Nothing convertible found client-side (missing files, filtered
+          // attachments, or no Zotero.Items in this environment): let the
+          // backend resolve the parent key and report the outcome.
+          pushKey(item.key);
+        }
+      } catch (e) {
+        debugLog("Zocrates: selection expansion failed for an item: " + e);
+        if (item.key) pushKey(item.key);
       }
     }
     return keys;
@@ -234,7 +360,7 @@ var BatchConverter = {
       this.renderConversionStatusModal({
         title: "Zocrates: Conversion Status",
         subtitle: "Zocrates converts documents to Markdown for LLM-ingestion.",
-        scopeLabel: `Selected: ${keys.length} item(s) (${total} document attachment(s))`,
+        scopeLabel: `Selected: ${keys.length} document attachment(s)`,
         total,
         cachedCount,
         converterCounts,
@@ -850,7 +976,7 @@ var BatchConverter = {
       let lines = [
         `Convert ${keys.length} document${keys.length === 1 ? "" : "s"} with ${converterLabel}?`,
         "",
-        `• Selected items: ${keys.length}`,
+        `• Selected documents: ${keys.length}`,
       ];
       if (estimate) {
         let alreadyConverted = estimate.already_converted_count || 0;
@@ -1067,7 +1193,7 @@ var BatchConverter = {
       };
 
       let appendSelectedItemsLine = () => {
-        appendLine(infoBox, `• Selected items: ${keys.length}`, "font-weight: 600;");
+        appendLine(infoBox, `• Selected documents: ${keys.length}`, "font-weight: 600;");
       };
 
       let renderAcceptedEstimate = () => {
@@ -1357,7 +1483,7 @@ var BatchConverter = {
           let promptLines = [
             `Convert ${keys.length} document${keys.length === 1 ? "" : "s"} with ${converterLabel}?`,
             "",
-            `• Selected items: ${keys.length}`,
+            `• Selected documents: ${keys.length}`,
           ];
 
           if (alreadyConverted > 0) {

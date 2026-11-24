@@ -1188,6 +1188,230 @@ async function runTests() {
       assert.ok(!("actualMode" in updates[0]), "actualMode must not be added");
     });
   });
+
+  // --- getAttachmentKeysFromSelected: selection -> attachment-key expansion ---
+  const makeAttachmentItem = (key, opts = {}) => ({
+    key,
+    isAttachment: () => true,
+    deleted: opts.deleted === true,
+    ...(opts.linkMode !== undefined ? { attachmentLinkMode: opts.linkMode } : {}),
+    // Zotero 10's synchronous existence check: path string, or false for
+    // linked-URL attachments / missing files. fileExists() would be async.
+    getFilePath: () => (opts.filePath !== undefined ? opts.filePath : "/storage/" + key + "/file.pdf"),
+    ...(opts.contentType !== undefined ? { attachmentContentType: opts.contentType } : {}),
+    ...(opts.filename !== undefined ? { getFilename: () => opts.filename } : {}),
+    ...(opts.fileExists !== undefined ? { fileExists: opts.fileExists } : {}),
+  });
+
+  const makeRegularItem = (key, attachmentItems, opts = {}) => ({
+    key,
+    isAttachment: () => false,
+    isNote: () => opts.isNote === true,
+    isAnnotation: () => opts.isAnnotation === true,
+    getAttachments: () => attachmentItems.map((att) => att.id),
+    ...(opts.noGetAttachments ? { getAttachments: undefined } : {}),
+  });
+
+  const withZoteroItems = (itemsById, fn) => {
+    const previous = global.Zotero;
+    global.Zotero = {
+      ...(previous || {}),
+      debug: (msg) => {},
+      Items: { get: (ids) => ids.map((id) => itemsById[id]).filter(Boolean) },
+    };
+    try {
+      return fn();
+    } finally {
+      global.Zotero = previous;
+    }
+  };
+
+  test("getAttachmentKeysFromSelected: passes plain strings through untouched", () => {
+    assert.deepStrictEqual(
+      BatchConverter.getAttachmentKeysFromSelected(["ATTKEY1", "ATTKEY2"]),
+      ["ATTKEY1", "ATTKEY2"]
+    );
+  });
+
+  test("getAttachmentKeysFromSelected: expands a parent to its file-backed attachments", () => {
+    const pdf1 = { id: 11, key: "PDF1", isAttachment: () => true, fileExists: () => true };
+    const pdf2 = { id: 12, key: "PDF2", isAttachment: () => true, fileExists: () => true };
+    const html = { id: 13, key: "SNAP1", isAttachment: () => true, fileExists: () => true };
+    const parent = makeRegularItem("PARENT1", [pdf1, pdf2, html]);
+
+    withZoteroItems({ 11: pdf1, 12: pdf2, 13: html }, () => {
+      assert.deepStrictEqual(
+        BatchConverter.getAttachmentKeysFromSelected([parent]),
+        ["PDF1", "PDF2", "SNAP1"]
+      );
+    });
+  });
+
+  test("getAttachmentKeysFromSelected: skips attachments without a local file", () => {
+    const present = { id: 21, key: "OK1", isAttachment: () => true, getFilePath: () => "/storage/OK1/f.pdf" };
+    const missing = { id: 22, key: "MISS1", isAttachment: () => true, getFilePath: () => false };
+    const linkUrl = {
+      id: 23,
+      key: "LINK1",
+      isAttachment: () => true,
+      attachmentLinkMode: 3,
+      getFilePath: () => false,
+    };
+    const parent = makeRegularItem("PARENT2", [present, missing, linkUrl]);
+
+    withZoteroItems({ 21: present, 22: missing, 23: linkUrl }, () => {
+      assert.deepStrictEqual(
+        BatchConverter.getAttachmentKeysFromSelected([parent]),
+        ["OK1"]
+      );
+    });
+  });
+
+  test("getAttachmentKeysFromSelected: skips linked-URL attachments even with an optimistic fileExists", () => {
+    const linkUrl = {
+      id: 24,
+      key: "LINK2",
+      isAttachment: () => true,
+      attachmentLinkMode: 3,
+      fileExists: () => Promise.resolve(true),
+    };
+
+    assert.deepStrictEqual(
+      BatchConverter.getAttachmentKeysFromSelected([linkUrl]),
+      []
+    );
+  });
+
+  test("getAttachmentKeysFromSelected: skips non-convertible content types", () => {
+    const paper = { id: 25, key: "PAPER1", isAttachment: () => true, getFilePath: () => "/s/f.pdf", attachmentContentType: "application/pdf" };
+    const zip = { id: 26, key: "ZIP1", isAttachment: () => true, getFilePath: () => "/s/s.zip", attachmentContentType: "application/zip" };
+    const audio = { id: 27, key: "AUDIO1", isAttachment: () => true, getFilePath: () => "/s/a.mp3", getFilename: () => "interview.mp3" };
+    const parent = makeRegularItem("PARENT6", [paper, zip, audio]);
+
+    withZoteroItems({ 25: paper, 26: zip, 27: audio }, () => {
+      assert.deepStrictEqual(
+        BatchConverter.getAttachmentKeysFromSelected([parent]),
+        ["PAPER1"]
+      );
+    });
+  });
+
+  test("getAttachmentKeysFromSelected: keeps convertible attachments with unresolved metadata", () => {
+    const unresolved = { id: 28, key: "NEW1", isAttachment: () => true, getFilePath: () => "/s/f.pdf" };
+
+    assert.deepStrictEqual(
+      BatchConverter.getAttachmentKeysFromSelected([unresolved]),
+      ["NEW1"]
+    );
+  });
+
+  test("getAttachmentKeysFromSelected: fails open on the legacy async fileExists API", () => {
+    const legacyAsync = { id: 29, key: "ASYNC1", isAttachment: () => true, fileExists: () => Promise.resolve(false) };
+
+    // A Promise is always truthy and cannot gate synchronously: fail open and
+    // let the backend's own existence checks decide.
+    assert.deepStrictEqual(
+      BatchConverter.getAttachmentKeysFromSelected([legacyAsync]),
+      ["ASYNC1"]
+    );
+  });
+
+  test("getAttachmentKeysFromSelected: includes directly selected file-backed attachments only", () => {
+    const present = makeAttachmentItem("OK2");
+    const missing = makeAttachmentItem("MISS2", { filePath: false });
+    const deleted = makeAttachmentItem("DELE1", { deleted: true });
+
+    assert.deepStrictEqual(
+      BatchConverter.getAttachmentKeysFromSelected([present, missing, deleted]),
+      ["OK2"]
+    );
+  });
+
+  test("getAttachmentKeysFromSelected: skips notes and annotations", () => {
+    const note = { key: "NOTE1", isAttachment: () => false, isNote: () => true };
+    const annotation = { key: "ANNOT1", isAttachment: () => false, isAnnotation: () => true };
+
+    assert.deepStrictEqual(
+      BatchConverter.getAttachmentKeysFromSelected([note, annotation]),
+      []
+    );
+  });
+
+  test("getAttachmentKeysFromSelected: deduplicates parent plus its own attachment", () => {
+    const child = { id: 31, key: "CHILD1", isAttachment: () => true, fileExists: () => true };
+    const parent = makeRegularItem("PARENT3", [child]);
+    const directChild = makeAttachmentItem("CHILD1");
+
+    withZoteroItems({ 31: child }, () => {
+      assert.deepStrictEqual(
+        BatchConverter.getAttachmentKeysFromSelected([parent, directChild]),
+        ["CHILD1"]
+      );
+    });
+  });
+
+  test("getAttachmentKeysFromSelected: falls back to the parent key when expansion yields nothing", () => {
+    const missingChild = { id: 41, key: "GONE1", isAttachment: () => true, fileExists: () => false };
+    const parent = makeRegularItem("PARENT4", [missingChild]);
+
+    withZoteroItems({ 41: missingChild }, () => {
+      // The backend resolves parent keys itself and reports per-key failures;
+      // dropping the key here would hide the item from estimate and SSE.
+      assert.deepStrictEqual(
+        BatchConverter.getAttachmentKeysFromSelected([parent]),
+        ["PARENT4"]
+      );
+    });
+  });
+
+  test("getAttachmentKeysFromSelected: falls back to item key without Zotero.Items", () => {
+    const previous = global.Zotero;
+    global.Zotero = undefined;
+    try {
+      const parent = makeRegularItem("PARENT5", [makeAttachmentItem("ANY1")]);
+      assert.deepStrictEqual(
+        BatchConverter.getAttachmentKeysFromSelected([parent]),
+        ["PARENT5"]
+      );
+    } finally {
+      global.Zotero = previous;
+    }
+  });
+
+  test("getAttachmentKeysFromSelected: exception in expansion falls back to the item key", () => {
+    const boom = {
+      key: "BOOM1",
+      isAttachment: () => false,
+      getAttachments: () => {
+        throw new Error("db locked");
+      },
+    };
+
+    assert.deepStrictEqual(
+      BatchConverter.getAttachmentKeysFromSelected([boom]),
+      ["BOOM1"]
+    );
+  });
+
+  test("getAttachmentKeysFromSelected: exception in eligibility check skips the attachment", () => {
+    const throwing = {
+      id: 51,
+      key: "THROW1",
+      isAttachment: () => true,
+      getFilePath: () => {
+        throw new Error("io error");
+      },
+    };
+    const healthy = { id: 52, key: "HEALTHY1", isAttachment: () => true, getFilePath: () => "/s/f.pdf" };
+    const parent = makeRegularItem("PARENT7", [throwing, healthy]);
+
+    withZoteroItems({ 51: throwing, 52: healthy }, () => {
+      assert.deepStrictEqual(
+        BatchConverter.getAttachmentKeysFromSelected([parent]),
+        ["HEALTHY1"]
+      );
+    });
+  });
 }
 
 if (require.main === module) {
