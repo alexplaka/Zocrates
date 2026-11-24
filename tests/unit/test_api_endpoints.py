@@ -721,13 +721,25 @@ class TestCostEstimateEndpoint:
         mock_syncer = MagicMock()
         dummy_pdf = tmp_path / "paper.pdf"
         dummy_pdf.write_text("pdf content", encoding="utf-8")
+        second_pdf = tmp_path / "paper2.pdf"
+        second_pdf.write_text("pdf content 2", encoding="utf-8")
 
         mock_att = MagicMock()
         mock_att.item_key = "KEY1"
         mock_att.content_type = "application/pdf"
         mock_att.path = dummy_pdf
 
-        mock_syncer.db.get_attachment_by_key.return_value = mock_att
+        second_att = MagicMock()
+        second_att.item_key = "KEY2"
+        second_att.content_type = "application/pdf"
+        second_att.path = second_pdf
+
+        # Distinct keys are distinct attachments; sending the same attachment key
+        # twice would be deduplicated into a single conversion target.
+        mock_syncer.db.get_attachment_by_key.side_effect = {
+            "KEY1": mock_att,
+            "KEY2": second_att,
+        }.get
         mock_syncer.processor.get_metadata.return_value = None
 
         with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
@@ -3654,3 +3666,439 @@ class TestDiagnosticReportEndpoint:
         assert "Explain equation 3" in md
         assert "Bob" not in md
         assert r"<HOME>\Zotero\file.pdf" in md
+
+
+MULTI_PARENT_KEY = "PARENT_MULTI"
+MULTI_PDF_A_KEY = "ATT_PDF_A"
+MULTI_PDF_B_KEY = "ATT_PDF_B"
+MULTI_HTML_KEY = "ATT_HTML_C"
+
+
+def build_multi_attachment_syncer(tmp_path: Path):
+    """Build a syncer whose single parent paper owns 2 PDFs and 1 HTML snapshot.
+
+    Returns:
+        Tuple of the mocked syncer and its attachments keyed by attachment key.
+    """
+    from zocrates.rag.zotero_db import ZoteroAttachment
+
+    pdf_a = tmp_path / "primary_manuscript.pdf"
+    pdf_a.write_bytes(b"%PDF-1.4 primary")
+    pdf_b = tmp_path / "supplementary_appendix.pdf"
+    pdf_b.write_bytes(b"%PDF-1.4 supplementary")
+    html_snapshot = tmp_path / "publisher_snapshot.html"
+    html_snapshot.write_text("<html><body>snapshot</body></html>", encoding="utf-8")
+
+    attachments = {
+        MULTI_PDF_A_KEY: ZoteroAttachment(
+            item_id=701,
+            item_key=MULTI_PDF_A_KEY,
+            parent_item_id=700,
+            parent_item_key=MULTI_PARENT_KEY,
+            content_type="application/pdf",
+            path=pdf_a,
+        ),
+        MULTI_PDF_B_KEY: ZoteroAttachment(
+            item_id=702,
+            item_key=MULTI_PDF_B_KEY,
+            parent_item_id=700,
+            parent_item_key=MULTI_PARENT_KEY,
+            content_type="application/pdf",
+            path=pdf_b,
+        ),
+        MULTI_HTML_KEY: ZoteroAttachment(
+            item_id=703,
+            item_key=MULTI_HTML_KEY,
+            parent_item_id=700,
+            parent_item_key=MULTI_PARENT_KEY,
+            content_type="text/html",
+            path=html_snapshot,
+        ),
+    }
+
+    parent_item = MagicMock(
+        item_id=700,
+        item_key=MULTI_PARENT_KEY,
+        item_type="journalArticle",
+        title="Multi Attachment Paper",
+        collections=[],
+        creators=["Author A"],
+        year=2024,
+        publication="Journal of Tests",
+        doi="10.1234/test",
+        url="https://example.org/test",
+        abstract="Abstract text",
+    )
+
+    def item_by_key(key):
+        if key == MULTI_PARENT_KEY:
+            return parent_item
+        attachment = attachments.get(key)
+        if attachment is not None:
+            return MagicMock(item_id=attachment.item_id, item_key=key, item_type="attachment")
+        return None
+
+    mock_syncer = MagicMock()
+    mock_syncer.db.get_item_by_key.side_effect = item_by_key
+    mock_syncer.db.get_attachments.return_value = list(attachments.values())
+    mock_syncer.db.get_attachment_by_key.side_effect = lambda key: (
+        attachments.get(key)
+        or (attachments[MULTI_PDF_A_KEY] if key == MULTI_PARENT_KEY else None)
+    )
+    mock_syncer.db.get_item.side_effect = lambda item_id: parent_item if item_id == 700 else None
+    mock_syncer.processor._document_converter_id = "markitdown"
+    mock_syncer.processor.datalab_non_pdf_fallback = "markitdown"
+    mock_syncer.processor.get_metadata.return_value = None
+    mock_syncer.processor.is_cached.return_value = False
+    mock_syncer.processor.convert_with.return_value = (
+        "# Multi Attachment Paper\n\nConverted body content for this attachment."
+    )
+    mock_syncer.store.get_all_ingested_item_keys.return_value = set()
+    return mock_syncer, attachments
+
+
+class TestMultiAttachmentConversionParity:
+    """Manual conversion endpoints must treat every child attachment as a document."""
+
+    def test_batch_convert_expands_all_child_attachments(self, client, tmp_path) -> None:
+        mock_syncer, _ = build_multi_attachment_syncer(tmp_path)
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            res = client.post(
+                "/batch-convert",
+                json={"item_keys": [MULTI_PARENT_KEY], "converter_id": "markitdown"},
+            )
+
+        assert res.status_code == 200
+        events = parse_sse_events(res.text)
+        converting = [e["data"] for e in events if e["data"].get("status") == "converting"]
+        assert [e["current_key"] for e in converting] == [
+            MULTI_PDF_A_KEY,
+            MULTI_PDF_B_KEY,
+            MULTI_HTML_KEY,
+        ]
+        # Siblings of one parent are labelled by filename so progress rows differ.
+        assert [e["current_title"] for e in converting] == [
+            "primary_manuscript.pdf",
+            "supplementary_appendix.pdf",
+            "publisher_snapshot.html",
+        ]
+        complete = events[-1]["data"]
+        assert complete["total"] == 3
+        assert complete["processed"] == 3
+        assert complete["failed"] == 0
+        assert mock_syncer.processor.convert_with.call_count == 3
+        assert mock_syncer.store.ingest_document.call_count == 3
+
+    def test_cost_estimate_counts_all_child_attachments(self, client, tmp_path) -> None:
+        mock_syncer, _ = build_multi_attachment_syncer(tmp_path)
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer), \
+             patch("zocrates.rag.pdf_utils.count_pdf_pages", return_value=3):
+            res = client.get(
+                f"/cost-estimate?converter_id=datalab&item_keys={MULTI_PARENT_KEY}"
+            )
+
+        assert res.status_code == 200
+        data = res.json()
+        assert data["target_documents"] == 3
+        assert data["eligible_documents"] == 3
+        assert data["already_converted_count"] == 0
+        # The HTML snapshot is routed to the non-PDF fallback and costs nothing.
+        assert data["non_pdf_target_count"] == 1
+        assert data["total_pages"] == 6
+
+    def test_library_conversion_status_counts_all_child_attachments(
+        self, client, tmp_path
+    ) -> None:
+        mock_syncer, attachments = build_multi_attachment_syncer(tmp_path)
+        mock_syncer.db.get_all_convertible_attachments.return_value = [
+            {
+                "attachment_id": att.item_id,
+                "attachment_key": att.item_key,
+                "parent_item_id": att.parent_item_id,
+                "parent_key": att.parent_item_key,
+                "parent_title": "Multi Attachment Paper",
+                "content_type": att.content_type,
+                "path": att.path,
+                "filename": att.path.name,
+            }
+            for att in attachments.values()
+        ]
+        mock_syncer.processor.get_all_metadata.return_value = {}
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            res = client.get("/library/conversion-status")
+
+        assert res.status_code == 200
+        data = res.json()
+        assert data["total_documents"] == 3
+        assert data["unconverted_count"] == 3
+        assert [item["key"] for item in data["unconverted_items"]] == [
+            MULTI_PDF_A_KEY,
+            MULTI_PDF_B_KEY,
+            MULTI_HTML_KEY,
+        ]
+
+    def test_conversion_targets_deduplicate_nested_and_repeated_keys(
+        self, client, tmp_path
+    ) -> None:
+        mock_syncer, _ = build_multi_attachment_syncer(tmp_path)
+        keys = [MULTI_PARENT_KEY, MULTI_PDF_A_KEY, "   ", MULTI_PARENT_KEY, MULTI_HTML_KEY]
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            res = client.post(
+                "/batch-convert", json={"item_keys": keys, "converter_id": "markitdown"}
+            )
+
+        assert res.status_code == 200
+        events = parse_sse_events(res.text)
+        converting = [e["data"] for e in events if e["data"].get("status") == "converting"]
+        assert [e["current_key"] for e in converting] == [
+            MULTI_PDF_A_KEY,
+            MULTI_PDF_B_KEY,
+            MULTI_HTML_KEY,
+        ]
+        complete = events[-1]["data"]
+        assert complete["total"] == 3
+        assert complete["processed"] == 3
+
+    def test_estimate_and_execution_target_sets_match(self, client, tmp_path) -> None:
+        mock_syncer, attachments = build_multi_attachment_syncer(tmp_path)
+        keys = [MULTI_PARENT_KEY, MULTI_PDF_B_KEY, MULTI_HTML_KEY]
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer), \
+             patch("zocrates.rag.pdf_utils.count_pdf_pages", return_value=2):
+            estimate_res = client.get(
+                f"/cost-estimate?converter_id=datalab&item_keys={','.join(keys)}"
+            )
+            stream_res = client.post(
+                "/batch-convert", json={"item_keys": keys, "converter_id": "markitdown"}
+            )
+
+        estimate = estimate_res.json()
+        executed = [
+            e["data"]["current_key"]
+            for e in parse_sse_events(stream_res.text)
+            if e["data"].get("status") == "converting"
+        ]
+        assert executed == list(attachments)
+        assert estimate["target_documents"] == len(executed) == 3
+
+    def test_convert_single_attachment_key_keeps_flat_response(self, client, tmp_path) -> None:
+        mock_syncer, _ = build_multi_attachment_syncer(tmp_path)
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            res = client.post(
+                f"/convert/{MULTI_PDF_B_KEY}", json={"converter_id": "markitdown"}
+            )
+
+        assert res.status_code == 200
+        data = res.json()
+        assert set(data) == {"status", "item_key", "converter_id", "char_count", "chunk_count"}
+        assert data["status"] == "success"
+        assert data["item_key"] == MULTI_PDF_B_KEY
+        assert data["converter_id"] == "markitdown"
+        assert data["char_count"] > 0
+        assert data["chunk_count"] > 0
+        assert mock_syncer.processor.convert_with.call_count == 1
+        assert mock_syncer.store.ingest_document.call_count == 1
+
+    def test_convert_parent_reports_converted_sibling_as_skipped(self, client, tmp_path) -> None:
+        """One sibling already converted under force=False is skipped, not re-billed.
+
+        Each test issues a single Server-Sent-Events request: ``sse_starlette``
+        binds ``AppStatus.should_exit_event`` to the event loop of the first SSE
+        request, so a plain ``/convert`` request followed by an SSE request in
+        the same test deadlocks the transport.
+        """
+        from zocrates.rag.document_processor import _file_sha256
+
+        mock_syncer, attachments = build_multi_attachment_syncer(tmp_path)
+        converted = attachments[MULTI_PDF_A_KEY]
+        mock_syncer.processor.is_cached.side_effect = lambda key: key == MULTI_PDF_A_KEY
+        mock_syncer.processor.get_metadata.side_effect = lambda key: (
+            {"converter_id": "markitdown", "source_hash": _file_sha256(converted.path)}
+            if key == MULTI_PDF_A_KEY
+            else None
+        )
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            convert_res = client.post(
+                f"/convert/{MULTI_PARENT_KEY}", json={"converter_id": "markitdown"}
+            )
+            convert_calls = mock_syncer.processor.convert_with.call_count
+
+        convert_data = convert_res.json()
+        assert convert_data["status"] == "success"
+        assert [
+            (entry["item_key"], entry["status"]) for entry in convert_data["attachments"]
+        ] == [
+            (MULTI_PDF_A_KEY, "skipped"),
+            (MULTI_PDF_B_KEY, "success"),
+            (MULTI_HTML_KEY, "success"),
+        ]
+        assert convert_calls == 2
+        assert "char_count" not in convert_data["attachments"][0]
+
+    def test_batch_convert_reports_converted_sibling_as_skipped(
+        self, client, tmp_path
+    ) -> None:
+        """The batch stream counts the same already-converted sibling as skipped."""
+        from zocrates.rag.document_processor import _file_sha256
+
+        mock_syncer, attachments = build_multi_attachment_syncer(tmp_path)
+        converted = attachments[MULTI_PDF_A_KEY]
+        mock_syncer.processor.is_cached.side_effect = lambda key: key == MULTI_PDF_A_KEY
+        mock_syncer.processor.get_metadata.side_effect = lambda key: (
+            {"converter_id": "markitdown", "source_hash": _file_sha256(converted.path)}
+            if key == MULTI_PDF_A_KEY
+            else None
+        )
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            batch_res = client.post(
+                "/batch-convert",
+                json={"item_keys": [MULTI_PARENT_KEY], "converter_id": "markitdown"},
+            )
+
+        batch_complete = parse_sse_events(batch_res.text)[-1]["data"]
+        assert batch_complete["skipped"] == 1
+        assert batch_complete["processed"] == 2
+        assert mock_syncer.processor.convert_with.call_count == 2
+
+    def test_convert_parent_continues_after_sibling_failure(self, client, tmp_path) -> None:
+        mock_syncer, _ = build_multi_attachment_syncer(tmp_path)
+
+        def convert_side_effect(item_key, **kwargs):
+            if item_key == MULTI_PDF_A_KEY:
+                raise RuntimeError("Corrupted PDF structure")
+            return "# Multi Attachment Paper\n\nConverted body content for this attachment."
+
+        mock_syncer.processor.convert_with.side_effect = convert_side_effect
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            res = client.post(
+                f"/convert/{MULTI_PARENT_KEY}", json={"converter_id": "markitdown"}
+            )
+
+        assert res.status_code == 200
+        data = res.json()
+        assert data["status"] == "success"
+        assert data["item_key"] == MULTI_PARENT_KEY
+        assert [
+            (entry["item_key"], entry["status"]) for entry in data["attachments"]
+        ] == [
+            (MULTI_PDF_A_KEY, "failed"),
+            (MULTI_PDF_B_KEY, "success"),
+            (MULTI_HTML_KEY, "success"),
+        ]
+        assert "Corrupted PDF structure" in data["attachments"][0]["error"]
+        # The trailing sibling still converted after the first one failed.
+        assert mock_syncer.processor.convert_with.call_count == 3
+        assert mock_syncer.store.ingest_document.call_count == 2
+        assert data["char_count"] == (
+            data["attachments"][1]["char_count"] + data["attachments"][2]["char_count"]
+        )
+
+    def test_convert_all_siblings_skipped_reports_skipped(self, client, tmp_path) -> None:
+        from zocrates.rag.document_processor import _file_sha256
+
+        mock_syncer, attachments = build_multi_attachment_syncer(tmp_path)
+        mock_syncer.processor.is_cached.return_value = True
+        mock_syncer.processor.get_metadata.side_effect = lambda key: (
+            {"converter_id": "markitdown", "source_hash": _file_sha256(attachments[key].path)}
+            if key in attachments
+            else None
+        )
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            res = client.post(
+                f"/convert/{MULTI_PARENT_KEY}", json={"converter_id": "markitdown"}
+            )
+
+        assert res.status_code == 200
+        data = res.json()
+        assert data["status"] == "skipped"
+        assert [entry["status"] for entry in data["attachments"]] == [
+            "skipped",
+            "skipped",
+            "skipped",
+        ]
+        mock_syncer.processor.convert_with.assert_not_called()
+
+    def test_batch_convert_invalid_key_still_emits_failed_record(self, client, tmp_path) -> None:
+        mock_syncer, _ = build_multi_attachment_syncer(tmp_path)
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer):
+            res = client.post(
+                "/batch-convert", json={"item_keys": ["GHOST_KEY"], "converter_id": "markitdown"}
+            )
+
+        assert res.status_code == 200
+        events = parse_sse_events(res.text)
+        assert [event["event"] for event in events] == ["progress", "complete"]
+        assert events[0]["data"]["status"] == "failed"
+        assert events[0]["data"]["current_key"] == "GHOST_KEY"
+        assert "GHOST_KEY" in events[0]["data"]["error"]
+        assert events[1]["data"]["total"] == 1
+        assert events[1]["data"]["failed"] == 1
+        assert events[1]["data"]["failed_items"][0]["item_key"] == "GHOST_KEY"
+        mock_syncer.processor.convert_with.assert_not_called()
+
+    def test_batch_convert_parent_with_no_valid_attachment_file_reports_failure(
+        self, client, tmp_path
+    ) -> None:
+        mock_syncer, attachments = build_multi_attachment_syncer(tmp_path)
+        for attachment in attachments.values():
+            attachment.path.unlink()
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer), \
+             patch(
+                 "zocrates.rag.document_processor.materialize_item_metadata_bundle"
+             ) as mock_materialize:
+            res = client.post(
+                "/batch-convert",
+                json={"item_keys": [MULTI_PARENT_KEY], "converter_id": "markitdown"},
+            )
+
+        assert res.status_code == 200
+        events = parse_sse_events(res.text)
+        assert [event["event"] for event in events] == ["progress", "complete"]
+        assert events[0]["data"]["status"] == "failed"
+        assert events[0]["data"]["current_key"] == MULTI_PARENT_KEY
+        assert events[1]["data"]["failed"] == 1
+        mock_syncer.processor.convert_with.assert_not_called()
+        mock_materialize.assert_not_called()
+        mock_syncer.sync_item.assert_not_called()
+
+    def test_convert_metadata_only_parent_does_not_materialize_bundle(
+        self, client, tmp_path
+    ) -> None:
+        mock_syncer, _ = build_multi_attachment_syncer(tmp_path)
+        bare_item = MagicMock(
+            item_id=800,
+            item_key="BARE_PARENT",
+            item_type="journalArticle",
+            title="Bare Parent Paper",
+        )
+        mock_syncer.db.get_item_by_key.side_effect = lambda key: (
+            bare_item if key == "BARE_PARENT" else None
+        )
+        mock_syncer.db.get_attachments.return_value = []
+        mock_syncer.sync_item = AsyncMock(return_value="processed")
+
+        with patch("zocrates.fast_api_app.get_syncer", return_value=mock_syncer), \
+             patch(
+                 "zocrates.rag.document_processor.materialize_item_metadata_bundle"
+             ) as mock_materialize:
+            res = client.post("/convert/BARE_PARENT")
+
+        assert res.status_code == 200
+        data = res.json()
+        assert data["status"] == "processed"
+        assert data["converter_id"] == "zotero_metadata"
+        assert "attachments" not in data
+        mock_syncer.processor.convert_with.assert_not_called()
+        mock_materialize.assert_not_called()
+        mock_syncer.sync_item.assert_awaited_once_with(item_key="BARE_PARENT", force=False)

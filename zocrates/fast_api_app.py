@@ -1351,30 +1351,7 @@ def get_library_conversion_status() -> dict:
     raw_attachments = syncer.db.get_all_convertible_attachments()
     meta_map = syncer.processor.get_all_metadata()
 
-    # Deduplicate: if an item has multiple attachments, prioritize PDF attachment
-    grouped_by_parent: dict[str, list[dict[str, Any]]] = {}
-    standalone: list[dict[str, Any]] = []
-
-    for att in raw_attachments:
-        if att["parent_key"]:
-            grouped_by_parent.setdefault(att["parent_key"], []).append(att)
-        else:
-            standalone.append(att)
-
-    primary_attachments: list[dict[str, Any]] = []
-    for _p_key, att_list in grouped_by_parent.items():
-        pdf_atts = [
-            a
-            for a in att_list
-            if a["content_type"] == "application/pdf"
-               or a["path"].suffix.lower() == ".pdf"
-        ]
-        primary = pdf_atts[0] if pdf_atts else att_list[0]
-        primary_attachments.append(primary)
-
-    primary_attachments.extend(standalone)
-
-    total_documents = len(primary_attachments)
+    total_documents = len(raw_attachments)
     ingested_keys = syncer.store.get_all_ingested_item_keys()
 
     indexed_count = 0
@@ -1390,7 +1367,7 @@ def get_library_conversion_status() -> dict:
     unconverted_items: list[dict[str, Any]] = []
     pending_index_items: list[dict[str, Any]] = []
 
-    for att in primary_attachments:
+    for att in raw_attachments:
         ak = att["attachment_key"]
         meta = meta_map.get(ak)
         title = att["parent_title"] or att["filename"] or ak
@@ -1472,114 +1449,160 @@ async def ingest_items_endpoint(req: ItemIngestRequest) -> dict[str, Any]:
     return {"status": "success", "results": results}
 
 
-@app.post("/convert/{item_key}", dependencies=[Depends(verify_auth)])
-async def convert_item(item_key: str, request: ConvertRequest | None = None) -> dict:
-    """Convert a single item using the specified or active converter strategy.
+_NON_DOCUMENT_ITEM_TYPES = ("attachment", "note", "annotation")
 
-    When ``force=False`` (default), checks whether the item is already cached
-    with the target converter and identical source file hash. If so, returns
-    ``{"status": "skipped", ...}`` without re-converting.
 
-    When ``force=True`` or when un-converted/stale, destroys any existing Markdown
-    bundle for the item, converts fresh, writes the bundle + frontmatter, and
-    immediately re-indexes the vector store.
+def _resolve_attachment_parent(syncer: Any, attachment: Any) -> Any:
+    """Resolve the parent bibliographic item that owns an attachment.
+
+    Args:
+        syncer: Registered ``LibrarySyncer`` providing the Zotero database.
+        attachment: Attachment whose owning parent item should be resolved.
+
+    Returns:
+        The parent ``ZoteroItem``, or ``None`` for standalone attachments.
+    """
+    if attachment.parent_item_id:
+        return syncer.db.get_item(attachment.parent_item_id)
+    if attachment.parent_item_key:
+        return syncer.db.get_item_by_key(attachment.parent_item_key)
+    return None
+
+
+def resolve_conversion_targets(syncer: Any, keys: list[str]) -> list[dict[str, Any]]:
+    """Expand conversion input keys into one target per convertible attachment.
+
+    Manual conversion entry points receive a mix of parent item keys (library
+    pane selections) and attachment keys (item pane, auto-converter, scholar
+    import). A parent key expands to every convertible child attachment so
+    sibling attachments are no longer masked by a single "primary" one; an
+    attachment key resolves to that attachment alone. Keys that resolve to no
+    attachment file on disk still yield a placeholder target (``attachment`` is
+    ``None``) so streaming callers can report the failure, while callers that
+    only count documents filter the placeholders out.
+
+    Args:
+        syncer: Registered ``LibrarySyncer`` providing the Zotero database.
+        keys: Raw item keys in request order; blank entries are ignored.
+
+    Returns:
+        Targets in input order, PDF-first with attachment key as the stable
+        tie-break within a parent, deduplicated by attachment key. Each target
+        is a dict with ``attachment``, ``parent_item``, ``title``, and
+        ``original_key``; ``title`` is the parent title for a lone attachment
+        and the attachment filename for siblings of a multi-attachment parent.
+    """
+    targets: list[dict[str, Any]] = []
+    seen_attachment_keys: set[str] = set()
+
+    for raw_key in keys:
+        clean_key = raw_key.strip() if isinstance(raw_key, str) else ""
+        if not clean_key:
+            continue
+
+        parent_item = syncer.db.get_item_by_key(clean_key)
+        item_type = getattr(parent_item, "item_type", None)
+        if isinstance(item_type, str) and item_type in _NON_DOCUMENT_ITEM_TYPES:
+            # The key denotes the attachment or note itself, not a parent item.
+            parent_item = None
+
+        attachments: list[Any] = []
+        if parent_item is not None:
+            attachments = [
+                att
+                for att in syncer.db.get_attachments(parent_item.item_id)
+                if getattr(att, "path", None) and att.path.exists()
+            ]
+        if not attachments:
+            attachment = syncer.db.get_attachment_by_key(clean_key)
+            if attachment and attachment.path and attachment.path.exists():
+                attachments = [attachment]
+                parent_item = _resolve_attachment_parent(syncer, attachment)
+
+        if not attachments:
+            parent_title = getattr(parent_item, "title", None)
+            targets.append({
+                "attachment": None,
+                "parent_item": parent_item,
+                "title": parent_title if isinstance(parent_title, str) and parent_title else clean_key,
+                "original_key": clean_key,
+            })
+            continue
+
+        attachments.sort(
+            key=lambda att: (
+                0
+                if att.content_type == "application/pdf"
+                or (att.path and att.path.suffix.lower() == ".pdf")
+                else 1,
+                str(att.item_key),
+            )
+        )
+
+        pending: list[Any] = []
+        for attachment in attachments:
+            if attachment.item_key in seen_attachment_keys:
+                continue
+            seen_attachment_keys.add(attachment.item_key)
+            pending.append(attachment)
+
+        # A lone attachment keeps the parent title (the established progress
+        # label); siblings of a multi-attachment parent are labelled by filename
+        # so the streaming rows stay distinguishable.
+        parent_title = getattr(parent_item, "title", None)
+        use_parent_title = (
+            len(pending) == 1 and isinstance(parent_title, str) and bool(parent_title)
+        )
+        for attachment in pending:
+            if use_parent_title:
+                title = parent_title
+            elif attachment.path:
+                title = attachment.path.name
+            else:
+                title = clean_key
+            targets.append({
+                "attachment": attachment,
+                "parent_item": parent_item,
+                "title": title,
+                "original_key": clean_key,
+            })
+
+    return targets
+
+
+async def _convert_single_attachment(
+        syncer: Any,
+        attachment: Any,
+        parent_item: Any,
+        active_id: str,
+        request: ConvertRequest | None,
+) -> dict[str, Any]:
+    """Convert and index one attachment under its own conversion identity.
+
+    Args:
+        syncer: Registered ``LibrarySyncer`` owning the converters and stores.
+        attachment: Attachment to convert; its key scopes every cache and index write.
+        parent_item: Parent bibliographic item supplying frontmatter metadata.
+        active_id: Request-level converter id resolved by the caller.
+        request: Original request carrying ``force`` and the Datalab mode override.
+
+    Returns:
+        ``{"status": "skipped", ...}`` when the incremental gate matched, or
+        ``{"status": "success", ...}`` with the produced character and chunk counts.
+
+    Raises:
+        HTTPException: 504 on timeout, 400 on unsupported content or unknown
+            converter, 500 on any other conversion failure.
     """
     from zocrates.rag.chunker import chunk_markdown
     from zocrates.config import (
         CHUNK_MAX_CHARS,
         CHUNK_OVERLAP_CHARS,
-        get_document_converter_id,
     )
     from zocrates.rag.document_processor import UnsupportedConversionError
 
-    try:
-        syncer = get_syncer()
-    except RuntimeError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail="Zocrates backend is not registered. Call /register first.",
-        ) from exc
-
-    attachment = syncer.db.get_attachment_by_key(item_key)
-    if not attachment or not attachment.path or not attachment.path.exists():
-        # Retry with brief backoff in case WAL checkpoint is finishing
-        for _ in range(4):
-            await asyncio.sleep(0.3)
-            attachment = syncer.db.get_attachment_by_key(item_key)
-            if attachment and attachment.path and attachment.path.exists():
-                break
-
-    if not attachment or not attachment.path or not attachment.path.exists():
-        # Fallback: check if storage/<item_key>/ contains an attachment file directly
-        storage_dir = getattr(syncer.db, "_storage_dir", None)
-        if storage_dir and (storage_dir / item_key).is_dir():
-            candidates = [
-                f for f in (storage_dir / item_key).iterdir()
-                if f.is_file() and not f.name.startswith(".")
-            ]
-            if candidates:
-                target_file = sorted(
-                    candidates,
-                    key=lambda f: 0 if f.suffix.lower() == ".pdf" else 1,
-                )[0]
-                from zocrates.rag.zotero_db import ZoteroAttachment
-
-                attachment = ZoteroAttachment(
-                    item_id=0,
-                    item_key=item_key,
-                    parent_item_id=None,
-                    parent_item_key=None,
-                    content_type=(
-                        "application/pdf"
-                        if target_file.suffix.lower() == ".pdf"
-                        else "application/octet-stream"
-                    ),
-                    path=target_file,
-                )
-
-    if not attachment or not attachment.path or not attachment.path.exists():
-        # Fallback for regular items without attachments
-        item = syncer.db.get_item_by_key(item_key)
-        item_type = getattr(item, "item_type", None)
-        if item and isinstance(item_type, str) and item_type not in ("attachment", "note", "annotation"):
-            atts = syncer.db.get_attachments(item.item_id) if hasattr(syncer.db, "get_attachments") else []
-            valid_atts = [a for a in atts if getattr(a, "path", None) and a.path.exists()]
-            if not valid_atts:
-                sync_result = syncer.sync_item(
-                    item_key=item_key, force=request.force if request else False
-                )
-                if inspect.isawaitable(sync_result):
-                    res = await sync_result
-                else:
-                    res = sync_result
-                return {
-                    "status": res,
-                    "item_key": item_key,
-                    "converter_id": "zotero_metadata",
-                    "content_type": "text/zotero-metadata",
-                }
-
-        raise HTTPException(
-            status_code=404,
-            detail=f"No valid attachment file found on disk for item key '{item_key}'",
-        )
-
-    requested_id = request.converter_id if request else None
-    active_id = str(
-        requested_id
-        or syncer.processor._document_converter_id
-        or get_document_converter_id(syncer._zotero_data_dir)
-        or "markitdown"
-    )
-
-    parent_item = None
-    if attachment.parent_item_id:
-        parent_item = syncer.db.get_item(attachment.parent_item_id)
-    elif attachment.parent_item_key:
-        parent_item = syncer.db.get_item_by_key(attachment.parent_item_key)
-
     p_type = parent_item.item_type if (parent_item and isinstance(getattr(parent_item, "item_type", None), str)) else None
-    p_title = parent_item.title if (parent_item and isinstance(getattr(parent_item, "title", None), str)) else item_key
+    p_title = parent_item.title if (parent_item and isinstance(getattr(parent_item, "title", None), str)) else attachment.item_key
     p_colls = parent_item.collections if (parent_item and isinstance(getattr(parent_item, "collections", None), list)) else None
     p_authors = parent_item.creators if (parent_item and isinstance(getattr(parent_item, "creators", None), list)) else None
     p_year = parent_item.year if (parent_item and isinstance(getattr(parent_item, "year", None), (str, int))) else None
@@ -1587,13 +1610,6 @@ async def convert_item(item_key: str, request: ConvertRequest | None = None) -> 
     p_doi = parent_item.doi if (parent_item and isinstance(getattr(parent_item, "doi", None), str)) else None
     p_url = parent_item.url if (parent_item and isinstance(getattr(parent_item, "url", None), str)) else None
     p_abstract = parent_item.abstract if (parent_item and isinstance(getattr(parent_item, "abstract", None), str)) else None
-
-    target_cache_key = (
-        attachment.parent_item_key if attachment.parent_item_key else attachment.item_key
-    )
-    target_item_id = (
-        attachment.parent_item_id if attachment.parent_item_id else attachment.item_id
-    )
 
     is_pdf = attachment.content_type == "application/pdf" or (
             attachment.path and attachment.path.suffix.lower() == ".pdf"
@@ -1824,6 +1840,193 @@ async def convert_item(item_key: str, request: ConvertRequest | None = None) -> 
     }
 
 
+@app.post("/convert/{item_key}", dependencies=[Depends(verify_auth)])
+async def convert_item(item_key: str, request: ConvertRequest | None = None) -> dict:
+    """Convert a single item using the specified or active converter strategy.
+
+    A parent item key expands to all of its convertible child attachments, so
+    sibling attachments of the same paper are no longer masked by a single
+    "primary" one. An attachment key (and a parent with exactly one convertible
+    attachment) keeps the flat single-document response described below, while
+    several attachments return an aggregate ``{"attachments": [...]}`` payload.
+
+    When ``force=False`` (default), checks whether the item is already cached
+    with the target converter and identical source file hash. If so, returns
+    ``{"status": "skipped", ...}`` without re-converting.
+
+    When ``force=True`` or when un-converted/stale, destroys any existing Markdown
+    bundle for the item, converts fresh, writes the bundle + frontmatter, and
+    immediately re-indexes the vector store.
+    """
+    from zocrates.config import get_document_converter_id
+
+    try:
+        syncer = get_syncer()
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Zocrates backend is not registered. Call /register first.",
+        ) from exc
+
+    targets = resolve_conversion_targets(syncer, [item_key])
+    valid_targets = [target for target in targets if target["attachment"] is not None]
+    if not valid_targets:
+        # Retry with brief backoff in case WAL checkpoint is finishing
+        for _ in range(4):
+            await asyncio.sleep(0.3)
+            targets = resolve_conversion_targets(syncer, [item_key])
+            valid_targets = [target for target in targets if target["attachment"] is not None]
+            if valid_targets:
+                break
+
+    if not valid_targets:
+        # Fallback: check if storage/<item_key>/ contains an attachment file directly
+        storage_dir = getattr(syncer.db, "_storage_dir", None)
+        if storage_dir and (storage_dir / item_key).is_dir():
+            candidates = [
+                f for f in (storage_dir / item_key).iterdir()
+                if f.is_file() and not f.name.startswith(".")
+            ]
+            if candidates:
+                target_file = sorted(
+                    candidates,
+                    key=lambda f: 0 if f.suffix.lower() == ".pdf" else 1,
+                )[0]
+                from zocrates.rag.zotero_db import ZoteroAttachment
+
+                attachment = ZoteroAttachment(
+                    item_id=0,
+                    item_key=item_key,
+                    parent_item_id=None,
+                    parent_item_key=None,
+                    content_type=(
+                        "application/pdf"
+                        if target_file.suffix.lower() == ".pdf"
+                        else "application/octet-stream"
+                    ),
+                    path=target_file,
+                )
+                valid_targets = [{
+                    "attachment": attachment,
+                    "parent_item": None,
+                    "title": target_file.name,
+                    "original_key": item_key,
+                }]
+
+    if not valid_targets:
+        # Fallback for regular items without attachments
+        item = syncer.db.get_item_by_key(item_key)
+        item_type = getattr(item, "item_type", None)
+        if item and isinstance(item_type, str) and item_type not in ("attachment", "note", "annotation"):
+            atts = syncer.db.get_attachments(item.item_id) if hasattr(syncer.db, "get_attachments") else []
+            valid_atts = [a for a in atts if getattr(a, "path", None) and a.path.exists()]
+            if not valid_atts:
+                sync_result = syncer.sync_item(
+                    item_key=item_key, force=request.force if request else False
+                )
+                if inspect.isawaitable(sync_result):
+                    res = await sync_result
+                else:
+                    res = sync_result
+                return {
+                    "status": res,
+                    "item_key": item_key,
+                    "converter_id": "zotero_metadata",
+                    "content_type": "text/zotero-metadata",
+                }
+
+        raise HTTPException(
+            status_code=404,
+            detail=f"No valid attachment file found on disk for item key '{item_key}'",
+        )
+
+    requested_id = request.converter_id if request else None
+    active_id = str(
+        requested_id
+        or syncer.processor._document_converter_id
+        or get_document_converter_id(syncer._zotero_data_dir)
+        or "markitdown"
+    )
+
+    if len(valid_targets) == 1:
+        return await _convert_single_attachment(
+            syncer,
+            valid_targets[0]["attachment"],
+            valid_targets[0]["parent_item"],
+            active_id,
+            request,
+        )
+
+    # Several attachments belong to the requested item: convert every sibling in
+    # turn and aggregate the outcome so one failure cannot hide the rest.
+    attachment_results: list[dict[str, Any]] = []
+    total_chars = 0
+    total_chunks = 0
+    for target in valid_targets:
+        attachment = target["attachment"]
+        try:
+            result = await _convert_single_attachment(
+                syncer, attachment, target["parent_item"], active_id, request
+            )
+        except HTTPException as exc:
+            detail = exc.detail
+            message = detail.get("message") if isinstance(detail, dict) else str(detail)
+            logger.error(
+                "Conversion failed for attachment %s ('%s'): %s",
+                attachment.item_key,
+                target["title"],
+                message,
+            )
+            attachment_results.append({
+                "item_key": attachment.item_key,
+                "status": "failed",
+                "error": message,
+            })
+            continue
+        except Exception as exc:
+            logger.error(
+                "Conversion failed for attachment %s ('%s'): %s",
+                attachment.item_key,
+                target["title"],
+                exc,
+            )
+            attachment_results.append({
+                "item_key": attachment.item_key,
+                "status": "failed",
+                "error": str(exc),
+            })
+            continue
+
+        status = str(result.get("status", "success"))
+        attachment_result: dict[str, Any] = {
+            "item_key": attachment.item_key,
+            "status": status,
+        }
+        if status == "success":
+            attachment_result["char_count"] = result.get("char_count", 0)
+            attachment_result["chunk_count"] = result.get("chunk_count", 0)
+            total_chars += attachment_result["char_count"]
+            total_chunks += attachment_result["chunk_count"]
+        attachment_results.append(attachment_result)
+
+    statuses = [result["status"] for result in attachment_results]
+    if "success" in statuses:
+        overall_status = "success"
+    elif all(status == "skipped" for status in statuses):
+        overall_status = "skipped"
+    else:
+        overall_status = "failed"
+
+    return {
+        "status": overall_status,
+        "item_key": item_key,
+        "converter_id": active_id,
+        "char_count": total_chars,
+        "chunk_count": total_chunks,
+        "attachments": attachment_results,
+    }
+
+
 @app.get("/cost-estimate", dependencies=[Depends(verify_auth)])
 async def cost_estimate(
         converter_id: str = "datalab",
@@ -1893,72 +2096,27 @@ async def cost_estimate(
 
     attachments = []
     if target_keys:
-        for k in target_keys:
-            att = syncer.db.get_attachment_by_key(k)
-            if not att or not att.path or not att.path.exists():
-                parent_item = syncer.db.get_item_by_key(k)
-                if parent_item:
-                    atts = syncer.db.get_attachments(parent_item.item_id)
-                    if atts:
-                        pdf_atts = [
-                            a
-                            for a in atts
-                            if (
-                                       a.content_type == "application/pdf"
-                                       or (a.path and a.path.suffix.lower() == ".pdf")
-                               )
-                               and a.path
-                               and a.path.exists()
-                        ]
-                        if pdf_atts:
-                            att = pdf_atts[0]
-                        else:
-                            valid_atts = [a for a in atts if a.path and a.path.exists()]
-                            if valid_atts:
-                                att = valid_atts[0]
-            if att and att.path and att.path.exists():
-                attachments.append(att)
+        # Shared resolver: the estimate must count exactly the attachments the
+        # conversion endpoints would convert for the same keys.
+        attachments = [
+            target["attachment"]
+            for target in resolve_conversion_targets(syncer, target_keys)
+            if target["attachment"] is not None
+        ]
     else:
         raw_attachments = syncer.db.get_all_convertible_attachments()
-        grouped_by_parent: dict[str, list[dict[str, Any]]] = {}
-        standalone: list[dict[str, Any]] = []
+
+        from zocrates.rag.zotero_db import ZoteroAttachment
 
         for a in raw_attachments:
-            if a["parent_key"]:
-                grouped_by_parent.setdefault(a["parent_key"], []).append(a)
-            else:
-                standalone.append(a)
-
-        for _p_key, att_list in grouped_by_parent.items():
-            pdf_atts = [
-                a
-                for a in att_list
-                if a["content_type"] == "application/pdf"
-                   or a["path"].suffix.lower() == ".pdf"
-            ]
-            primary = pdf_atts[0] if pdf_atts else att_list[0]
-            from zocrates.rag.zotero_db import ZoteroAttachment
             attachments.append(
                 ZoteroAttachment(
-                    item_id=primary["attachment_id"],
-                    item_key=primary["attachment_key"],
-                    parent_item_id=primary["parent_item_id"],
-                    parent_item_key=primary["parent_key"],
-                    content_type=primary["content_type"],
-                    path=primary["path"],
-                )
-            )
-
-        for s in standalone:
-            from zocrates.rag.zotero_db import ZoteroAttachment
-            attachments.append(
-                ZoteroAttachment(
-                    item_id=s["attachment_id"],
-                    item_key=s["attachment_key"],
-                    parent_item_id=None,
-                    parent_item_key=None,
-                    content_type=s["content_type"],
-                    path=s["path"],
+                    item_id=a["attachment_id"],
+                    item_key=a["attachment_key"],
+                    parent_item_id=a["parent_item_id"],
+                    parent_item_key=a["parent_key"] or None,
+                    content_type=a["content_type"],
+                    path=a["path"],
                 )
             )
 
@@ -2136,66 +2294,7 @@ async def batch_convert(
     )
 
     # Resolve items and attachments
-    targets: list[dict[str, Any]] = []
-    for key in batch_req.item_keys:
-        clean_key = key.strip()
-        if not clean_key:
-            continue
-
-        att = syncer.db.get_attachment_by_key(clean_key)
-        parent_item = None
-        if att:
-            if att.parent_item_id:
-                parent_item = syncer.db.get_item(att.parent_item_id)
-            elif att.parent_item_key:
-                parent_item = syncer.db.get_item_by_key(att.parent_item_key)
-            title = (
-                parent_item.title
-                if (parent_item and isinstance(getattr(parent_item, "title", None), str))
-                else (att.path.name if att.path else clean_key)
-            )
-            targets.append({
-                "attachment": att,
-                "parent_item": parent_item,
-                "title": title,
-                "original_key": clean_key,
-            })
-        else:
-            parent_item = syncer.db.get_item_by_key(clean_key)
-            if parent_item:
-                atts = syncer.db.get_attachments(parent_item.item_id)
-                primary_att = None
-                if atts:
-                    pdf_atts = [
-                        a
-                        for a in atts
-                        if (
-                                   a.content_type == "application/pdf"
-                                   or (a.path and a.path.suffix.lower() == ".pdf")
-                           )
-                           and a.path
-                           and a.path.exists()
-                    ]
-                    if pdf_atts:
-                        primary_att = pdf_atts[0]
-                    else:
-                        valid_atts = [a for a in atts if a.path and a.path.exists()]
-                        if valid_atts:
-                            primary_att = valid_atts[0]
-                title = parent_item.title if isinstance(getattr(parent_item, "title", None), str) else clean_key
-                targets.append({
-                    "attachment": primary_att,
-                    "parent_item": parent_item,
-                    "title": title,
-                    "original_key": clean_key,
-                })
-            else:
-                targets.append({
-                    "attachment": None,
-                    "parent_item": None,
-                    "title": clean_key,
-                    "original_key": clean_key,
-                })
+    targets: list[dict[str, Any]] = resolve_conversion_targets(syncer, batch_req.item_keys)
 
     async def sse_batch_generator() -> AsyncIterator[dict[str, Any]]:
         """Stream batch document conversion progress events over Server-Sent Events.
