@@ -18,7 +18,11 @@ dependencies = [
     "fastapi>=0.115.0,<1.0.0",
     "sse-starlette>=2.0.0,<3.0.0",
     "requests",
-    "transformers>=4.57.0",
+    # peft is required by the Jina v5 remote modeling code (modeling_jina_embeddings_v5.py
+    # imports PeftMixedModel to load retrieval LoRA adapters); it is invisible to static
+    # dependency analysis because it lives behind trust_remote_code=True dynamic loading.
+    "peft>=0.15.0",
+    "transformers>=5.0.0",
     "torch>=2.0.0",
     "torchvision>=0.20.0",
     "platformdirs>=4.0.0",

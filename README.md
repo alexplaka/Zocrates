@@ -240,7 +240,7 @@ Zocrates operates as an extension inside Zotero and inherits the platform baseli
 * **Windows Runtime**: [Microsoft Visual C++ 2015–2022 Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe) is required on Windows for local document conversion engines (MarkItDown, Docling) and ONNX runtime dependencies. Zocrates setup automatically verifies this runtime at startup and prompts for installation if absent.
 * **Hardware & Memory**:
   * **RAM**: Minimum **8 GB RAM** (16 GB+ recommended if running local Ollama / vLLM inference).
-  * **Disk**: **~2 GB free disk space** for the hermetic Python 3.13 virtual environment, Jina v5 embedding weights, OKF document bundles, and local ChromaDB / SQLite FTS5 hybrid search indices.
+  * **Disk**: **~7 GB free disk space** for the hermetic Python 3.13 virtual environment, Jina v5 embedding weights, OKF document bundles, and local ChromaDB / SQLite FTS5 hybrid search indices. The virtual environment itself accounts for ~6.5 GB on GPU-enabled Linux/Windows installs (less on Apple Silicon), dominated almost entirely by the **Docling local document-conversion stack**: PyTorch and its bundled NVIDIA CUDA / Triton support libraries (~5.5 GB combined). All remaining dependencies (FastAPI, ChromaDB, ADK, converters, etc.) total well under 1 GB, and model weights live in the Hugging Face cache outside the virtual environment.
 * **Developer Tooling**: Git installed and available in your `$PATH` (for developer source deployments).
 
 ### Setup & Local Deployment
