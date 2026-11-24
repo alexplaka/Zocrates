@@ -593,6 +593,132 @@
     .zc-apply-flash {
       animation: zcApplyFlash 0.9s ease-in-out 2;
     }
+
+    /* Coordinator thinking-effort select: shares the model picker's row, so it is
+       sized to its own option labels instead of the 100% width every other
+       .zc-form-group select takes. Height matches the model select through the
+       shared select rules. */
+    #llm-thinking-select {
+      width: auto;
+      flex: 0 0 auto;
+    }
+
+    /* Per-agent model rollup: a read-only transparency block inside the LLM card.
+       The header badge stays visible while the body is collapsed so override
+       existence can never be hidden by the toggle. */
+    #agent-rollup-header[aria-expanded="true"] .zc-drawer-chevron {
+      transform: rotate(45deg);
+      border-color: var(--zc-accent);
+    }
+
+    #agent-rollup-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 9999px;
+      font-size: 11px;
+      font-weight: 600;
+      line-height: 1.4;
+      background-color: var(--zc-card-bg);
+      color: var(--zc-text-muted);
+      border: 1px solid var(--zc-border);
+      max-width: 100%;
+    }
+
+    #agent-rollup-badge.zc-rollup-badge-overrides {
+      color: var(--zc-accent);
+      border-color: var(--zc-accent);
+      background-color: rgba(99, 102, 241, 0.12);
+    }
+
+    #agent-rollup-rows {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .zc-rollup-row {
+      display: grid;
+      grid-template-columns: 130px minmax(0, 1fr) auto auto;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      border-top: 1px solid var(--zc-border);
+      font-size: 12px;
+    }
+
+    .zc-rollup-row:first-child {
+      border-top: none;
+    }
+
+    .zc-rollup-role {
+      font-weight: 600;
+      color: var(--zc-text-main);
+    }
+
+    /* Model cell: the effective model line with the role's thinking spec on
+       its own line below, so differing default efforts stay easy to read. */
+    .zc-rollup-model {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+      color: var(--zc-text-main);
+    }
+
+    .zc-rollup-model-line {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      min-width: 0;
+    }
+
+    .zc-rollup-slug {
+      font-family: monospace;
+      font-size: 11.5px;
+      word-break: break-all;
+    }
+
+    .zc-rollup-chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 1px 6px;
+      border-radius: 9999px;
+      border: 1px solid var(--zc-border);
+      color: var(--zc-text-muted);
+      font-size: 10.5px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .zc-rollup-chip.zc-rollup-chip-override {
+      border-color: var(--zc-accent);
+      color: var(--zc-accent);
+    }
+
+    .zc-rollup-thinking {
+      color: var(--zc-text-muted);
+      font-size: 11px;
+    }
+
+    .zc-rollup-cost {
+      color: var(--zc-text-muted);
+      font-size: 11.5px;
+      white-space: nowrap;
+    }
+
+    .zc-rollup-test-btn {
+      padding: 3px 10px;
+      font-size: 11px;
+    }
+
+    /* Per-row Test result: spans the full row width on its own line below the
+       role row so appearing text never squeezes the model info. */
+    .zc-rollup-status {
+      grid-column: 1 / -1;
+      font-size: 11px;
+      word-break: break-word;
+    }
   </html:style>
 
   <html:div class="zc-container">
@@ -846,7 +972,7 @@
       <html:button type="button" class="zc-drawer-header" aria-expanded="false" aria-controls="llm-provider-card-body">
         <html:span class="zc-drawer-header-text">
           <html:span class="zc-card-title">LLM Provider and Model</html:span>
-          <html:span class="zc-card-desc">Configure remote or local LLMs used by Zocrates.</html:span>
+          <html:span class="zc-card-desc">Main Provider/Model: used by the Coordinator agent and by any other agent set to inherit it.</html:span>
         </html:span>
         <html:span style="display: flex; align-items: center; gap: 8px;">
           <html:span id="llm-provider-dirty-dot" class="zc-dirty-dot" style="display: none;"></html:span>
@@ -904,11 +1030,47 @@
           <html:span id="llm-model-count-badge" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 11px; font-weight: 600; color: var(--zc-text-muted); pointer-events: none;"></html:span>
         </html:div>
 
-        <html:select id="llm-model-select" style="width: 100%; box-sizing: border-box;">
-          <html:option value="google/gemini-3.8-flash">Loading OpenRouter Models...</html:option>
-        </html:select>
+        <html:div style="display: flex; gap: 8px; align-items: stretch; flex-wrap: wrap;">
+          <html:select id="llm-model-select" style="width: 100%; box-sizing: border-box; flex: 1 1 220px; min-width: 0;">
+            <html:option value="google/gemini-3.8-flash">Loading OpenRouter Models...</html:option>
+          </html:select>
+          <!-- Local/custom model name shares the row so the thinking select always
+               sits beside whichever model control is visible. -->
+          <html:input type="text" id="llm-model-custom-input" placeholder="Enter the model name" style="display: none; width: 100%; box-sizing: border-box; flex: 1 1 220px; min-width: 0;" />
+          <!-- Coordinator thinking effort. The options are self-labeled because the
+               select shares its row with the model picker and has no own label. -->
+          <html:span style="position: relative; display: inline-flex; align-items: center; flex: 0 0 auto;">
+            <html:select id="llm-thinking-select" aria-label="Coordinator thinking effort">
+              <html:option value="minimal">Thinking: minimal</html:option>
+              <html:option value="low">Thinking: low</html:option>
+              <html:option value="medium" selected="selected">Thinking: medium (default)</html:option>
+              <html:option value="high">Thinking: high</html:option>
+            </html:select>
+            <html:span id="llm-thinking-select-dirty-dot" class="zc-field-dirty-dot" style="display: none;"></html:span>
+          </html:span>
+        </html:div>
         <html:div id="llm-model-metadata-box" style="display: none;"></html:div>
-        <html:input type="text" id="llm-model-custom-input" placeholder="Enter the model name" style="display: none; width: 100%; box-sizing: border-box;" />
+      </html:div>
+
+      <!-- Per-agent model rollup (read-only). The header badge is outside the
+           collapsed body so override existence can never be hidden. -->
+      <html:div id="agent-rollup" style="margin-bottom: 16px; border: 1px solid var(--zc-border); border-radius: 8px; overflow: hidden; background-color: var(--zc-hw-bg);">
+        <html:button type="button" id="agent-rollup-header" class="zc-drawer-header" style="padding: 10px 14px;" aria-expanded="false" aria-controls="agent-rollup-body">
+          <html:span style="display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap;">
+            <html:span style="font-size: 13px; font-weight: 600; color: var(--zc-text-main);">Per-agent models</html:span>
+            <html:span id="agent-rollup-badge">No overrides — all agents inherit the main model</html:span>
+          </html:span>
+          <html:span class="zc-drawer-chevron"></html:span>
+        </html:button>
+        <html:div id="agent-rollup-body" style="display: none;">
+          <html:div id="agent-rollup-rows"></html:div>
+          <html:div class="zc-help-text" style="margin-top: 8px; font-size: 11.5px; opacity: 0.8;">
+            To change per-agent models, edit <html:code>zocrates_config.json</html:code>.
+          </html:div>
+          <html:div class="zc-help-text" style="margin-top: 2px; font-size: 11.5px; opacity: 0.8;">
+            See &#x22EE; &gt; About &gt; Advanced Settings in the Zocrates sidebar.
+          </html:div>
+        </html:div>
       </html:div>
 
       <!-- Secondary Actions Row (Refresh & Test Connection above Apply) -->

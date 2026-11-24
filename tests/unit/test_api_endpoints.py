@@ -1789,6 +1789,67 @@ class TestLLMEndpoints:
             assert "override_agent_models" in data
             assert "coordinator" in data["override_agent_models"]
 
+    def test_get_config_returns_all_override_agent_model_roles(self, client, tmp_path) -> None:
+        """GET /config must expose every role's override entry.
+
+        The Preferences per-agent rollup resolves its rows from this dict alone,
+        so a role missing here would render as a silent gap rather than as
+        "inherits main".
+        """
+        with patch("zocrates.config.resolve_zotero_data_dir", return_value=tmp_path):
+            res = client.get("/config")
+
+        assert res.status_code == 200
+        overrides = res.json()["override_agent_models"]
+        assert set(overrides) == {
+            "coordinator",
+            "library_search",
+            "library_synthesizer",
+            "online_search",
+            "online_synthesizer",
+        }
+        for role, role_cfg in overrides.items():
+            assert isinstance(role_cfg, dict), role
+            assert "model" in role_cfg, role
+
+    def test_post_config_coordinator_thinking_level_preserves_other_keys(self, client, tmp_path) -> None:
+        """A coordinator-only thinking_level write must merge, never replace.
+
+        The Preferences thinking selector sends exactly one key; every
+        hand-edited coordinator key (temperature here) has to survive the
+        per-role merge, and the hot-swap chain must still run.
+        """
+        from zocrates.config import load_zocrates_config, save_zocrates_config
+
+        save_zocrates_config(
+            {
+                "override_agent_models": {
+                    "coordinator": {"model": None, "thinking_level": "medium", "temperature": 0.33}
+                }
+            },
+            zotero_data_dir=tmp_path,
+        )
+
+        with patch("zocrates.config.resolve_zotero_data_dir", return_value=tmp_path), \
+             patch("zocrates.agents.app.set_agent_models") as mock_set_models:
+            res = client.post(
+                "/config",
+                json={"override_agent_models": {"coordinator": {"thinking_level": "high"}}},
+            )
+
+        assert res.status_code == 200
+        coordinator = res.json()["config"]["override_agent_models"]["coordinator"]
+        assert coordinator["thinking_level"] == "high"
+        assert coordinator["temperature"] == 0.33
+        assert coordinator["model"] is None
+
+        # Same merge semantics on disk, not only in the response
+        on_disk = load_zocrates_config(tmp_path)["override_agent_models"]["coordinator"]
+        assert on_disk["thinking_level"] == "high"
+        assert on_disk["temperature"] == 0.33
+
+        mock_set_models.assert_called_once()
+
     def test_post_llm_config(self, client, tmp_path) -> None:
         with patch("zocrates.config.resolve_zotero_data_dir", return_value=tmp_path), \
              patch("zocrates.agents.app.set_agent_models"):

@@ -5,6 +5,7 @@ and preset slug-resolution audit.
 import copy
 import json
 from pathlib import Path
+import re
 from typing import Any
 from unittest.mock import patch
 
@@ -382,6 +383,46 @@ def test_openrouter_provider_default_consistent_with_main_default():
 
     assert PROVIDER_DEFAULT_MODELS["openrouter"] == DEFAULT_LLM_MODEL
     assert PROVIDER_DEFAULT_MODELS["openrouter_llm"] == DEFAULT_LLM_MODEL
+
+
+# ---------------------------------------------------------------------------
+# Frontend mirrors: preferences.js ROLE_DEFAULT_THINKING <-> backend role defaults
+# ---------------------------------------------------------------------------
+PREFERENCES_JS = REPO_ROOT / "zotero-plugin" / "addon" / "preferences.js"
+
+
+def _read_preferences_js_role_default_thinking() -> dict[str, str]:
+    """Parse the ROLE_DEFAULT_THINKING literal out of preferences.js.
+
+    Plain source read plus regex: the mirror lives in a browser-preferences
+    module that is not loadable from Python, and this guard only needs the
+    declarative role->level map.
+    """
+    source = PREFERENCES_JS.read_text(encoding="utf-8")
+    match = re.search(r"const ROLE_DEFAULT_THINKING = \{(.*?)\};\n", source, re.DOTALL)
+    assert match, "const ROLE_DEFAULT_THINKING = { ... }; not found in preferences.js"
+    return dict(re.findall(r'(\w+)\s*:\s*"([^"]*)"', match.group(1)))
+
+
+def test_preferences_js_role_default_thinking_mirrors_backend():
+    """The Preferences thinking annotations must mirror the backend defaults.
+
+    Mirror invariant: zocrates/agents/common/config.py::ROLE_DEFAULT_THINKING is
+    the single source of truth for every role's thinking effort, while
+    preferences.js carries a copy so the per-agent rollup can annotate
+    "(default)" and the Coordinator thinking select can prefill without a
+    per-render backend round trip. A drift would silently mislabel which roles
+    run at their default effort and which were deliberately changed, so the two
+    maps must stay identical — adding or retuning a role default in Python
+    requires the same edit in preferences.js.
+    """
+    from zocrates.agents.common.config import ROLE_DEFAULT_THINKING
+
+    assert _read_preferences_js_role_default_thinking() == ROLE_DEFAULT_THINKING, (
+        "preferences.js ROLE_DEFAULT_THINKING drifted from "
+        "zocrates/agents/common/config.py::ROLE_DEFAULT_THINKING. "
+        "Update the mirror consciously."
+    )
 
 # ---------------------------------------------------------------------------
 # Release versioning: pyproject.toml <-> manifest.json drift guard + __version__
