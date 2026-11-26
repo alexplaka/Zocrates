@@ -149,14 +149,14 @@ For researchers who want external coding assistants and desktop agents to access
 
 ## Key Capabilities & Highlights
 
-### 1. Autonomous ReAct Search & Grounded Synthesis
+### Autonomous ReAct Search & Grounded Synthesis
 Unlike generic search plugins, Zocrates uses a specialized multi-agent retrieval pipeline:
 * **Tool Budget & Safety Circuit Breakers**: Bounded 10-call tool budget with soft warnings on call 9 and a tool-level 7,500 cumulative word ceiling.
 * **Substantive Chunk Filtering**: Filters out Chunk 0 frontmatter, metadata slices, and in-document tables of contents before scoring, ensuring top-k cross-encoder slots are reserved for substantive claims.
 * **Cross-Encoder Reranking**: Dynamically scores retrieved passages using a cross-encoder with empty-evidence fallback guards.
 * **Table of Contents Continuity**: Subsequent turns with the same selected papers as context get cached information so the agent can avoid unnecessary tool calls. ToC caching (`cached_tocs`), section level-folding for dense monographs (>15 sections), and complete-range asset summarization (>8 figures / >6 tables).
 
-### 2. Two-Tier Attribution: Passage Grounding by Default & Sentence Micro-Attribution on Demand
+### Two-Tier Attribution: Passage Grounding by Default & Sentence Micro-Attribution on Demand
 Zocrates treats academic attribution and epistemic honesty as an absolute priority, offering a two-tier verification depth:
 * **Passage-Level Attribution by Default**: Numbered in-text references (`[1]`, `[2]`, `[1, 2]`) follow cross-encoder relevance order without leaking internal database keys.
 * **Per-Occurrence AI Decision-Model Verification**: Evaluates claims on a **per-occurrence** basis using fast probabilistic decision models (cloud `~typesafe/jev-latest`, `inception/mercury-decide`, or local `laya` via `uv tool`).
@@ -183,39 +183,39 @@ Zocrates treats academic attribution and epistemic honesty as an absolute priori
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-### 3. PDF Reader Integration (Excerpts & Area Crops)
+### Online Literature Discovery & One-Click Import
+* **Autonomous Scholarly Search**: Queries OpenAlex, Unpaywall, and Crossref with automatic inverted-index abstract reconstruction.
+* **Local Deduplication**: Checks DOIs, arXiv IDs, and normalized title Levenshtein distance against the local Zotero database to ensure only novel papers are presented.
+* **Zero-Friction Polite Pools**: Uses user sync credentials or manual email configuration to route requests through high-reliability academic polite pools.
+* **One-Click Library Write-Back**: Discovered candidates render as interactive cards with checkboxes; selecting candidates downloads staged Open Access PDFs (`%PDF-` magic byte validated) and atomically creates items in your target Zotero collection.
+
+### PDF Reader Integration (Excerpts & Area Crops)
 * **Direct Context Ingestion**: Right-click highlighted text or draw bounding-box annotations in Zotero's PDF Reader → **"Zocrates: Add to Context"**.
 * **Automatic Scope Anchoring**: Adding an excerpt resolves the parent paper and automatically switches the chat scope to `"papers"` mode.
 * **Multimodal Vision Routing**: Visual area crops (<150KB JPEG) are routed to vision-capable models (Gemini, GPT, Claude, Qwen-VL, etc.) as binary image bytes. For text-only models, clean `<image_snippet>` tags and SSE notices are emitted with <0.1 ms overhead.
 * **Live Resize Tracking**: Adjusting an area annotation in the reader dynamically updates the thumbnail preview and payload.
 * **Turn Rewind Restoration**: Excerpts persist in SQLite session state; editing or rewinding prior turns restores the active excerpts and context chips.
 
-### 4. Multimodal Figure Enrichment (VLM Captioning)
+### Multimodal Figure Enrichment (VLM Captioning)
 * **Dense Visual Descriptions**: Automatically extracts charts, plots, and diagrams from converted papers and enriches uncaptioned figures using Vision-Language Models.
 * **Dual Indexing**: Descriptions are injected into `<figure data-type="image">` blocks as `<synthetic_caption>` sections and indexed in both ChromaDB dense vectors and SQLite FTS5 full-text search.
 * **Zero Redundant Calls**: Captions are cached in `image_captions.json` to prevent unnecessary inference calls.
 
-### 5. Paper Relations Graph Visualizer
+### Paper Relations Graph Visualizer
 * **Strictly Local & Deterministic**: Generated 100% locally on your machine using deterministic algorithms (statistical keyphrase extraction and reciprocal rank fusion hybrid scoring) requiring **zero LLM calls and zero cloud requests**.
 * **Evidence-Gated Connections**: Edges are formed only when semantic vector similarity and academic keyphrase co-occurrence corroborate each other.
 * **Unconnected Papers**: Papers with no strong relationships remain honestly unconnected—Zocrates never invents spurious links to fill a graph.
 * **Native In-Zotero Canvas 2D Tab**: Runs completely offline inside Zotero with Weighted Label Propagation Algorithm (LPA) clustering, physics-based collision repulsion, degree-based semantic zoom, and 5-theme synchronization.
 
-### 6. User-Curated Long-Term Memory (Native Zotero Notes)
+### User-Curated Long-Term Memory (Native Zotero Notes)
 * **Native Rich-Text Notes**: Save individual assistant responses, syntheses, or entire research sessions directly into Zotero as rich-text notes with a single click.
 * **Automatic Local Re-indexing**: Because Zocrates converts and indexes Zotero notes alongside PDFs, saved notes immediately become part of your local vector and full-text databases.
 * **Searchable Across Future Sessions**: Past conclusions, literature summaries, and custom notes automatically inform future research conversations across your library.
 
-### 7. Predictive Ghost Text Engine
+### Predictive Ghost Text Engine
 * **Decoupled Background Execution**: Triggers asynchronously upon SSE chat finalization (`POST /sessions/{id}/suggest_next_prompt`) with **zero latency** on assistant responses or citation popovers.
 * **Invocation Gatekeeper**: Validates the active turn invocation ID, preventing stale suggestions on conversational or greeting turns.
 * **Intuitive Overlay UX**: Renders translucent suggestion text in the chat input with two-line clamping. Press `[Tab ⇥]` or `→` (at caret start) to accept, or `Esc` to dismiss.
-
-### 8. Online Literature Discovery & One-Click Import
-* **Autonomous Scholarly Search**: Queries OpenAlex, Unpaywall, and Crossref with automatic inverted-index abstract reconstruction.
-* **Local Deduplication**: Checks DOIs, arXiv IDs, and normalized title Levenshtein distance against the local Zotero database to ensure only novel papers are presented.
-* **Zero-Friction Polite Pools**: Uses user sync credentials or manual email configuration to route requests through high-reliability academic polite pools.
-* **One-Click Library Write-Back**: Discovered candidates render as interactive cards with checkboxes; selecting candidates downloads staged Open Access PDFs (`%PDF-` magic byte validated) and atomically creates items in your target Zotero collection.
 
 ---
 
